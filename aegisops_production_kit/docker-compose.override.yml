@@ -1,0 +1,12 @@
+# ── Dev override (auto-loaded by `docker compose`) ────────────────────────────
+# Runs the API from MOUNTED host source instead of the baked image layer, so code
+# changes take effect on a container restart without an image rebuild. This exists
+# because image rebuilds on this host (OneDrive path + Docker Desktop) intermittently
+# fail to invalidate the COPY cache, leaving stale code in the image.
+#
+# To return to the pure baked-image production model, delete this file (or run with
+# only the base file:  docker compose -f docker-compose.yml --profile full up -d).
+services:
+  api:
+    volumes:
+      - "./backend/app:/app/app"

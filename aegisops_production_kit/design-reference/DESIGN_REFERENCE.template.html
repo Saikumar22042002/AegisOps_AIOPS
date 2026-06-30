@@ -1,0 +1,1288 @@
+
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<style>/* cyrillic-ext */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("d10e46c3-3649-41f5-8407-cf46b98d2db6") format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("55f9e17c-d095-41c8-8f1b-689f7995dba6") format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("1ecd57f4-df0b-4de1-8451-77a69407217d") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("370a42dc-2e1c-4bda-b429-edc96060ac61") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("aa9d45f2-29de-4afb-afd6-8dd56794f5d9") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("c6eb3da7-bcf4-4924-b978-782b5cb88907") format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("9d5ac13e-fd55-40b3-818c-15bb14e9aaa9") format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("688104b1-42d3-4e6b-b227-f6a7ff9e324a") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("23f6eae4-0bdf-4acb-8eb8-445e8ba365c2") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("680ff934-a164-4f83-9244-78af994bce42") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("b1939138-dd9f-49bc-96b2-49352c6005ce") format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("f705885a-fff5-419d-b8f8-aa32ec1e5b47") format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("e72cf83b-9f0c-4508-822e-58bef9b3b775") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("4f7a7772-1085-488d-99ff-aa7843dd6ab6") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("0f4fad2e-1e47-4d70-a0e5-1fbbe93e2b07") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 300;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("eb5986fd-b700-4855-865c-20abe3cab43b") format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 300;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("ea77fe43-557b-4f8a-8f38-da6c41070763") format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* greek */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 300;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("c200e276-b0b3-44cb-8c68-4690faab3ee8") format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 300;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("f437d8a1-af91-4dda-9dfa-abea84472db0") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 300;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("020ba093-afea-40b4-aa7d-7efdccdf3165") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 300;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("f647b11f-0f70-42bc-9a9b-d53ba606e8ce") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("eb5986fd-b700-4855-865c-20abe3cab43b") format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("ea77fe43-557b-4f8a-8f38-da6c41070763") format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* greek */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("c200e276-b0b3-44cb-8c68-4690faab3ee8") format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("f437d8a1-af91-4dda-9dfa-abea84472db0") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("020ba093-afea-40b4-aa7d-7efdccdf3165") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("f647b11f-0f70-42bc-9a9b-d53ba606e8ce") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 500;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("eb5986fd-b700-4855-865c-20abe3cab43b") format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 500;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("ea77fe43-557b-4f8a-8f38-da6c41070763") format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* greek */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 500;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("c200e276-b0b3-44cb-8c68-4690faab3ee8") format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 500;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("f437d8a1-af91-4dda-9dfa-abea84472db0") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 500;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("020ba093-afea-40b4-aa7d-7efdccdf3165") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 500;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("f647b11f-0f70-42bc-9a9b-d53ba606e8ce") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 600;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("eb5986fd-b700-4855-865c-20abe3cab43b") format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 600;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("ea77fe43-557b-4f8a-8f38-da6c41070763") format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* greek */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 600;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("c200e276-b0b3-44cb-8c68-4690faab3ee8") format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 600;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("f437d8a1-af91-4dda-9dfa-abea84472db0") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 600;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("020ba093-afea-40b4-aa7d-7efdccdf3165") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 600;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("f647b11f-0f70-42bc-9a9b-d53ba606e8ce") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 700;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("eb5986fd-b700-4855-865c-20abe3cab43b") format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 700;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("ea77fe43-557b-4f8a-8f38-da6c41070763") format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* greek */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 700;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("c200e276-b0b3-44cb-8c68-4690faab3ee8") format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 700;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("f437d8a1-af91-4dda-9dfa-abea84472db0") format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 700;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("020ba093-afea-40b4-aa7d-7efdccdf3165") format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 700;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("f647b11f-0f70-42bc-9a9b-d53ba606e8ce") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+</style>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  /* ░░ DESIGN TOKENS — Dark (default / :root) ░░ */
+  :root, [data-theme="dark"] {
+    color-scheme: dark;
+    --bg:#0a0a0c; --bg-elev:#0c0c0f; --bg-pop:#131319; --code-bg:#0a0a0d;
+    --surface:rgba(255,255,255,.02); --surface-2:rgba(255,255,255,.03); --surface-3:rgba(255,255,255,.05);
+    --border:rgba(255,255,255,.07); --border-2:rgba(255,255,255,.085); --border-3:rgba(255,255,255,.14);
+    --text:#f4f5f7; --text-navactive:#e7e8f4; --text-2:#c4c7cf; --text-3:#9498a2; --text-4:#6b6f7a; --text-5:#52565f; --text-dim:#3a3e47;
+    --code-comment:#5a5e68;
+    --accent:#6366f1; --accent-strong:#4f46e5; --accent-2:#818cf8; --accent-3:#a5b4fc; --accent-fg:#dadcff; --accent-border:rgba(129,140,248,.3);
+    --green:#34d399; --green-strong:#10b981; --on-green:#04140d;
+    --amber:#fbbf24; --red:#f87171; --red-2:#fca5a5; --cyan:#22d3ee; --violet:#c084fc;
+    --av-user-bg:#3a2f52; --av-user-fg:#d6c8f0; --av-org-bg:#27314a; --av-org-fg:#aebbd6;
+  }
+  /* ░░ DESIGN TOKENS — Light ░░ */
+  [data-theme="light"] {
+    color-scheme: light;
+    --bg:#f5f6f8; --bg-elev:#ffffff; --bg-pop:#ffffff; --code-bg:#f3f5f8;
+    --surface:rgba(15,23,42,.022); --surface-2:rgba(15,23,42,.04); --surface-3:rgba(15,23,42,.06);
+    --border:rgba(15,23,42,.10); --border-2:rgba(15,23,42,.14); --border-3:rgba(15,23,42,.20);
+    --text:#0f172a; --text-navactive:#312e81; --text-2:#334155; --text-3:#5b6573; --text-4:#8a93a3; --text-5:#aab2bf; --text-dim:#cbd2dc;
+    --code-comment:#94a3b8;
+    --accent:#4f46e5; --accent-strong:#4338ca; --accent-2:#6366f1; --accent-3:#4f46e5; --accent-fg:#4338ca; --accent-border:rgba(99,102,241,.3);
+    --green:#059669; --green-strong:#047857; --on-green:#ffffff;
+    --amber:#b45309; --red:#dc2626; --red-2:#b91c1c; --cyan:#0e7490; --violet:#7c3aed;
+    --av-user-bg:#ede9fe; --av-user-fg:#6d28d9; --av-org-bg:#dbeafe; --av-org-fg:#1d4ed8;
+  }
+  html, body { height:100%; background:var(--bg); }
+  /* ░░ Responsive — mobile (inline styles can't express media queries) ░░ */
+  #ao-hamburger { display:none; }
+  @media (max-width: 860px) {
+    #ao-hamburger { display:flex !important; }
+    #ao-sidebar { position:fixed !important; left:0; top:0; z-index:80 !important; transform:translateX(-100%); transition:transform .25s ease; box-shadow:0 24px 60px rgba(0,0,0,.5); }
+    #ao-sidebar[data-open="true"] { transform:translateX(0); }
+    #ao-panel { position:fixed !important; right:0; top:0; height:100% !important; width:90% !important; max-width:440px !important; z-index:75 !important; }
+    #ao-topnav { padding:0 12px !important; gap:8px !important; overflow-x:auto !important; }
+    .ao-cloud-sel { display:none !important; }
+    .ao-chat-pad { padding:24px 16px 20px !important; }
+    .ao-composer-pad { padding:0 16px 18px !important; }
+    .ao-module-pad { padding:26px 18px !important; }
+    .ao-stat-grid { grid-template-columns:repeat(2,1fr) !important; }
+    .ao-summary-grid { grid-template-columns:repeat(2,1fr) !important; }
+  }
+  @media (max-width: 460px) {
+    .ao-stat-grid, .ao-summary-grid { grid-template-columns:1fr !important; }
+  }
+  body { font-family:'IBM Plex Sans', system-ui, sans-serif; -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
+  ::-webkit-scrollbar { width:9px; height:9px; }
+  ::-webkit-scrollbar-track { background:transparent; }
+  ::-webkit-scrollbar-thumb { background:var(--border-2); border-radius:99px; border:2px solid transparent; background-clip:padding-box; }
+  ::-webkit-scrollbar-thumb:hover { background:var(--border-3); background-clip:padding-box; }
+  textarea { font-family:inherit; resize:none; }
+  @keyframes ao-blink { 0%,49%{opacity:1} 50%,100%{opacity:0} }
+  @keyframes ao-spin { to { transform:rotate(360deg) } }
+  @keyframes ao-pulse { 0%,100%{ opacity:1 } 50%{ opacity:.4 } }
+  @keyframes ao-ring { 0%{ box-shadow:0 0 0 0 rgba(129,140,248,.4) } 70%{ box-shadow:0 0 0 6px rgba(129,140,248,0) } 100%{ box-shadow:0 0 0 0 rgba(129,140,248,0) } }
+  @keyframes ao-fadeup { from { opacity:0; transform:translateY(8px) } to { opacity:1; transform:none } }
+  @keyframes ao-fadein { from { opacity:0 } to { opacity:1 } }
+  @keyframes ao-stepin { from { opacity:0; transform:translateX(-6px) } to { opacity:1; transform:none } }
+  @keyframes ao-bar { 0%{ transform:scaleY(.35) } 50%{ transform:scaleY(1) } 100%{ transform:scaleY(.35) } }
+  @keyframes ao-slidein { from { opacity:0; transform:translateX(20px) } to { opacity:1; transform:none } }
+</style>
+</helmet>
+
+<div data-theme="{{ resolvedTheme }}" style="height:100vh; width:100%; background:var(--bg); color:var(--text-2); font-size:14px; overflow:hidden; position:relative;">
+
+  <!-- ░░░░░░░░ LOGIN ░░░░░░░░ -->
+  <sc-if value="{{ notAuthed }}" hint-placeholder-val="{{ false }}">
+  <div style="height:100%; width:100%; display:flex; align-items:center; justify-content:center; background:radial-gradient(900px 500px at 50% -10%, rgba(99,102,241,.12), transparent 60%), var(--bg); position:relative;">
+    <div style="position:absolute; top:26px; left:28px; display:flex; align-items:center; gap:10px;">
+      <div style="width:28px; height:28px; border-radius:8px; background:linear-gradient(155deg,var(--accent),var(--accent-strong)); display:flex; align-items:center; justify-content:center;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 2.6 4.6 5.6v5.2c0 4.4 3 8.5 7.4 9.9 4.4-1.4 7.4-5.5 7.4-9.9V5.6L12 2.6Z" fill="rgba(255,255,255,.2)" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"></path><path d="m8.7 12 2.2 2.3 4.2-4.6" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path></svg></div>
+      <span style="font-size:14px; font-weight:600; color:var(--text);">AegisOps</span>
+    </div>
+    <button onclick="{{ cycleTheme }}" style="position:absolute; top:24px; right:28px; display:flex; align-items:center; gap:7px; padding:7px 12px; border-radius:9px; border:1px solid var(--border-2); background:var(--surface-2); color:var(--text-3); font-size:12px; cursor:pointer;" style-hover="border-color:var(--border-3);">{{ themeIcon }} {{ themeLabel }}</button>
+
+    <div style="width:404px; max-width:92%; background:var(--bg-elev); border:1px solid var(--border); border-radius:18px; box-shadow:0 30px 80px rgba(0,0,0,.4); padding:34px 34px 26px;">
+      <div style="width:46px; height:46px; border-radius:13px; background:linear-gradient(155deg,var(--accent),var(--accent-strong)); display:flex; align-items:center; justify-content:center; margin-bottom:20px; box-shadow:0 6px 20px rgba(79,70,229,.4);"><svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 2.6 4.6 5.6v5.2c0 4.4 3 8.5 7.4 9.9 4.4-1.4 7.4-5.5 7.4-9.9V5.6L12 2.6Z" fill="rgba(255,255,255,.2)" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"></path><path d="m8.7 12 2.2 2.3 4.2-4.6" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path></svg></div>
+      <div style="font-size:21px; font-weight:600; color:var(--text); letter-spacing:-.02em;">Sign in to AegisOps</div>
+      <div style="font-size:13.5px; color:var(--text-3); margin-top:6px; margin-bottom:24px;">AI-native CloudOps · DevOps · SRE platform</div>
+
+      <label style="display:block; font-size:12px; font-weight:500; color:var(--text-3); margin-bottom:7px;">Work email</label>
+      <div style="display:flex; align-items:center; gap:9px; padding:11px 13px; border-radius:10px; background:var(--surface-2); border:1px solid var(--border-2); margin-bottom:15px;" style-focus-within="border-color:var(--accent-2);">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2.5" stroke="var(--text-4)" stroke-width="1.6"></rect><path d="m4 7 8 6 8-6" stroke="var(--text-4)" stroke-width="1.6" stroke-linejoin="round"></path></svg>
+        <input value="maya.okafor@northwind.com" style="flex:1; background:transparent; border:none; outline:none; color:var(--text); font-size:13.5px;">
+      </div>
+      <label style="display:block; font-size:12px; font-weight:500; color:var(--text-3); margin-bottom:7px;">Password</label>
+      <div style="display:flex; align-items:center; gap:9px; padding:11px 13px; border-radius:10px; background:var(--surface-2); border:1px solid var(--border-2); margin-bottom:20px;" style-focus-within="border-color:var(--accent-2);">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><rect x="5" y="10" width="14" height="10" rx="2.5" stroke="var(--text-4)" stroke-width="1.6"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3" stroke="var(--text-4)" stroke-width="1.6"></path></svg>
+        <input type="password" value="aegisops" style="flex:1; background:transparent; border:none; outline:none; color:var(--text); font-size:13.5px; letter-spacing:.15em;">
+      </div>
+      <button onclick="{{ signIn }}" style="width:100%; padding:12px; border-radius:10px; border:none; background:var(--accent); color:#fff; font-size:14px; font-weight:600; cursor:pointer; box-shadow:0 4px 14px rgba(99,102,241,.3);" style-hover="filter:brightness(1.07);">Sign in</button>
+
+      <div style="display:flex; align-items:center; gap:12px; margin:18px 0;"><span style="flex:1; height:1px; background:var(--border-2);"></span><span style="font-size:11px; color:var(--text-4);">OR</span><span style="flex:1; height:1px; background:var(--border-2);"></span></div>
+
+      <button onclick="{{ signIn }}" style="width:100%; display:flex; align-items:center; justify-content:center; gap:10px; padding:11px; border-radius:10px; border:1px solid var(--border-2); background:var(--surface-2); color:var(--text); font-size:13.5px; font-weight:500; cursor:pointer;" style-hover="border-color:var(--border-3); background:var(--surface-3);">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><circle cx="9" cy="9" r="3.2" stroke="var(--accent-3)" stroke-width="1.7"></circle><path d="m11 11 7.5 7.5M16 16l2.5-1 1 2.5M19 13.5 21 15" stroke="var(--accent-3)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+        Continue with Keycloak SSO
+      </button>
+      <div style="display:flex; align-items:center; justify-content:center; gap:7px; margin-top:18px; font-size:11.5px; color:var(--text-4);"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M12 2.6 4.6 5.6v5.2c0 4.4 3 8.5 7.4 9.9 4.4-1.4 7.4-5.5 7.4-9.9V5.6L12 2.6Z" stroke="var(--green)" stroke-width="1.6" stroke-linejoin="round"></path></svg>SAML · MFA enforced · SOC 2 Type II</div>
+    </div>
+  </div>
+  </sc-if>
+
+  <!-- ░░░░░░░░ APP ░░░░░░░░ -->
+  <sc-if value="{{ authed }}" hint-placeholder-val="{{ true }}">
+  <div style="display:flex; height:100%; width:100%;">
+
+  <!-- ░░░░ SIDEBAR ░░░░ -->
+  <aside id="ao-sidebar" data-open="{{ mobileNavOpen }}" style="width:252px; flex-shrink:0; background:var(--bg-elev); border-right:1px solid var(--surface-3); display:flex; flex-direction:column; height:100%;">
+    <div style="padding:20px 18px 16px; display:flex; align-items:center; gap:11px;">
+      <div style="width:31px; height:31px; border-radius:9px; background:linear-gradient(155deg,var(--accent),var(--accent-strong)); display:flex; align-items:center; justify-content:center; box-shadow:0 3px 12px rgba(79,70,229,.4);">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 2.6 4.6 5.6v5.2c0 4.4 3 8.5 7.4 9.9 4.4-1.4 7.4-5.5 7.4-9.9V5.6L12 2.6Z" fill="rgba(255,255,255,.2)" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"></path><path d="m8.7 12 2.2 2.3 4.2-4.6" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+      </div>
+      <div style="line-height:1.1;">
+        <div style="font-size:15px; font-weight:600; color:var(--text); letter-spacing:-.01em;">AegisOps</div>
+        <div style="font-size:10.5px; color:var(--text-4); font-weight:500;">AI Operations OS</div>
+      </div>
+    </div>
+
+    <div style="padding:2px 14px 14px;">
+      <button onclick="{{ newChat }}" style="width:100%; display:flex; align-items:center; gap:9px; padding:11px 13px; border-radius:10px; border:1px solid rgba(129,140,248,.25); background:rgba(99,102,241,.1); color:var(--accent-fg); font-size:13px; font-weight:500; cursor:pointer; transition:all .15s;" style-hover="background:rgba(99,102,241,.18); border-color:rgba(129,140,248,.45);">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg>
+        New conversation
+      </button>
+    </div>
+
+    <div style="padding:0 14px 14px;">
+      <button onclick="{{ openCmdk }}" style="width:100%; display:flex; align-items:center; gap:9px; padding:9px 12px; border-radius:9px; background:var(--surface-2); border:1px solid var(--surface-3); cursor:pointer; transition:border-color .15s;" style-hover="border-color:var(--border-3);">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="#6b6f7a" stroke-width="2"></circle><path d="m20 20-3-3" stroke="#6b6f7a" stroke-width="2" stroke-linecap="round"></path></svg>
+        <span style="color:var(--text-4); font-size:12.5px;">Search &amp; commands</span>
+        <span style="margin-left:auto; font-family:'IBM Plex Mono',monospace; font-size:10px; color:var(--text-3); border:1px solid var(--border-2); border-radius:5px; padding:1px 6px;">⌘K</span>
+      </button>
+    </div>
+
+    <nav style="padding:4px 10px 4px; display:flex; flex-direction:column; gap:2px;">
+      <div style="font-size:10px; font-weight:600; letter-spacing:.09em; text-transform:uppercase; color:var(--text-5); padding:6px 9px 6px;">Platform</div>
+      <button onclick="{{ goWorkspace }}" style="{{ navWorkspaceStyle }}" style-hover="background:var(--surface-2);">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="m12 3 1.9 4.6L18.5 9l-3.4 3 .9 4.8L12 14.6 7.9 16.8l.9-4.8L5.5 9l4.6-1.4L12 3Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"></path></svg>
+        AI Workspace
+      </button>
+      <button onclick="{{ goProjects }}" style="{{ navProjectsStyle }}" style-hover="background:var(--surface-2);">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="3.5" y="5" width="17" height="14" rx="2.5" stroke="currentColor" stroke-width="1.6"></rect><path d="M3.5 9h17M8 5V3.5M16 5V3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></svg>
+        Projects <span style="margin-left:auto; font-size:10.5px; color:var(--text-5); font-family:'IBM Plex Mono',monospace;">12</span>
+      </button>
+      <button onclick="{{ goInfrastructure }}" style="{{ navInfrastructureStyle }}" style-hover="background:var(--surface-2);">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.6"></rect><rect x="13.5" y="3.5" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.6"></rect><rect x="3.5" y="13.5" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.6"></rect><rect x="13.5" y="13.5" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.6"></rect></svg>
+        Infrastructure
+      </button>
+      <button onclick="{{ goIncidents }}" style="{{ navIncidentsStyle }}" style-hover="background:var(--surface-2);">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 3 2.5 20h19L12 3Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"></path><path d="M12 10v4M12 17h.01" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"></path></svg>
+        Incidents <span style="margin-left:auto; font-size:10px; font-weight:600; color:var(--amber); padding:1px 7px; border-radius:99px; background:rgba(251,191,36,.12);">1</span>
+      </button>
+      <button onclick="{{ goKnowledge }}" style="{{ navKnowledgeStyle }}" style-hover="background:var(--surface-2);">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M5 4.5h9a2.5 2.5 0 0 1 2.5 2.5v12.5H7.5A2.5 2.5 0 0 1 5 19V4.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"></path><path d="M9 9h4M9 12.5h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></svg>
+        Knowledge
+      </button>
+      <button onclick="{{ goAnalytics }}" style="{{ navAnalyticsStyle }}" style-hover="background:var(--surface-2);">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 20V4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path><rect x="7.5" y="12" width="3" height="6" rx="1" stroke="currentColor" stroke-width="1.5"></rect><rect x="13" y="8" width="3" height="10" rx="1" stroke="currentColor" stroke-width="1.5"></rect><rect x="18.5" y="5" width="3" height="13" rx="1" stroke="currentColor" stroke-width="1.5"></rect></svg>
+        Analytics
+      </button>
+      <button onclick="{{ goAdmin }}" style="{{ navAdminStyle }}" style-hover="background:var(--surface-2);">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"></circle><path d="M12 2.5v2.2M12 19.3v2.2M21.5 12h-2.2M4.7 12H2.5M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6M18.4 18.4l-1.6-1.6M7.2 7.2 5.6 5.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></svg>
+        Administration
+      </button>
+    </nav>
+
+    <div style="flex:1; overflow-y:auto; padding:16px 10px 8px; min-height:0;">
+      <div style="font-size:10px; font-weight:600; letter-spacing:.09em; text-transform:uppercase; color:var(--text-5); padding:2px 9px 9px;">Today</div>
+      <div style="display:flex; flex-direction:column; gap:2px;">
+        <button style="display:flex; align-items:center; gap:9px; padding:9px 10px; border-radius:8px; border:none; background:rgba(99,102,241,.1); color:var(--text-navactive); font-size:12.5px; cursor:pointer; text-align:left; width:100%; box-shadow:inset 2px 0 0 var(--accent-2);"><span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Provision EKS for payments-platform</span></button>
+        <button style="display:flex; align-items:center; gap:9px; padding:9px 10px; border-radius:8px; border:none; background:transparent; color:var(--text-3); font-size:12.5px; cursor:pointer; text-align:left; width:100%;" style-hover="background:var(--surface-2);"><span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Checkout latency RCA</span></button>
+        <button style="display:flex; align-items:center; gap:9px; padding:9px 10px; border-radius:8px; border:none; background:transparent; color:var(--text-3); font-size:12.5px; cursor:pointer; text-align:left; width:100%;" style-hover="background:var(--surface-2);"><span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Rotate RDS credentials · staging</span></button>
+      </div>
+      <div style="font-size:10px; font-weight:600; letter-spacing:.09em; text-transform:uppercase; color:var(--text-5); padding:16px 9px 9px;">Yesterday</div>
+      <div style="display:flex; flex-direction:column; gap:2px;">
+        <button style="display:flex; align-items:center; gap:9px; padding:9px 10px; border-radius:8px; border:none; background:transparent; color:var(--text-3); font-size:12.5px; cursor:pointer; text-align:left; width:100%;" style-hover="background:var(--surface-2);"><span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Scale orders-api to 8 replicas</span></button>
+        <button style="display:flex; align-items:center; gap:9px; padding:9px 10px; border-radius:8px; border:none; background:transparent; color:var(--text-3); font-size:12.5px; cursor:pointer; text-align:left; width:100%;" style-hover="background:var(--surface-2);"><span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Why did 5 pods restart in eu-west-1?</span></button>
+      </div>
+    </div>
+
+    <div style="border-top:1px solid var(--surface-3); padding:11px 12px;">
+      <button onclick="{{ goSettings }}" style="{{ navSettingsStyle }}" style-hover="background:var(--surface-2);">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" stroke="currentColor" stroke-width="1.6"></path><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L16 2H8l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 0 0 3 12a7 7 0 0 0 .1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L8 22h8l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" opacity=".55"></path></svg>
+        Settings
+      </button>
+      <button style="width:100%; display:flex; align-items:center; gap:10px; padding:8px; margin-top:4px; border-radius:10px; border:none; background:transparent; cursor:pointer;" style-hover="background:var(--surface-2);">
+        <div style="width:30px; height:30px; border-radius:8px; background:var(--av-org-bg); display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:600; color:var(--av-org-fg); flex-shrink:0;">NF</div>
+        <div style="text-align:left; line-height:1.2; flex:1; min-width:0;">
+          <div style="font-size:12.5px; font-weight:500; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Northwind Financial</div>
+          <div style="font-size:11px; color:var(--text-4);">Maya Okafor · Platform</div>
+        </div>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style="flex-shrink:0;"><path d="m8 9 4-4 4 4M8 15l4 4 4-4" stroke="#6b6f7a" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+      </button>
+    </div>
+  </aside>
+
+  <sc-if value="{{ mobileNavOpen }}" hint-placeholder-val="{{ false }}">
+  <div onclick="{{ closeMobileNav }}" style="position:fixed; inset:0; z-index:79; background:rgba(0,0,0,.5); animation:ao-fadein .15s ease;"></div>
+  </sc-if>
+
+  <!-- ░░░░ MAIN ░░░░ -->
+  <main style="flex:1; display:flex; flex-direction:column; min-width:0; height:100%; background:var(--bg);">
+
+    <header id="ao-topnav" style="height:58px; flex-shrink:0; border-bottom:1px solid var(--surface-3); display:flex; align-items:center; gap:14px; padding:0 20px; background:var(--bg);">
+      <sc-if value="{{ anyMenu }}" hint-placeholder-val="{{ false }}"><div onclick="{{ closeMenus }}" style="position:fixed; inset:0; z-index:30;"></div></sc-if>
+
+      <button id="ao-hamburger" onclick="{{ toggleMobileNav }}" style="width:34px; height:34px; flex-shrink:0; border-radius:9px; border:1px solid var(--border-2); background:var(--surface-2); align-items:center; justify-content:center; cursor:pointer; color:var(--text-2);">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path></svg>
+      </button>
+
+      <!-- Cloud account -->
+      <div class="ao-cloud-sel" style="position:relative; z-index:31;">
+        <button onclick="{{ toggleCloud }}" style="display:flex; align-items:center; gap:7px; padding:6px 10px; border-radius:8px; border:1px solid var(--border-2); background:var(--surface); cursor:pointer; font-size:12.5px; color:var(--text-2);" style-hover="border-color:var(--border-3);">
+          <span style="width:7px; height:7px; border-radius:2px; background:{{ cloudDot }};"></span>{{ cloud }}
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="m7 10 5 5 5-5" stroke="currentColor" style="color:var(--text-4)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+        </button>
+        <sc-if value="{{ menuCloud }}" hint-placeholder-val="{{ false }}">
+          <div style="position:absolute; top:calc(100% + 8px); left:0; min-width:220px; background:var(--bg-pop); border:1px solid var(--border-2); border-radius:12px; box-shadow:0 16px 44px rgba(0,0,0,.4); padding:6px; z-index:40; animation:ao-fadeup .15s ease;">
+            <div style="font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-5); font-weight:600; padding:7px 10px 5px;">Cloud accounts</div>
+            <sc-for list="{{ cloudOptions }}" as="o" hint-placeholder-count="5">
+              <button onclick="{{ o.run }}" style="display:flex; align-items:center; gap:10px; width:100%; padding:9px 10px; border-radius:8px; border:none; background:transparent; cursor:pointer; text-align:left;" style-hover="background:var(--surface-2);">
+                <span style="width:8px; height:8px; border-radius:2px; background:{{ o.dot }}; flex-shrink:0;"></span>
+                <span style="flex:1; font-size:13px; color:var(--text); font-weight:500;">{{ o.label }}</span>
+                <span style="font-size:11px; color:var(--text-4);">{{ o.sub }}</span>
+                <sc-if value="{{ o.active }}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="m5 12 5 5 9-11" stroke="var(--accent-2)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path></svg></sc-if>
+              </button>
+            </sc-for>
+          </div>
+        </sc-if>
+      </div>
+
+      <div style="margin-left:auto; display:flex; align-items:center; gap:9px;">
+        <!-- Model selector -->
+        <div style="position:relative; z-index:31;">
+          <button onclick="{{ toggleModelMenu }}" style="display:flex; align-items:center; gap:8px; padding:7px 11px; border-radius:9px; border:1px solid var(--border-2); background:var(--surface-2); color:var(--text-2); font-size:12.5px; cursor:pointer;" style-hover="border-color:var(--border-3);">
+            <span style="width:7px; height:7px; border-radius:99px; background:{{ modelDot }};"></span>{{ modelLabel }}
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="m7 10 5 5 5-5" stroke="currentColor" style="color:var(--text-4)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          </button>
+          <sc-if value="{{ menuModel }}" hint-placeholder-val="{{ false }}">
+            <div style="position:absolute; top:calc(100% + 8px); right:0; min-width:268px; background:var(--bg-pop); border:1px solid var(--border-2); border-radius:12px; box-shadow:0 16px 44px rgba(0,0,0,.4); padding:6px; z-index:40; animation:ao-fadeup .15s ease;">
+              <div style="font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-5); font-weight:600; padding:7px 10px 5px;">Model · LLM provider</div>
+              <sc-for list="{{ modelOptions }}" as="o" hint-placeholder-count="6">
+                <button onclick="{{ o.run }}" style="display:flex; align-items:center; gap:10px; width:100%; padding:9px 10px; border-radius:8px; border:none; background:transparent; cursor:pointer; text-align:left;" style-hover="background:var(--surface-2);">
+                  <span style="width:8px; height:8px; border-radius:99px; background:{{ o.dot }}; flex-shrink:0;"></span>
+                  <span style="flex:1;"><span style="display:block; font-size:13px; color:var(--text); font-weight:500;">{{ o.label }}</span><span style="display:block; font-size:11px; color:var(--text-4);">{{ o.sub }}</span></span>
+                  <sc-if value="{{ o.active }}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="m5 12 5 5 9-11" stroke="var(--accent-2)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path></svg></sc-if>
+                </button>
+              </sc-for>
+            </div>
+          </sc-if>
+        </div>
+
+        <!-- Theme -->
+        <div style="position:relative; z-index:31;">
+          <button onclick="{{ toggleThemeMenu }}" style="width:35px; height:35px; border-radius:9px; border:1px solid var(--border-2); background:var(--surface-2); display:flex; align-items:center; justify-content:center; cursor:pointer; color:var(--text-3);" style-hover="border-color:var(--border-3);">{{ themeIcon }}</button>
+          <sc-if value="{{ menuTheme }}" hint-placeholder-val="{{ false }}">
+            <div style="position:absolute; top:calc(100% + 8px); right:0; min-width:170px; background:var(--bg-pop); border:1px solid var(--border-2); border-radius:12px; box-shadow:0 16px 44px rgba(0,0,0,.4); padding:6px; z-index:40; animation:ao-fadeup .15s ease;">
+              <div style="font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-5); font-weight:600; padding:7px 10px 5px;">Theme</div>
+              <button onclick="{{ setThemeDark }}" style="display:flex; align-items:center; gap:10px; width:100%; padding:9px 10px; border-radius:8px; border:none; background:transparent; cursor:pointer; text-align:left; font-size:13px; color:var(--text);" style-hover="background:var(--surface-2);">Dark<sc-if value="{{ isThemeDark }}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" style="margin-left:auto;"><path d="m5 12 5 5 9-11" stroke="var(--accent-2)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path></svg></sc-if></button>
+              <button onclick="{{ setThemeLight }}" style="display:flex; align-items:center; gap:10px; width:100%; padding:9px 10px; border-radius:8px; border:none; background:transparent; cursor:pointer; text-align:left; font-size:13px; color:var(--text);" style-hover="background:var(--surface-2);">Light<sc-if value="{{ isThemeLight }}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" style="margin-left:auto;"><path d="m5 12 5 5 9-11" stroke="var(--accent-2)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path></svg></sc-if></button>
+              <button onclick="{{ setThemeSystem }}" style="display:flex; align-items:center; gap:10px; width:100%; padding:9px 10px; border-radius:8px; border:none; background:transparent; cursor:pointer; text-align:left; font-size:13px; color:var(--text);" style-hover="background:var(--surface-2);">System<sc-if value="{{ isThemeSystem }}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" style="margin-left:auto;"><path d="m5 12 5 5 9-11" stroke="var(--accent-2)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path></svg></sc-if></button>
+            </div>
+          </sc-if>
+        </div>
+
+        <!-- Notifications -->
+        <div style="position:relative; z-index:31;">
+          <button onclick="{{ toggleNotif }}" style="width:35px; height:35px; border-radius:9px; border:1px solid var(--border-2); background:var(--surface-2); display:flex; align-items:center; justify-content:center; cursor:pointer; position:relative;" style-hover="border-color:var(--border-3);">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M6 9a6 6 0 1 1 12 0c0 5 2 6 2 6H4s2-1 2-6Z" stroke="currentColor" style="color:var(--text-3)" stroke-width="1.6" stroke-linejoin="round"></path><path d="M10 19a2 2 0 0 0 4 0" stroke="currentColor" style="color:var(--text-3)" stroke-width="1.6" stroke-linecap="round"></path></svg>
+            <span style="position:absolute; top:7px; right:8px; min-width:7px; height:7px; border-radius:99px; background:var(--red); border:1.5px solid var(--bg-elev);"></span>
+          </button>
+          <sc-if value="{{ menuNotif }}" hint-placeholder-val="{{ false }}">
+            <div style="position:absolute; top:calc(100% + 8px); right:0; width:320px; background:var(--bg-pop); border:1px solid var(--border-2); border-radius:12px; box-shadow:0 16px 44px rgba(0,0,0,.4); padding:6px; z-index:40; animation:ao-fadeup .15s ease;">
+              <div style="display:flex; align-items:center; padding:8px 10px 6px;"><span style="font-size:12.5px; font-weight:600; color:var(--text);">Notifications</span><span style="margin-left:auto; font-size:11px; color:var(--accent-3); cursor:pointer;">Mark all read</span></div>
+              <sc-for list="{{ notifItems }}" as="n" hint-placeholder-count="4">
+                <button style="display:flex; gap:10px; width:100%; padding:9px 10px; border-radius:8px; border:none; background:transparent; cursor:pointer; text-align:left;" style-hover="background:var(--surface-2);">
+                  <span style="width:7px; height:7px; border-radius:99px; background:{{ n.color }}; margin-top:5px; flex-shrink:0;"></span>
+                  <span style="flex:1; font-size:12.5px; color:var(--text-2); line-height:1.45;">{{ n.title }}</span>
+                  <span style="font-size:11px; color:var(--text-4); flex-shrink:0;">{{ n.time }}</span>
+                </button>
+              </sc-for>
+            </div>
+          </sc-if>
+        </div>
+
+        <!-- Artifact panel toggle -->
+        <button onclick="{{ toggleArtifact }}" style="width:35px; height:35px; border-radius:9px; border:1px solid var(--border-2); background:{{ artifactBtnBg }}; display:flex; align-items:center; justify-content:center; cursor:pointer; color:{{ artifactBtnColor }};" style-hover="border-color:var(--border-3);">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" stroke="currentColor" stroke-width="1.6"></rect><path d="M14 4.5v15" stroke="currentColor" stroke-width="1.6"></path></svg>
+        </button>
+
+        <div style="width:1px; height:22px; background:var(--border-2);"></div>
+
+        <!-- Profile + RBAC -->
+        <div style="position:relative; z-index:31;">
+          <button onclick="{{ toggleProfile }}" style="display:flex; align-items:center; gap:8px; padding:3px 3px 3px 3px; border-radius:99px; border:1px solid var(--border-2); background:var(--surface-2); cursor:pointer;" style-hover="border-color:var(--border-3);">
+            <span style="width:29px; height:29px; border-radius:99px; background:var(--av-user-bg); display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:600; color:var(--av-user-fg);">MO</span>
+          </button>
+          <sc-if value="{{ menuProfile }}" hint-placeholder-val="{{ false }}">
+            <div style="position:absolute; top:calc(100% + 8px); right:0; width:288px; background:var(--bg-pop); border:1px solid var(--border-2); border-radius:12px; box-shadow:0 16px 44px rgba(0,0,0,.4); padding:6px; z-index:40; animation:ao-fadeup .15s ease;">
+              <div style="display:flex; align-items:center; gap:11px; padding:10px 11px 12px;">
+                <span style="width:38px; height:38px; border-radius:10px; background:var(--av-user-bg); display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:600; color:var(--av-user-fg);">MO</span>
+                <div style="flex:1; min-width:0;"><div style="font-size:13.5px; font-weight:600; color:var(--text);">Maya Okafor</div><div style="font-size:11.5px; color:var(--text-4); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">maya.okafor@northwind.com</div></div>
+              </div>
+              <div style="padding:0 11px 8px;"><span style="display:inline-flex; align-items:center; gap:6px; font-size:11px; font-weight:500; color:var(--accent-3); padding:3px 9px; border-radius:99px; background:rgba(99,102,241,.1); border:1px solid var(--accent-border);"><svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M12 2.6 4.6 5.6v5.2c0 4.4 3 8.5 7.4 9.9 4.4-1.4 7.4-5.5 7.4-9.9V5.6L12 2.6Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"></path></svg>{{ role }}</span></div>
+              <div style="height:1px; background:var(--border); margin:2px 0 6px;"></div>
+              <div style="font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-5); font-weight:600; padding:5px 11px 5px;">Switch role · RBAC</div>
+              <div style="max-height:184px; overflow-y:auto;">
+                <sc-for list="{{ roleOptions }}" as="o" hint-placeholder-count="8">
+                  <button onclick="{{ o.run }}" style="display:flex; align-items:center; gap:10px; width:100%; padding:8px 11px; border-radius:8px; border:none; background:transparent; cursor:pointer; text-align:left;" style-hover="background:var(--surface-2);">
+                    <span style="flex:1;"><span style="display:block; font-size:12.5px; color:var(--text); font-weight:500;">{{ o.label }}</span><span style="display:block; font-size:11px; color:var(--text-4);">{{ o.sub }}</span></span>
+                    <sc-if value="{{ o.active }}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="m5 12 5 5 9-11" stroke="var(--accent-2)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path></svg></sc-if>
+                  </button>
+                </sc-for>
+              </div>
+              <div style="height:1px; background:var(--border); margin:6px 0;"></div>
+              <button onclick="{{ goSettings }}" style="display:flex; align-items:center; gap:10px; width:100%; padding:9px 11px; border-radius:8px; border:none; background:transparent; cursor:pointer; text-align:left; font-size:13px; color:var(--text-2);" style-hover="background:var(--surface-2);">Preferences &amp; API keys</button>
+              <button onclick="{{ signOut }}" style="display:flex; align-items:center; gap:10px; width:100%; padding:9px 11px; border-radius:8px; border:none; background:transparent; cursor:pointer; text-align:left; font-size:13px; color:var(--red-2);" style-hover="background:rgba(248,113,113,.08);">Sign out</button>
+            </div>
+          </sc-if>
+        </div>
+      </div>
+    </header>
+
+    <!-- workspace body: chat + artifact -->
+    <div style="flex:1; display:flex; min-height:0;">
+
+      <!-- ════ CHAT COLUMN ════ -->
+      <sc-if value="{{ isWorkspace }}" hint-placeholder-val="{{ true }}">
+      <div style="flex:1; display:flex; flex-direction:column; min-width:0; min-height:0;">
+        <div style="flex:1; overflow-y:auto; min-height:0;">
+          <div class="ao-chat-pad" style="max-width:{{ chatMaxWidth }}; margin:0 auto; padding:40px 36px 28px; transition:max-width .25s;">
+
+            <!-- USER MSG -->
+            <div style="display:flex; gap:15px; margin-bottom:38px;">
+              <div style="width:30px; height:30px; border-radius:8px; background:var(--av-user-bg); display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:600; color:var(--av-user-fg); flex-shrink:0;">MO</div>
+              <div style="flex:1; padding-top:4px;">
+                <div style="font-size:15px; color:var(--text); line-height:1.65;">Provision a production-ready EKS cluster for <span style="color:#fff; font-weight:500;">payments-platform</span> in <span style="font-family:'IBM Plex Mono',monospace; font-size:13.5px; color:var(--accent-3);">us-east-1</span>, spanning 3 AZs with managed node groups. Reuse our existing prod VPC.</div>
+              </div>
+            </div>
+
+            <!-- AI MSG -->
+            <div style="display:flex; gap:15px;">
+              <div style="width:30px; height:30px; border-radius:8px; background:linear-gradient(155deg,var(--accent),var(--accent-strong)); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 2.6 4.6 5.6v5.2c0 4.4 3 8.5 7.4 9.9 4.4-1.4 7.4-5.5 7.4-9.9V5.6L12 2.6Z" fill="rgba(255,255,255,.18)" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"></path><path d="m8.7 12 2.2 2.3 4.2-4.6" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+              </div>
+              <div style="flex:1; min-width:0;">
+
+                <!-- interpreted intent + workflow + confidentiality -->
+                <div style="display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:14px;">
+                  <span style="display:inline-flex; align-items:center; gap:6px; font-size:11.5px; color:var(--text-3); padding:4px 10px; border-radius:7px; background:var(--surface-2); border:1px solid var(--border);">Intent<span style="color:var(--text); font-weight:500;">Provisioning</span></span>
+                  <span style="display:inline-flex; align-items:center; gap:6px; font-size:11.5px; color:var(--text-3); padding:4px 10px; border-radius:7px; background:var(--surface-2); border:1px solid var(--border);">Workflow<span style="color:var(--text); font-weight:500; font-family:'IBM Plex Mono',monospace;">eks-provision v3</span></span>
+                  <span style="display:inline-flex; align-items:center; gap:6px; font-size:11.5px; color:var(--text-3); padding:4px 10px; border-radius:7px; background:var(--surface-2); border:1px solid var(--border);">Confidence<span style="color:var(--green); font-weight:500;">98%</span></span>
+                  <span style="margin-left:auto; display:inline-flex; align-items:center; gap:6px; font-size:11px; font-weight:500; color:var(--amber); padding:4px 10px; border-radius:7px; background:rgba(251,191,36,.08); border:1px solid rgba(251,191,36,.2);"><svg width="11" height="11" viewBox="0 0 24 24" fill="none"><rect x="5" y="10" width="14" height="10" rx="2.5" stroke="currentColor" stroke-width="1.7"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3" stroke="currentColor" stroke-width="1.7"></path></svg>Confidential</span>
+                </div>
+
+                <button onclick="{{ toggleTimeline }}" style="display:flex; align-items:center; gap:10px; padding:9px 13px; border-radius:10px; border:1px solid var(--border); background:var(--surface); color:var(--text-3); font-size:12.5px; cursor:pointer; margin-bottom:16px; width:100%;" style-hover="background:var(--surface-3);">
+                  <span style="width:16px;height:16px;border-radius:99px;background:rgba(52,211,153,.14);display:flex;align-items:center;justify-content:center;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="m5 12 5 5 9-11" stroke="#34d399" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"></path></svg></span>
+                  <span style="color:var(--text-2); font-weight:500;">AI activity</span>
+                  <span>· 10 steps completed · 4.1s</span>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" style="margin-left:auto; transform:{{ timelineChevron }}; transition:transform .2s;"><path d="m7 10 5 5 5-5" stroke="#6b6f7a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                </button>
+                <sc-if value="{{ timelineOpen }}" hint-placeholder-val="{{ true }}">
+                  <div style="margin:-8px 0 20px; padding:16px 18px; border:1px solid var(--border); border-radius:12px; background:var(--surface);">
+                    <sc-for list="{{ seedTimeline }}" as="t" hint-placeholder-count="10">
+                      <div style="display:flex; align-items:center; gap:11px; padding:5px 0;">
+                        <span style="width:18px;height:18px;border-radius:99px;background:rgba(52,211,153,.13);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="m5 12 5 5 9-11" stroke="#34d399" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path></svg></span>
+                        <span style="font-size:13px; color:var(--text-2);">{{ t.label }}</span>
+                        <span style="font-size:12px; color:var(--text-4);">{{ t.detail }}</span>
+                        <span style="margin-left:auto; font-family:'IBM Plex Mono',monospace; font-size:10.5px; color:var(--text-5);">{{ t.time }}</span>
+                      </div>
+                    </sc-for>
+                  </div>
+                </sc-if>
+
+                <!-- prose -->
+                <div style="font-size:15px; color:var(--text-2); line-height:1.78; margin-bottom:22px;">
+                  I discovered your existing production VPC and confirmed it can host the cluster without new networking. Using the org-approved EKS module, I drafted a Terraform plan that hardens the cluster per the <span style="color:var(--accent-3); border-bottom:1px dashed rgba(165,180,252,.4); cursor:pointer;">Production Hardening runbook</span> — private API endpoint, encrypted secrets, and IRSA enabled. I've prepared two artifacts for your review:
+                </div>
+
+                <!-- ARTIFACT CARDS -->
+                <div style="display:flex; flex-direction:column; gap:11px; margin-bottom:14px;">
+                  <button onclick="{{ openTerraform }}" style="display:flex; align-items:center; gap:14px; padding:15px 16px; border-radius:13px; border:1px solid {{ tfCardBorder }}; background:{{ tfCardBg }}; cursor:pointer; text-align:left; width:100%; transition:all .15s;" style-hover="border-color:rgba(129,140,248,.5); background:rgba(99,102,241,.07);">
+                    <span style="width:40px; height:40px; border-radius:10px; background:rgba(129,140,248,.12); display:flex; align-items:center; justify-content:center; flex-shrink:0;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="m3 8 9-5 9 5-9 5-9-5Z" stroke="#a5b4fc" stroke-width="1.5" stroke-linejoin="round"></path><path d="m3 8 9 5v8M21 8l-9 5" stroke="#a5b4fc" stroke-width="1.5" stroke-linejoin="round" opacity=".55"></path></svg></span>
+                    <div style="flex:1; min-width:0;">
+                      <div style="font-size:14px; font-weight:600; color:var(--text); margin-bottom:3px;">Terraform Plan</div>
+                      <div style="font-size:12.5px; color:var(--text-3);">module.eks_payments · approval required</div>
+                    </div>
+                    <div style="display:flex; gap:6px; flex-shrink:0;">
+                      <span style="font-family:'IBM Plex Mono',monospace; font-size:11.5px; padding:3px 8px; border-radius:6px; background:rgba(52,211,153,.12); color:var(--green);">+14</span>
+                      <span style="font-family:'IBM Plex Mono',monospace; font-size:11.5px; padding:3px 8px; border-radius:6px; background:rgba(251,191,36,.12); color:var(--amber);">~2</span>
+                      <span style="font-family:'IBM Plex Mono',monospace; font-size:11.5px; padding:3px 8px; border-radius:6px; background:var(--surface-3); color:var(--text-4);">-0</span>
+                    </div>
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" style="flex-shrink:0;"><path d="m9 6 6 6-6 6" stroke="#52565f" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                  </button>
+
+                  <button onclick="{{ openCost }}" style="display:flex; align-items:center; gap:14px; padding:15px 16px; border-radius:13px; border:1px solid {{ costCardBorder }}; background:{{ costCardBg }}; cursor:pointer; text-align:left; width:100%; transition:all .15s;" style-hover="border-color:rgba(52,211,153,.4); background:rgba(52,211,153,.05);">
+                    <span style="width:40px; height:40px; border-radius:10px; background:rgba(52,211,153,.1); display:flex; align-items:center; justify-content:center; flex-shrink:0;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 2v20M17 6.5c0-2-2.2-3-5-3s-5 1-5 3.2c0 4.8 10 2.4 10 7.3 0 2.2-2.2 3.2-5 3.2s-5-1.2-5-3.2" stroke="#34d399" stroke-width="1.6" stroke-linecap="round"></path></svg></span>
+                    <div style="flex:1; min-width:0;">
+                      <div style="font-size:14px; font-weight:600; color:var(--text); margin-bottom:3px;">Cost Analysis</div>
+                      <div style="font-size:12.5px; color:var(--text-3);">Estimated monthly delta · within guardrail</div>
+                    </div>
+                    <span style="font-family:'IBM Plex Mono',monospace; font-size:14px; font-weight:600; color:var(--green); flex-shrink:0;">+$312<span style="font-size:11px; color:var(--text-4);">/mo</span></span>
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" style="flex-shrink:0;"><path d="m9 6 6 6-6 6" stroke="#52565f" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                  </button>
+                </div>
+
+                <!-- compact approval reference -->
+                <sc-if value="{{ showApprovalPending }}" hint-placeholder-val="{{ true }}">
+                <div style="display:flex; align-items:center; gap:12px; padding:13px 16px; border-radius:12px; border:1px solid rgba(251,191,36,.25); background:rgba(251,191,36,.05); margin-bottom:16px;">
+                  <span style="width:24px;height:24px;border-radius:7px;background:rgba(251,191,36,.14);display:flex;align-items:center;justify-content:center;animation:ao-ring 2.2s infinite;flex-shrink:0;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M12 8v5m0 3h.01" stroke="#fbbf24" stroke-width="2" stroke-linecap="round"></path><circle cx="12" cy="12" r="9" stroke="#fbbf24" stroke-width="1.6"></circle></svg></span>
+                  <div style="flex:1;"><div style="font-size:13.5px; font-weight:500; color:var(--text);">Human approval required</div><div style="font-size:11.5px; color:var(--text-3);">Production change · review the plan before applying</div></div>
+                  <button onclick="{{ openTerraform }}" style="padding:8px 15px; border-radius:9px; border:1px solid rgba(251,191,36,.35); background:rgba(251,191,36,.1); color:var(--amber); font-size:12.5px; font-weight:600; cursor:pointer; flex-shrink:0;" style-hover="background:rgba(251,191,36,.18);">Review plan</button>
+                </div>
+                </sc-if>
+                <sc-if value="{{ showApproved }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex; align-items:center; gap:12px; padding:13px 16px; border-radius:12px; border:1px solid rgba(52,211,153,.28); background:rgba(52,211,153,.06); margin-bottom:16px; animation:ao-fadeup .3s ease;">
+                  <span style="width:24px;height:24px;border-radius:7px;background:rgba(52,211,153,.14);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="m5 12 5 5 9-11" stroke="#34d399" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path></svg></span>
+                  <div style="flex:1;"><div style="font-size:13.5px; font-weight:500; color:var(--text);">Approved — applying now</div><div style="font-size:11.5px; color:var(--text-3);">Streaming <span style="font-family:'IBM Plex Mono',monospace; color:var(--accent-3);">terraform apply</span> · watch the workflow artifact</div></div>
+                  <div style="display:flex; gap:3px; align-items:flex-end; height:16px; flex-shrink:0;"><span style="width:3px; background:var(--green); border-radius:2px; height:100%; transform-origin:bottom; animation:ao-bar 1s ease-in-out infinite;"></span><span style="width:3px; background:var(--green); border-radius:2px; height:100%; transform-origin:bottom; animation:ao-bar 1s ease-in-out .15s infinite;"></span><span style="width:3px; background:var(--green); border-radius:2px; height:100%; transform-origin:bottom; animation:ao-bar 1s ease-in-out .3s infinite;"></span></div>
+                </div>
+                </sc-if>
+                <sc-if value="{{ showRejected }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex; align-items:center; gap:12px; padding:13px 16px; border-radius:12px; border:1px solid rgba(248,113,113,.28); background:rgba(248,113,113,.05); margin-bottom:16px; animation:ao-fadeup .3s ease;">
+                  <span style="width:24px;height:24px;border-radius:7px;background:rgba(248,113,113,.14);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6 6 18" stroke="#f87171" stroke-width="2.2" stroke-linecap="round"></path></svg></span>
+                  <div style="flex:1;"><div style="font-size:13.5px; font-weight:500; color:var(--text);">Plan rejected</div><div style="font-size:11.5px; color:var(--text-3);">No changes applied. Tell me what to adjust and I'll re-plan.</div></div>
+                </div>
+                </sc-if>
+
+                <!-- follow-up chips -->
+                <div style="display:flex; flex-wrap:wrap; gap:8px;">
+                  <button onclick="{{ openGraph }}" style="display:flex; align-items:center; gap:7px; padding:8px 13px; border-radius:9px; border:1px solid var(--border-2); background:var(--surface-2); color:var(--text-2); font-size:12.5px; cursor:pointer;" style-hover="background:var(--surface-3);"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><circle cx="6" cy="6" r="2.5" stroke="#a5b4fc" stroke-width="1.6"></circle><circle cx="18" cy="9" r="2.5" stroke="#a5b4fc" stroke-width="1.6"></circle><circle cx="9" cy="18" r="2.5" stroke="#a5b4fc" stroke-width="1.6"></circle><path d="m8 7 8 1M8 8l1 8" stroke="#a5b4fc" stroke-width="1.4"></path></svg>View infrastructure graph</button>
+                  <button onclick="{{ openWorkflow }}" style="display:flex; align-items:center; gap:7px; padding:8px 13px; border-radius:9px; border:1px solid var(--border-2); background:var(--surface-2); color:var(--text-2); font-size:12.5px; cursor:pointer;" style-hover="background:var(--surface-3);">Execution workflow</button>
+                  <button style="display:flex; align-items:center; gap:7px; padding:8px 13px; border-radius:9px; border:1px solid var(--border-2); background:var(--surface-2); color:var(--text-2); font-size:12.5px; cursor:pointer;" style-hover="background:var(--surface-3);">Optimize cost</button>
+                </div>
+
+                <!-- feedback + provenance -->
+                <div style="display:flex; align-items:center; gap:10px; margin-top:16px; padding-top:14px; border-top:1px solid var(--border);">
+                  <span style="font-size:11.5px; color:var(--text-4);">Was this helpful?</span>
+                  <button onclick="{{ seedThumbUp }}" style="width:30px; height:30px; border-radius:8px; border:1px solid {{ seedUpBorder }}; background:{{ seedUpBg }}; display:flex; align-items:center; justify-content:center; cursor:pointer; color:{{ seedUpColor }};" style-hover="border-color:var(--border-3);"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M7 10v9H4v-9h3Zm0 0 4.5-7c1 0 2 .8 2 2v3h4.6c1.2 0 2 1 1.8 2.2l-1.3 6c-.2.9-1 1.6-2 1.6H7" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"></path></svg></button>
+                  <button onclick="{{ seedThumbDown }}" style="width:30px; height:30px; border-radius:8px; border:1px solid {{ seedDownBorder }}; background:{{ seedDownBg }}; display:flex; align-items:center; justify-content:center; cursor:pointer; color:{{ seedDownColor }};" style-hover="border-color:var(--border-3);"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M17 14V5h3v9h-3Zm0 0-4.5 7c-1 0-2-.8-2-2v-3H5.9c-1.2 0-2-1-1.8-2.2l1.3-6c.2-.9 1-1.6 2-1.6H17" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"></path></svg></button>
+                  <span style="margin-left:auto; display:flex; align-items:center; gap:7px; font-size:11px; color:var(--text-4);"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"></circle><path d="M12 8v4l3 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></svg>Logged to Langfuse · ctx #2291</span>
+                </div>
+
+              </div>
+            </div>
+
+            <!-- streamed messages -->
+            <sc-for list="{{ messages }}" as="m" hint-placeholder-count="0">
+              <div style="margin-top:38px; animation:ao-fadeup .3s ease;">
+                <sc-if value="{{ m.isUser }}">
+                  <div style="display:flex; gap:15px;">
+                    <div style="width:30px; height:30px; border-radius:8px; background:var(--av-user-bg); display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:600; color:var(--av-user-fg); flex-shrink:0;">MO</div>
+                    <div style="flex:1; padding-top:4px; font-size:15px; color:var(--text); line-height:1.65;">{{ m.text }}</div>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ m.isAI }}">
+                  <div style="display:flex; gap:15px;">
+                    <div style="width:30px; height:30px; border-radius:8px; background:linear-gradient(155deg,var(--accent),var(--accent-strong)); display:flex; align-items:center; justify-content:center; flex-shrink:0;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 2.6 4.6 5.6v5.2c0 4.4 3 8.5 7.4 9.9 4.4-1.4 7.4-5.5 7.4-9.9V5.6L12 2.6Z" fill="rgba(255,255,255,.18)" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"></path></svg></div>
+                    <div style="flex:1; min-width:0; padding-top:2px;">
+                      <!-- live timeline -->
+                      <sc-if value="{{ m.showTimeline }}">
+                        <div style="border:1px solid rgba(129,140,248,.18); border-radius:12px; background:rgba(99,102,241,.04); padding:14px 16px; margin-bottom:16px;">
+                          <div style="font-size:11px; text-transform:uppercase; letter-spacing:.07em; color:var(--accent-2); font-weight:600; margin-bottom:11px;">AI activity</div>
+                          <sc-for list="{{ m.timeline }}" as="step" hint-placeholder-count="3">
+                            <div style="display:flex; align-items:center; gap:11px; padding:4px 0; animation:ao-stepin .25s ease;">
+                              <sc-if value="{{ step.isDone }}"><span style="width:17px;height:17px;border-radius:99px;background:rgba(52,211,153,.13);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="m5 12 5 5 9-11" stroke="#34d399" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"></path></svg></span></sc-if>
+                              <sc-if value="{{ step.isActive }}"><span style="width:17px;height:17px;border-radius:99px;background:rgba(129,140,248,.16);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" style="animation:ao-spin 1s linear infinite;"><path d="M12 3a9 9 0 1 0 9 9" stroke="#818cf8" stroke-width="2.6" stroke-linecap="round"></path></svg></span></sc-if>
+                              <sc-if value="{{ step.isPending }}"><span style="width:17px;height:17px;border-radius:99px;border:1.5px solid var(--border-3);flex-shrink:0;"></span></sc-if>
+                              <span style="font-size:13px; color:{{ step.color }};">{{ step.label }}</span>
+                            </div>
+                          </sc-for>
+                        </div>
+                      </sc-if>
+                      <div style="font-size:15px; color:var(--text-2); line-height:1.78;">{{ m.text }}<sc-if value="{{ m.streaming }}"><span style="display:inline-block; width:7px; height:16px; background:var(--accent-2); margin-left:2px; vertical-align:-2px; animation:ao-blink 1s steps(1) infinite;"></span></sc-if></div>
+                    </div>
+                  </div>
+                </sc-if>
+              </div>
+            </sc-for>
+
+            <div style="height:8px;"></div>
+          </div>
+        </div>
+
+        <!-- composer -->
+        <div class="ao-composer-pad" style="flex-shrink:0; padding:0 36px 26px;">
+          <div style="max-width:{{ chatMaxWidth }}; margin:0 auto; transition:max-width .25s;">
+            <div style="display:flex; gap:8px; margin-bottom:13px; flex-wrap:wrap;">
+              <button onclick="{{ useSuggestion0 }}" style="padding:7px 13px; border-radius:99px; border:1px solid var(--border-2); background:var(--surface); color:var(--text-3); font-size:12.5px; cursor:pointer; white-space:nowrap;" style-hover="border-color:rgba(129,140,248,.4); color:var(--text-2);">Show every database in Production</button>
+              <button onclick="{{ useSuggestion1 }}" style="padding:7px 13px; border-radius:99px; border:1px solid var(--border-2); background:var(--surface); color:var(--text-3); font-size:12.5px; cursor:pointer; white-space:nowrap;" style-hover="border-color:rgba(129,140,248,.4); color:var(--text-2);">Why did checkout latency spike?</button>
+              <button onclick="{{ useSuggestion2 }}" style="padding:7px 13px; border-radius:99px; border:1px solid var(--border-2); background:var(--surface); color:var(--text-3); font-size:12.5px; cursor:pointer; white-space:nowrap;" style-hover="border-color:rgba(129,140,248,.4); color:var(--text-2);">Compare staging vs production</button>
+            </div>
+            <div style="border:1px solid var(--border-2); border-radius:16px; background:var(--surface-2); padding:14px 15px 11px;" style-focus-within="border-color:rgba(129,140,248,.45); box-shadow:0 0 0 3px rgba(99,102,241,.08);">
+              <textarea value="{{ input }}" oninput="{{ onInput }}" onkeydown="{{ onKey }}" rows="1" placeholder="Ask AegisOps to provision, investigate, deploy, or explain…" style="width:100%; background:transparent; border:none; outline:none; color:var(--text); font-size:15px; line-height:1.5; min-height:24px; max-height:160px;"></textarea>
+              <div style="display:flex; align-items:center; gap:9px; margin-top:9px;">
+                <button style="width:31px; height:31px; border-radius:8px; border:1px solid var(--border-2); background:transparent; display:flex; align-items:center; justify-content:center; cursor:pointer; color:var(--text-3);" style-hover="background:var(--surface-3);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path></svg></button>
+                <button style="display:flex; align-items:center; gap:6px; height:31px; padding:0 12px; border-radius:8px; border:1px solid var(--border-2); background:transparent; cursor:pointer; color:var(--text-3); font-size:12px;" style-hover="background:var(--surface-3);"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 3v18M5.5 8.5 12 3l6.5 5.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path></svg>Attach</button>
+                <span style="margin-left:auto; font-size:11px; color:var(--text-5); font-family:'IBM Plex Mono',monospace;">{{ agentModeLabel }}</span>
+                <button onclick="{{ onSend }}" style="width:35px; height:35px; border-radius:9px; border:none; background:{{ sendBg }}; display:flex; align-items:center; justify-content:center; cursor:{{ sendCursor }};">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 19V5M5.5 11.5 12 5l6.5 6.5" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                </button>
+              </div>
+            </div>
+            <div style="text-align:center; font-size:11px; color:var(--text-5); margin-top:10px;">AegisOps can make mistakes. Every destructive action requires your approval.</div>
+          </div>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- ════ MODULE VIEW ════ -->
+      <sc-if value="{{ isModule }}" hint-placeholder-val="{{ false }}">
+      <div style="flex:1; overflow-y:auto; min-height:0;">
+        <div class="ao-module-pad" style="max-width:1080px; margin:0 auto; padding:40px 36px;">
+          <div style="display:flex; align-items:flex-start; gap:17px; margin-bottom:32px;">
+            <div style="width:46px; height:46px; border-radius:13px; background:rgba(99,102,241,.12); border:1px solid rgba(129,140,248,.25); display:flex; align-items:center; justify-content:center; flex-shrink:0; color:var(--accent-3); font-weight:600;">{{ moduleIcon }}</div>
+            <div style="flex:1;">
+              <div style="font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-4); margin-bottom:5px;">{{ moduleEyebrow }}</div>
+              <div style="font-size:24px; font-weight:600; color:var(--text); letter-spacing:-.02em;">{{ moduleTitle }}</div>
+              <div style="font-size:13.5px; color:var(--text-3); margin-top:6px; max-width:580px; line-height:1.65;">{{ moduleDesc }}</div>
+            </div>
+            <button onclick="{{ goWorkspace }}" style="display:flex; align-items:center; gap:8px; padding:10px 15px; border-radius:10px; border:1px solid rgba(129,140,248,.3); background:rgba(99,102,241,.1); color:var(--accent-fg); font-size:13px; font-weight:500; cursor:pointer; flex-shrink:0;" style-hover="border-color:rgba(129,140,248,.5);"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="m12 3 1.9 4.6L18.5 9l-3.4 3 .9 4.8L12 14.6 7.9 16.8l.9-4.8L5.5 9l4.6-1.4L12 3Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"></path></svg>Ask AI</button>
+          </div>
+          <div class="ao-stat-grid" style="display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:30px;">
+            <sc-for list="{{ moduleStats }}" as="s" hint-placeholder-count="4">
+              <div style="border:1px solid var(--border); border-radius:13px; padding:17px 18px; background:var(--surface);">
+                <div style="font-size:11px; color:var(--text-3); margin-bottom:9px;">{{ s.label }}</div>
+                <div style="font-size:25px; font-weight:600; color:var(--text); letter-spacing:-.02em;">{{ s.value }}</div>
+                <div style="font-size:11.5px; color:{{ s.deltaColor }}; margin-top:6px;">{{ s.delta }}</div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="border:1px solid var(--border); border-radius:14px; overflow:hidden; background:var(--surface);">
+            <div style="padding:15px 20px; border-bottom:1px solid var(--surface-3); display:flex; align-items:center; gap:10px;">
+              <span style="font-size:13.5px; font-weight:600; color:var(--text);">{{ moduleListTitle }}</span>
+              <span style="font-size:11px; color:var(--text-4);">opens contextually — no separate page</span>
+            </div>
+            <sc-for list="{{ moduleRows }}" as="r" hint-placeholder-count="4">
+              <div style="display:flex; align-items:center; gap:15px; padding:15px 20px; border-bottom:1px solid var(--surface-2); cursor:pointer;" style-hover="background:var(--surface);">
+                <span style="width:8px; height:8px; border-radius:99px; background:{{ r.dot }}; flex-shrink:0;"></span>
+                <span style="font-size:13.5px; color:var(--text); font-weight:500; min-width:210px;">{{ r.name }}</span>
+                <span style="font-size:12.5px; color:var(--text-3); flex:1;">{{ r.meta }}</span>
+                <span style="font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--text-3);">{{ r.value }}</span>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" style="flex-shrink:0;"><path d="m9 6 6 6-6 6" stroke="#52565f" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+              </div>
+            </sc-for>
+          </div>
+
+          <sc-if value="{{ isAdmin }}" hint-placeholder-val="{{ false }}">
+          <div style="margin-top:26px;">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
+              <span style="font-size:13.5px; font-weight:600; color:var(--text);">Integrations &amp; connected services</span>
+              <span style="font-size:11px; color:var(--text-4);">configured per organization</span>
+            </div>
+            <div class="ao-summary-grid" style="display:grid; grid-template-columns:repeat(3,1fr); gap:12px;">
+              <sc-for list="{{ integrations }}" as="i" hint-placeholder-count="13">
+                <div style="display:flex; align-items:center; gap:12px; padding:14px 15px; border:1px solid var(--border); border-radius:12px; background:var(--surface);" style-hover="border-color:var(--border-2);">
+                  <span style="width:34px; height:34px; border-radius:9px; background:var(--surface-2); border:1px solid var(--border); display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; color:{{ i.color }}; flex-shrink:0;">{{ i.mark }}</span>
+                  <div style="flex:1; min-width:0;"><div style="font-size:13px; color:var(--text); font-weight:500;">{{ i.name }}</div><div style="font-size:11px; color:var(--text-4);">{{ i.cat }}</div></div>
+                  <span style="display:flex; align-items:center; gap:5px; font-size:10.5px; color:{{ i.statusColor }};"><span style="width:6px; height:6px; border-radius:99px; background:{{ i.statusColor }};"></span>{{ i.status }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+          </sc-if>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- ════ ARTIFACT PANEL ════ -->
+      <sc-if value="{{ artifactPanelVisible }}" hint-placeholder-val="{{ true }}">
+      <aside id="ao-panel" style="width:540px; flex-shrink:0; background:var(--bg-elev); border-left:1px solid var(--surface-3); display:flex; flex-direction:column; height:100%; animation:ao-slidein .25s ease;">
+        <!-- artifact header + tabs -->
+        <div style="flex-shrink:0; border-bottom:1px solid var(--surface-3);">
+          <div style="display:flex; align-items:center; gap:11px; padding:15px 18px 13px;">
+            <span style="font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-4); font-weight:600;">Artifact</span>
+            <span style="font-size:14px; font-weight:600; color:var(--text);">{{ artifactTitle }}</span>
+            <div style="margin-left:auto; display:flex; gap:6px;">
+              <button style="width:30px; height:30px; border-radius:8px; border:1px solid var(--border-2); background:transparent; display:flex; align-items:center; justify-content:center; cursor:pointer; color:var(--text-3);" style-hover="background:var(--surface-3);"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M9 9V5h10v10h-4M5 9h10v10H5V9Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"></path></svg></button>
+              <button onclick="{{ closeArtifact }}" style="width:30px; height:30px; border-radius:8px; border:1px solid var(--border-2); background:transparent; display:flex; align-items:center; justify-content:center; cursor:pointer; color:var(--text-3);" style-hover="background:var(--surface-3);"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"></path></svg></button>
+            </div>
+          </div>
+          <div style="display:flex; gap:2px; padding:0 10px; overflow-x:auto;">
+            <sc-for list="{{ artifactTabs }}" as="t" hint-placeholder-count="8">
+              <button onclick="{{ t.run }}" style="{{ t.style }}">{{ t.label }}</button>
+            </sc-for>
+          </div>
+        </div>
+
+        <div style="flex:1; overflow-y:auto; min-height:0;">
+
+          <!-- TERRAFORM ARTIFACT -->
+          <sc-if value="{{ isTfTab }}" hint-placeholder-val="{{ true }}">
+          <div style="padding:18px;">
+            <!-- PR-style header -->
+            <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:11px; margin-bottom:16px;">
+              <div style="border:1px solid var(--border); border-radius:11px; padding:13px 14px; background:var(--surface);"><div style="font-size:10.5px; color:var(--text-3); margin-bottom:6px;">Plan</div><div style="display:flex; gap:7px; font-family:'IBM Plex Mono',monospace; font-size:13px;"><span style="color:var(--green);">+14</span><span style="color:var(--amber);">~2</span><span style="color:var(--text-4);">-0</span></div></div>
+              <div style="border:1px solid var(--border); border-radius:11px; padding:13px 14px; background:var(--surface);"><div style="font-size:10.5px; color:var(--text-3); margin-bottom:6px;">Cost</div><div style="font-family:'IBM Plex Mono',monospace; font-size:13px; color:var(--green);">+$312/mo</div></div>
+              <div style="border:1px solid rgba(52,211,153,.2); border-radius:11px; padding:13px 14px; background:rgba(52,211,153,.05);"><div style="font-size:10.5px; color:var(--text-3); margin-bottom:6px;">Policy</div><div style="font-size:13px; color:var(--green); font-weight:600; display:flex; align-items:center; gap:5px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="m5 12 5 5 9-11" stroke="#34d399" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"></path></svg>PASS</div></div>
+            </div>
+
+            <!-- diff -->
+            <div style="border:1px solid var(--border-2); border-radius:12px; overflow:hidden; background:var(--code-bg); margin-bottom:16px;">
+              <div style="display:flex; align-items:center; gap:9px; padding:11px 14px; border-bottom:1px solid var(--border); background:var(--surface);">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="m3 8 9-5 9 5-9 5-9-5Z" stroke="#a5b4fc" stroke-width="1.5" stroke-linejoin="round"></path></svg>
+                <span style="font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--text); font-weight:500;">main.tf</span>
+                <span style="font-size:11px; color:var(--text-3);">module.eks_payments</span>
+              </div>
+              <pre style="margin:0; padding:15px 16px; font-family:'IBM Plex Mono',monospace; font-size:11.5px; line-height:1.75; color:var(--text-2); overflow-x:auto;"><span style="color:var(--code-comment);"># aws_eks_cluster.payments</span>
+<span style="color:var(--green);">+</span> resource <span style="color:var(--amber);">"aws_eks_cluster"</span> <span style="color:var(--accent-3);">"payments"</span> {
+    name                    = <span style="color:var(--green);">"payments-prod-use1"</span>
+    version                 = <span style="color:var(--green);">"1.29"</span>
+    role_arn                = <span style="color:var(--cyan);">aws_iam_role.eks.arn</span>
+    endpoint_private_access = <span style="color:var(--violet);">true</span>
+    encryption_config       = { resources = [<span style="color:var(--green);">"secrets"</span>] }
+}
+<span style="color:var(--code-comment);"># module.node_group["app"]</span>
+<span style="color:var(--green);">+</span> module <span style="color:var(--amber);">"node_group_app"</span> {
+    desired_size   = <span style="color:var(--amber);">3</span>
+    instance_types = [<span style="color:var(--green);">"m6i.xlarge"</span>]
+    subnet_ids     = <span style="color:var(--cyan);">local.private_subnet_ids</span>
+}
+<span style="color:var(--amber);">~</span> resource <span style="color:var(--amber);">"aws_security_group"</span> <span style="color:var(--accent-3);">"nodes"</span> {
+    <span style="color:var(--amber);">~</span> ingress = { control plane → nodes }
+}
+<span style="color:var(--code-comment);">Plan: 14 to add, 2 to change, 0 to destroy.</span></pre>
+            </div>
+
+            <!-- policy checks -->
+            <div style="border:1px solid var(--border); border-radius:12px; padding:14px 16px; background:var(--surface); margin-bottom:16px;">
+              <div style="font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-4); font-weight:600; margin-bottom:11px;">Policy checks · 6 of 6 passed</div>
+              <div style="display:flex; flex-direction:column; gap:8px;">
+                <div style="display:flex; align-items:center; gap:9px; font-size:12.5px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="m5 12 5 5 9-11" stroke="#34d399" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path></svg><span style="color:var(--text-2);">Secrets encryption enabled</span></div>
+                <div style="display:flex; align-items:center; gap:9px; font-size:12.5px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="m5 12 5 5 9-11" stroke="#34d399" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path></svg><span style="color:var(--text-2);">Private API endpoint only</span></div>
+                <div style="display:flex; align-items:center; gap:9px; font-size:12.5px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="m5 12 5 5 9-11" stroke="#34d399" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path></svg><span style="color:var(--text-2);">IRSA configured · no node IAM keys</span></div>
+                <div style="display:flex; align-items:center; gap:9px; font-size:12.5px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="m5 12 5 5 9-11" stroke="#34d399" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path></svg><span style="color:var(--text-2);">Approved module version (v20.8)</span></div>
+              </div>
+            </div>
+
+            <!-- approval actions -->
+            <sc-if value="{{ showApprovalPending }}" hint-placeholder-val="{{ true }}">
+            <div style="border:1px solid rgba(251,191,36,.25); border-radius:12px; background:rgba(251,191,36,.04); padding:15px 16px;">
+              <div style="display:flex; align-items:center; gap:9px; margin-bottom:13px;"><span style="font-size:13.5px; font-weight:600; color:var(--text);">Approval required</span><span style="margin-left:auto; font-size:11px; font-weight:600; color:var(--amber); padding:3px 9px; border-radius:99px; background:rgba(251,191,36,.1); border:1px solid rgba(251,191,36,.28);">RISK · MEDIUM</span></div>
+              <div style="display:flex; align-items:center; gap:9px;">
+                <button onclick="{{ approve }}" style="display:flex; align-items:center; gap:8px; padding:10px 17px; border-radius:9px; border:none; background:var(--green-strong); color:var(--on-green); font-size:13px; font-weight:600; cursor:pointer;" style-hover="filter:brightness(1.08);"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="m5 12 5 5 9-11" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"></path></svg>Approve &amp; apply</button>
+                <button onclick="{{ reject }}" style="padding:10px 16px; border-radius:9px; border:1px solid var(--border-3); background:transparent; color:var(--text-2); font-size:13px; font-weight:500; cursor:pointer;" style-hover="background:rgba(248,113,113,.1); border-color:rgba(248,113,113,.4); color:var(--red-2);">Reject</button>
+                <button style="padding:10px 16px; border-radius:9px; border:1px solid var(--border-3); background:transparent; color:var(--text-3); font-size:13px; font-weight:500; cursor:pointer;" style-hover="background:var(--surface-3);">Request changes</button>
+              </div>
+            </div>
+            </sc-if>
+            <sc-if value="{{ showApproved }}" hint-placeholder-val="{{ false }}">
+            <div style="border:1px solid rgba(52,211,153,.28); border-radius:12px; background:rgba(52,211,153,.05); padding:15px 16px; display:flex; align-items:center; gap:11px;">
+              <span style="width:26px;height:26px;border-radius:8px;background:rgba(52,211,153,.14);display:flex;align-items:center;justify-content:center;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="m5 12 5 5 9-11" stroke="#34d399" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path></svg></span>
+              <div><div style="font-size:13.5px; font-weight:600; color:var(--text);">Approved — applying</div><div style="font-size:11.5px; color:var(--text-3);">See live progress in the Workflow tab</div></div>
+            </div>
+            </sc-if>
+            <sc-if value="{{ showRejected }}" hint-placeholder-val="{{ false }}">
+            <div style="border:1px solid rgba(248,113,113,.28); border-radius:12px; background:rgba(248,113,113,.05); padding:15px 16px; display:flex; align-items:center; gap:11px;">
+              <span style="width:26px;height:26px;border-radius:8px;background:rgba(248,113,113,.14);display:flex;align-items:center;justify-content:center;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6 6 18" stroke="#f87171" stroke-width="2.2" stroke-linecap="round"></path></svg></span>
+              <div><div style="font-size:13.5px; font-weight:600; color:var(--text);">Rejected</div><div style="font-size:11.5px; color:var(--text-3);">No changes applied</div></div>
+            </div>
+            </sc-if>
+          </div>
+          </sc-if>
+
+          <!-- METRICS ARTIFACT -->
+          <sc-if value="{{ isMetricsTab }}" hint-placeholder-val="{{ false }}">
+          <div style="padding:18px;">
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:14px;"><span style="font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-4); font-weight:600;">Live metrics</span><span style="margin-left:auto; display:flex; align-items:center; gap:6px; font-size:10.5px; color:var(--text-4);"><span style="width:6px;height:6px;border-radius:99px;background:var(--green);"></span>Prometheus · 15s</span></div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:20px;">
+              <div style="border:1px solid var(--border); border-radius:11px; padding:12px 13px; background:var(--surface);"><div style="font-size:10.5px; color:var(--text-4); margin-bottom:5px;">p95 latency</div><div style="font-size:18px; font-weight:600; color:var(--text); font-family:'IBM Plex Mono',monospace;">214<span style="font-size:11px; color:var(--text-4);">ms</span></div><div style="font-size:10.5px; color:var(--amber); margin-top:3px;">+12% post-deploy</div></div>
+              <div style="border:1px solid var(--border); border-radius:11px; padding:12px 13px; background:var(--surface);"><div style="font-size:10.5px; color:var(--text-4); margin-bottom:5px;">Throughput</div><div style="font-size:18px; font-weight:600; color:var(--text); font-family:'IBM Plex Mono',monospace;">4.8k<span style="font-size:11px; color:var(--text-4);">rps</span></div><div style="font-size:10.5px; color:var(--green); margin-top:3px;">stable</div></div>
+              <div style="border:1px solid var(--border); border-radius:11px; padding:12px 13px; background:var(--surface);"><div style="font-size:10.5px; color:var(--text-4); margin-bottom:5px;">Error rate</div><div style="font-size:18px; font-weight:600; color:var(--text); font-family:'IBM Plex Mono',monospace;">0.04<span style="font-size:11px; color:var(--text-4);">%</span></div><div style="font-size:10.5px; color:var(--green); margin-top:3px;">within SLO</div></div>
+              <div style="border:1px solid var(--border); border-radius:11px; padding:12px 13px; background:var(--surface);"><div style="font-size:10.5px; color:var(--text-4); margin-bottom:5px;">CPU saturation</div><div style="font-size:18px; font-weight:600; color:var(--text); font-family:'IBM Plex Mono',monospace;">61<span style="font-size:11px; color:var(--text-4);">%</span></div><div style="font-size:10.5px; color:var(--text-4); margin-top:3px;">3 nodes</div></div>
+            </div>
+            <div style="font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-4); font-weight:600; margin-bottom:12px;">Projected cost</div>
+            <div style="display:flex; align-items:flex-end; gap:12px; margin-bottom:20px;">
+              <div><div style="font-size:11px; color:var(--text-3); margin-bottom:5px;">Estimated monthly delta</div><div style="font-size:32px; font-weight:600; color:var(--green); font-family:'IBM Plex Mono',monospace; letter-spacing:-.02em;">+$312</div></div>
+              <div style="font-size:12px; color:var(--text-4); padding-bottom:7px;">within $500/mo guardrail</div>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:14px; margin-bottom:20px;">
+              <div><div style="display:flex; justify-content:space-between; font-size:12.5px; margin-bottom:6px;"><span style="color:var(--text-2);">3× m6i.xlarge nodes</span><span style="font-family:'IBM Plex Mono',monospace; color:var(--text);">$211</span></div><div style="height:7px; border-radius:4px; background:var(--surface-3);"><div style="height:100%; width:68%; border-radius:4px; background:var(--accent-2);"></div></div></div>
+              <div><div style="display:flex; justify-content:space-between; font-size:12.5px; margin-bottom:6px;"><span style="color:var(--text-2);">EKS control plane</span><span style="font-family:'IBM Plex Mono',monospace; color:var(--text);">$73</span></div><div style="height:7px; border-radius:4px; background:var(--surface-3);"><div style="height:100%; width:23%; border-radius:4px; background:var(--cyan);"></div></div></div>
+              <div><div style="display:flex; justify-content:space-between; font-size:12.5px; margin-bottom:6px;"><span style="color:var(--text-2);">NAT + data transfer</span><span style="font-family:'IBM Plex Mono',monospace; color:var(--text);">$28</span></div><div style="height:7px; border-radius:4px; background:var(--surface-3);"><div style="height:100%; width:9%; border-radius:4px; background:var(--green);"></div></div></div>
+            </div>
+            <div style="border:1px solid var(--border); border-radius:12px; padding:14px 16px; background:var(--surface); font-size:13px; color:var(--text-3); line-height:1.7;">AegisOps suggests <span style="color:var(--text-2);">3× m6i.large</span> instead of xlarge for the initial rollout — that would lower the delta to <span style="color:var(--green);">+$168/mo</span> with headroom to scale. Ask to re-plan with this change.</div>
+          </div>
+          </sc-if>
+
+          <!-- TRACES ARTIFACT -->
+          <sc-if value="{{ isTracesTab }}" hint-placeholder-val="{{ false }}">
+          <div style="padding:18px;">
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;"><span style="font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-4); font-weight:600;">Langfuse trace</span><span style="margin-left:auto; font-family:'IBM Plex Mono',monospace; font-size:10.5px; color:var(--text-4);">trace_8f2a · ctx #2291</span></div>
+            <div style="font-size:11.5px; color:var(--text-4); margin-bottom:16px;">Spans captured in execution order · linked to context graph</div>
+            <div style="display:flex; flex-direction:column;">
+              <sc-for list="{{ traceSpans }}" as="sp" hint-placeholder-count="7">
+                <div style="display:flex; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid var(--border);">
+                  <span style="width:7px; height:7px; border-radius:99px; background:{{ sp.dot }}; flex-shrink:0; margin-left:{{ sp.indent }};"></span>
+                  <span style="font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--text-2); flex:1;">{{ sp.name }}</span>
+                  <sc-if value="{{ sp.tokens }}"><span style="font-family:'IBM Plex Mono',monospace; font-size:10px; color:var(--accent-3); padding:2px 6px; border-radius:5px; background:rgba(99,102,241,.1);">{{ sp.tokens }}</span></sc-if>
+                  <span style="font-family:'IBM Plex Mono',monospace; font-size:10.5px; color:var(--text-4); min-width:42px; text-align:right;">{{ sp.dur }}</span>
+                </div>
+              </sc-for>
+            </div>
+            <div style="display:flex; gap:18px; margin-top:16px; padding:13px 15px; border:1px solid var(--border); border-radius:11px; background:var(--surface); font-size:11.5px;">
+              <span style="color:var(--text-4);">Total <span style="color:var(--text); font-family:'IBM Plex Mono',monospace;">4.1s</span></span>
+              <span style="color:var(--text-4);">Tokens <span style="color:var(--text); font-family:'IBM Plex Mono',monospace;">11.4k</span></span>
+              <span style="color:var(--text-4);">Cost <span style="color:var(--text); font-family:'IBM Plex Mono',monospace;">$0.038</span></span>
+            </div>
+          </div>
+          </sc-if>
+
+          <!-- TIMELINE ARTIFACT -->
+          <sc-if value="{{ isTimelineTab }}" hint-placeholder-val="{{ true }}">
+          <div style="padding:18px;">
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:16px;"><span style="font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-4); font-weight:600;">LangGraph execution</span><span style="margin-left:auto; font-size:11px; font-family:'IBM Plex Mono',monospace; color:var(--text-3);">{{ workflowElapsed }}</span></div>
+            <div style="padding-left:4px;">
+              <sc-for list="{{ workflowNodes }}" as="n" hint-placeholder-count="7">
+                <div style="display:flex; gap:14px; position:relative; padding-bottom:18px;">
+                  <div style="display:flex; flex-direction:column; align-items:center; flex-shrink:0;">
+                    <span style="width:24px; height:24px; border-radius:99px; background:{{ n.bg }}; border:1.5px solid {{ n.ring }}; display:flex; align-items:center; justify-content:center; z-index:1;">{{ n.icon }}</span>
+                    <sc-if value="{{ n.hasLine }}"><span style="width:1.5px; flex:1; background:{{ n.lineColor }}; margin-top:2px; min-height:16px;"></span></sc-if>
+                  </div>
+                  <div style="padding-top:2px; flex:1;"><div style="font-size:13.5px; color:{{ n.titleColor }}; font-weight:500;">{{ n.title }}</div><div style="font-size:12px; color:var(--text-4); margin-top:2px;">{{ n.detail }}</div></div>
+                  <span style="font-family:'IBM Plex Mono',monospace; font-size:10.5px; color:var(--text-5); padding-top:4px;">{{ n.time }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+          </sc-if>
+
+          <!-- REFERENCES ARTIFACT -->
+          <sc-if value="{{ isReferencesTab }}" hint-placeholder-val="{{ false }}">
+          <div style="padding:18px;">
+            <div style="font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-4); font-weight:600; margin-bottom:13px;">Discovered resources</div>
+            <div style="display:flex; flex-direction:column; gap:9px; margin-bottom:20px;">
+              <div style="display:flex; align-items:center; gap:12px; padding:13px 14px; border-radius:12px; border:1px solid var(--border); background:var(--surface);"><span style="width:32px;height:32px;border-radius:9px;background:rgba(34,211,238,.1);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="4" y="5" width="16" height="14" rx="2" stroke="#22d3ee" stroke-width="1.6"></rect><path d="M4 10h16" stroke="#22d3ee" stroke-width="1.6"></path></svg></span><div style="flex:1;"><div style="font-size:13px; color:var(--text); font-weight:500; font-family:'IBM Plex Mono',monospace;">vpc-0a91c4f2</div><div style="font-size:11px; color:var(--text-4);">prod VPC · 10.40.0.0/16 · 3 AZ</div></div><span style="font-family:'IBM Plex Mono',monospace; font-size:10px; color:var(--green);">healthy</span></div>
+              <div style="display:flex; align-items:center; gap:12px; padding:13px 14px; border-radius:12px; border:1px solid var(--border); background:var(--surface);"><span style="width:32px;height:32px;border-radius:9px;background:rgba(129,140,248,.1);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3.5" stroke="#818cf8" stroke-width="1.6"></circle><path d="M12 5v3M12 16v3M5 12h3M16 12h3" stroke="#818cf8" stroke-width="1.6" stroke-linecap="round"></path></svg></span><div style="flex:1;"><div style="font-size:13px; color:var(--text); font-weight:500;">6 private subnets</div><div style="font-size:11px; color:var(--text-4);">2 per AZ · NAT egress</div></div><span style="font-family:'IBM Plex Mono',monospace; font-size:10px; color:var(--green);">ready</span></div>
+              <div style="display:flex; align-items:center; gap:12px; padding:13px 14px; border-radius:12px; border:1px solid var(--border); background:var(--surface);"><span style="width:32px;height:32px;border-radius:9px;background:rgba(168,85,247,.1);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 3 5 6v5c0 4 3 7 7 8 4-1 7-4 7-8V6l-7-3Z" stroke="#c084fc" stroke-width="1.5" stroke-linejoin="round"></path></svg></span><div style="flex:1;"><div style="font-size:13px; color:var(--text); font-weight:500; font-family:'IBM Plex Mono',monospace;">kms-payments-prod</div><div style="font-size:11px; color:var(--text-4);">secrets encryption key</div></div><span style="font-family:'IBM Plex Mono',monospace; font-size:10px; color:var(--green);">active</span></div>
+            </div>
+            <div style="font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-4); font-weight:600; margin-bottom:13px;">Knowledge cited</div>
+            <a style="display:flex; gap:11px; padding:13px; border-radius:11px; border:1px solid var(--border); background:var(--surface); margin-bottom:9px; cursor:pointer; text-decoration:none;" style-hover="border-color:rgba(129,140,248,.3);"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" style="flex-shrink:0; margin-top:1px;"><path d="M6 4h8l4 4v12H6V4Z" stroke="#a5b4fc" stroke-width="1.5" stroke-linejoin="round"></path><path d="M14 4v4h4" stroke="#a5b4fc" stroke-width="1.5" stroke-linejoin="round"></path></svg><div><div style="font-size:12.5px; color:var(--text-2); font-weight:500;">EKS Production Hardening</div><div style="font-size:11px; color:var(--text-4); margin-top:2px;">Runbook · 94% relevance</div></div></a>
+            <a style="display:flex; gap:11px; padding:13px; border-radius:11px; border:1px solid var(--border); background:var(--surface); cursor:pointer; text-decoration:none;" style-hover="border-color:rgba(129,140,248,.3);"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" style="flex-shrink:0; margin-top:1px;"><path d="M6 4h8l4 4v12H6V4Z" stroke="#22d3ee" stroke-width="1.5" stroke-linejoin="round"></path><path d="M14 4v4h4" stroke="#22d3ee" stroke-width="1.5" stroke-linejoin="round"></path></svg><div><div style="font-size:12.5px; color:var(--text-2); font-weight:500;">Payments Platform Architecture v3</div><div style="font-size:11px; color:var(--text-4); margin-top:2px;">Design doc · 88% relevance</div></div></a>
+          </div>
+          </sc-if>
+
+          <!-- REASONING ARTIFACT -->
+          <sc-if value="{{ isReasoningTab }}" hint-placeholder-val="{{ false }}">
+          <div style="padding:18px;">
+            <div style="font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-4); font-weight:600; margin-bottom:14px;">Agent reasoning &amp; decisions</div>
+            <div style="display:flex; flex-direction:column; gap:10px;">
+              <sc-for list="{{ reasoningCards }}" as="r" hint-placeholder-count="5">
+                <div style="border:1px solid var(--border); border-radius:12px; padding:13px 15px 13px 14px; background:var(--surface); border-left:2px solid var(--accent-2);">
+                  <div style="display:flex; align-items:center; gap:8px; margin-bottom:5px;"><span style="font-size:12.5px; font-weight:600; color:var(--text);">{{ r.title }}</span><sc-if value="{{ r.conf }}"><span style="margin-left:auto; font-family:'IBM Plex Mono',monospace; font-size:10px; color:var(--green); padding:2px 7px; border-radius:5px; background:rgba(52,211,153,.1);">{{ r.conf }}</span></sc-if></div>
+                  <div style="font-size:12.5px; color:var(--text-3); line-height:1.6;">{{ r.body }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+          </sc-if>
+
+          <!-- LOGS ARTIFACT -->
+          <sc-if value="{{ isLogsTab }}" hint-placeholder-val="{{ false }}">
+          <div style="padding:18px;">
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:14px;"><span style="font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-4); font-weight:600;">Execution logs</span><span style="margin-left:auto; display:flex; align-items:center; gap:6px; font-size:10.5px; color:var(--text-4);"><span style="width:6px;height:6px;border-radius:99px;background:var(--green); animation:ao-pulse 1.4s infinite;"></span>streaming · SSE</span></div>
+            <div style="border:1px solid var(--border); border-radius:12px; background:var(--code-bg); padding:14px 15px; font-family:'IBM Plex Mono',monospace; font-size:11.5px; line-height:1.85; overflow-x:auto;">
+              <sc-for list="{{ logLines }}" as="l" hint-placeholder-count="9">
+                <div style="display:flex; gap:10px; white-space:nowrap;"><span style="color:var(--text-5);">{{ l.ts }}</span><span style="color:{{ l.lvlColor }}; min-width:42px;">{{ l.lvl }}</span><span style="color:var(--text-2);">{{ l.msg }}</span></div>
+              </sc-for>
+              <div style="display:flex; gap:10px;"><span style="color:var(--text-5);">14:23:48</span><span style="color:var(--accent-3); min-width:42px;">····</span><span style="display:inline-block; width:7px; height:13px; background:var(--accent-2); animation:ao-blink 1s steps(1) infinite;"></span></div>
+            </div>
+          </div>
+          </sc-if>
+
+          <!-- APPROVALS ARTIFACT -->
+          <sc-if value="{{ isApprovalsTab }}" hint-placeholder-val="{{ false }}">
+          <div style="padding:18px;">
+            <div style="font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-4); font-weight:600; margin-bottom:14px;">Approval gate · production change</div>
+            <div style="border:1px solid var(--border); border-radius:13px; background:var(--surface); overflow:hidden;">
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:1px; background:var(--border);">
+                <div style="background:var(--bg-elev); padding:13px 15px;"><div style="font-size:10.5px; color:var(--text-4); margin-bottom:4px;">Risk</div><div style="font-size:13px; color:var(--amber); font-weight:600;">Medium</div></div>
+                <div style="background:var(--bg-elev); padding:13px 15px;"><div style="font-size:10.5px; color:var(--text-4); margin-bottom:4px;">Cost impact</div><div style="font-size:13px; color:var(--text);">+$312/mo</div></div>
+                <div style="background:var(--bg-elev); padding:13px 15px;"><div style="font-size:10.5px; color:var(--text-4); margin-bottom:4px;">Affected</div><div style="font-size:13px; color:var(--text);">payments · Production</div></div>
+                <div style="background:var(--bg-elev); padding:13px 15px;"><div style="font-size:10.5px; color:var(--text-4); margin-bottom:4px;">ServiceNow</div><div style="font-size:13px; color:var(--accent-3); font-family:'IBM Plex Mono',monospace;">CHG0040021</div></div>
+              </div>
+            </div>
+            <div style="margin-top:14px; border:1px solid var(--border); border-radius:12px; padding:14px 16px; background:var(--surface);">
+              <div style="font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-4); font-weight:600; margin-bottom:11px;">Policy · 6 of 6 passed</div>
+              <div style="display:flex; flex-direction:column; gap:8px;">
+                <div style="display:flex; align-items:center; gap:9px; font-size:12.5px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="m5 12 5 5 9-11" stroke="var(--green)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path></svg><span style="color:var(--text-2);">Secrets encryption · private endpoint · IRSA</span></div>
+                <div style="display:flex; align-items:center; gap:9px; font-size:12.5px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="m5 12 5 5 9-11" stroke="var(--green)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path></svg><span style="color:var(--text-2);">Approved module · cost within guardrail</span></div>
+              </div>
+            </div>
+            <sc-if value="{{ showApprovalPending }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex; align-items:center; gap:9px; margin-top:14px;">
+              <button onclick="{{ approve }}" style="display:flex; align-items:center; gap:8px; padding:10px 17px; border-radius:9px; border:none; background:var(--green-strong); color:var(--on-green); font-size:13px; font-weight:600; cursor:pointer;" style-hover="filter:brightness(1.08);"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="m5 12 5 5 9-11" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"></path></svg>Approve &amp; apply</button>
+              <button onclick="{{ reject }}" style="padding:10px 16px; border-radius:9px; border:1px solid var(--border-2); background:transparent; color:var(--text-2); font-size:13px; font-weight:500; cursor:pointer;" style-hover="border-color:rgba(248,113,113,.4); color:var(--red-2);">Reject</button>
+            </div>
+            </sc-if>
+            <sc-if value="{{ showApproved }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex; align-items:center; gap:11px; margin-top:14px; border:1px solid rgba(52,211,153,.28); border-radius:11px; background:rgba(52,211,153,.05); padding:13px 15px;"><span style="width:24px;height:24px;border-radius:7px;background:rgba(52,211,153,.14);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="m5 12 5 5 9-11" stroke="var(--green)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path></svg></span><div style="font-size:12.5px; color:var(--text-2);">Approved by <span style="color:var(--text); font-weight:500;">Maya Okafor</span> · applying now</div></div>
+            </sc-if>
+            <sc-if value="{{ showRejected }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex; align-items:center; gap:11px; margin-top:14px; border:1px solid rgba(248,113,113,.28); border-radius:11px; background:rgba(248,113,113,.05); padding:13px 15px;"><span style="width:24px;height:24px;border-radius:7px;background:rgba(248,113,113,.14);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6 6 18" stroke="var(--red)" stroke-width="2.2" stroke-linecap="round"></path></svg></span><div style="font-size:12.5px; color:var(--text-2);">Rejected · no changes applied</div></div>
+            </sc-if>
+          </div>
+          </sc-if>
+
+        </div>
+      </aside>
+      </sc-if>
+
+    </div>
+  </main>
+
+  <!-- ░░░░ COMMAND PALETTE ░░░░ -->
+  <sc-if value="{{ cmdkOpen }}" hint-placeholder-val="{{ false }}">
+  <div onclick="{{ closeCmdk }}" style="position:absolute; inset:0; z-index:50; background:rgba(5,5,7,.6); backdrop-filter:blur(3px); display:flex; align-items:flex-start; justify-content:center; padding-top:13vh; animation:ao-fadein .15s ease;">
+    <div onclick="{{ stop }}" style="width:560px; max-width:90%; background:var(--bg-pop); border:1px solid var(--border-2); border-radius:15px; box-shadow:0 24px 70px rgba(0,0,0,.6); overflow:hidden; animation:ao-fadeup .18s ease;">
+      <div style="display:flex; align-items:center; gap:11px; padding:16px 18px; border-bottom:1px solid var(--border);">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="#6b6f7a" stroke-width="2"></circle><path d="m20 20-3-3" stroke="#6b6f7a" stroke-width="2" stroke-linecap="round"></path></svg>
+        <input autofocus="" value="{{ cmdkQuery }}" oninput="{{ onCmdkInput }}" placeholder="Search resources, run actions, jump to a page…" style="flex:1; background:transparent; border:none; outline:none; color:var(--text); font-size:15px;">
+        <span style="font-family:'IBM Plex Mono',monospace; font-size:10px; color:var(--text-4); border:1px solid var(--border-2); border-radius:5px; padding:2px 6px;">ESC</span>
+      </div>
+      <div style="max-height:340px; overflow-y:auto; padding:8px;">
+        <div style="font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-5); font-weight:600; padding:8px 10px 6px;">Actions</div>
+        <sc-for list="{{ cmdkActions }}" as="c" hint-placeholder-count="4">
+          <button onclick="{{ c.run }}" style="display:flex; align-items:center; gap:12px; width:100%; padding:10px 11px; border-radius:9px; border:none; background:transparent; cursor:pointer; text-align:left;" style-hover="background:rgba(129,140,248,.12);">
+            <span style="width:28px; height:28px; border-radius:8px; background:var(--surface-3); display:flex; align-items:center; justify-content:center; flex-shrink:0; color:var(--accent-3);">{{ c.icon }}</span>
+            <span style="flex:1; font-size:13.5px; color:var(--text);">{{ c.label }}</span>
+            <span style="font-size:11px; color:var(--text-4);">{{ c.hint }}</span>
+          </button>
+        </sc-for>
+        <div style="font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-5); font-weight:600; padding:12px 10px 6px;">Navigate</div>
+        <sc-for list="{{ cmdkNav }}" as="c" hint-placeholder-count="4">
+          <button onclick="{{ c.run }}" style="display:flex; align-items:center; gap:12px; width:100%; padding:10px 11px; border-radius:9px; border:none; background:transparent; cursor:pointer; text-align:left;" style-hover="background:rgba(129,140,248,.12);">
+            <span style="width:28px; height:28px; border-radius:8px; background:var(--surface-3); display:flex; align-items:center; justify-content:center; flex-shrink:0; color:var(--text-3);">{{ c.icon }}</span>
+            <span style="flex:1; font-size:13.5px; color:var(--text);">{{ c.label }}</span>
+          </button>
+        </sc-for>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+  </div>
+  </sc-if>
+
+</div>

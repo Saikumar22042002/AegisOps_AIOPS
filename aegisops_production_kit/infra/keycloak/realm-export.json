@@ -1,0 +1,109 @@
+{
+  "realm": "aegisops",
+  "enabled": true,
+  "displayName": "AegisOps",
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "accessTokenLifespan": 1800,
+  "ssoSessionIdleTimeout": 3600,
+  "ssoSessionMaxLifespan": 36000,
+  "roles": {
+    "realm": [
+      { "name": "platform-admin", "description": "Full control incl. approve/reject/apply" },
+      { "name": "org-admin", "description": "Org-wide control incl. approvals" },
+      { "name": "cloud-architect", "description": "Design + plan + approve/apply" },
+      { "name": "devops-engineer", "description": "Deploy + run; initiate workflows; cannot approve prod" },
+      { "name": "sre", "description": "Incidents + reliability; initiate workflows; cannot approve prod" },
+      { "name": "developer", "description": "Initiate requests; cannot approve prod" },
+      { "name": "auditor", "description": "Read + audit only; cannot approve/execute" },
+      { "name": "read-only", "description": "View only; cannot approve/execute" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "aegisops-frontend",
+      "name": "AegisOps Frontend",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "rootUrl": "http://localhost:3000",
+      "baseUrl": "http://localhost:3000",
+      "redirectUris": ["http://localhost:3000/*"],
+      "webOrigins": ["http://localhost:3000", "+"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:3000/*"
+      },
+      "fullScopeAllowed": true
+    },
+    {
+      "clientId": "aegisops-backend",
+      "name": "AegisOps Backend",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "aegisops-backend-secret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": true,
+      "rootUrl": "http://localhost:8000",
+      "baseUrl": "http://localhost:8000",
+      "redirectUris": ["http://localhost:8000/*", "http://localhost:3000/*"],
+      "webOrigins": ["http://localhost:8000", "http://localhost:3000", "+"],
+      "attributes": {
+        "post.logout.redirect.uris": "http://localhost:3000/*+http://localhost:8000/*"
+      },
+      "fullScopeAllowed": true,
+      "protocolMappers": [
+        {
+          "name": "audience-backend",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "aegisops-backend",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "maya.okafor",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "maya.okafor@northwind.com",
+      "firstName": "Maya",
+      "lastName": "Okafor",
+      "credentials": [{ "type": "password", "value": "aegisops", "temporary": false }],
+      "realmRoles": ["platform-admin"]
+    },
+    {
+      "username": "dev.engineer",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "dev.engineer@northwind.com",
+      "firstName": "Dev",
+      "lastName": "Engineer",
+      "credentials": [{ "type": "password", "value": "aegisops", "temporary": false }],
+      "realmRoles": ["devops-engineer"]
+    },
+    {
+      "username": "audit.viewer",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "audit.viewer@northwind.com",
+      "firstName": "Audit",
+      "lastName": "Viewer",
+      "credentials": [{ "type": "password", "value": "aegisops", "temporary": false }],
+      "realmRoles": ["read-only"]
+    }
+  ]
+}

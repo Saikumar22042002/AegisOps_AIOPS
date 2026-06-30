@@ -1,0 +1,93 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ════════════════════════════════════════════════════════════════════════
+   Design tokens — copied VERBATIM from design-reference/DESIGN_REFERENCE.tokens.css.
+   Do not edit colors here; the source HTML is the visual source of truth.
+   ════════════════════════════════════════════════════════════════════════ */
+
+* { margin:0; padding:0; box-sizing:border-box; }
+/* ░░ DESIGN TOKENS — Dark (default / :root) ░░ */
+:root, [data-theme="dark"] {
+  color-scheme: dark;
+  --bg:#0a0a0c; --bg-elev:#0c0c0f; --bg-pop:#131319; --code-bg:#0a0a0d;
+  --surface:rgba(255,255,255,.02); --surface-2:rgba(255,255,255,.03); --surface-3:rgba(255,255,255,.05);
+  --border:rgba(255,255,255,.07); --border-2:rgba(255,255,255,.085); --border-3:rgba(255,255,255,.14);
+  --text:#f4f5f7; --text-navactive:#e7e8f4; --text-2:#c4c7cf; --text-3:#9498a2; --text-4:#6b6f7a; --text-5:#52565f; --text-dim:#3a3e47;
+  --code-comment:#5a5e68;
+  --accent:#6366f1; --accent-strong:#4f46e5; --accent-2:#818cf8; --accent-3:#a5b4fc; --accent-fg:#dadcff; --accent-border:rgba(129,140,248,.3);
+  --green:#34d399; --green-strong:#10b981; --on-green:#04140d;
+  --amber:#fbbf24; --red:#f87171; --red-2:#fca5a5; --cyan:#22d3ee; --violet:#c084fc;
+  --av-user-bg:#3a2f52; --av-user-fg:#d6c8f0; --av-org-bg:#27314a; --av-org-fg:#aebbd6;
+}
+/* ░░ DESIGN TOKENS — Light ░░ */
+[data-theme="light"] {
+  color-scheme: light;
+  --bg:#f5f6f8; --bg-elev:#ffffff; --bg-pop:#ffffff; --code-bg:#f3f5f8;
+  --surface:rgba(15,23,42,.022); --surface-2:rgba(15,23,42,.04); --surface-3:rgba(15,23,42,.06);
+  --border:rgba(15,23,42,.10); --border-2:rgba(15,23,42,.14); --border-3:rgba(15,23,42,.20);
+  --text:#0f172a; --text-navactive:#312e81; --text-2:#334155; --text-3:#5b6573; --text-4:#8a93a3; --text-5:#aab2bf; --text-dim:#cbd2dc;
+  --code-comment:#94a3b8;
+  --accent:#4f46e5; --accent-strong:#4338ca; --accent-2:#6366f1; --accent-3:#4f46e5; --accent-fg:#4338ca; --accent-border:rgba(99,102,241,.3);
+  --green:#059669; --green-strong:#047857; --on-green:#ffffff;
+  --amber:#b45309; --red:#dc2626; --red-2:#b91c1c; --cyan:#0e7490; --violet:#7c3aed;
+  --av-user-bg:#ede9fe; --av-user-fg:#6d28d9; --av-org-bg:#dbeafe; --av-org-fg:#1d4ed8;
+}
+html, body { height:100%; background:var(--bg); }
+/* ░░ Responsive — mobile (inline styles can't express media queries) ░░ */
+#ao-hamburger { display:none; }
+@media (max-width: 860px) {
+  #ao-hamburger { display:flex !important; }
+  #ao-sidebar { position:fixed !important; left:0; top:0; z-index:80 !important; transform:translateX(-100%); transition:transform .25s ease; box-shadow:0 24px 60px rgba(0,0,0,.5); }
+  #ao-sidebar[data-open="true"] { transform:translateX(0); }
+  #ao-panel { position:fixed !important; right:0; top:0; height:100% !important; width:90% !important; max-width:440px !important; z-index:75 !important; }
+  #ao-topnav { padding:0 12px !important; gap:8px !important; overflow-x:auto !important; }
+  .ao-cloud-sel { display:none !important; }
+  .ao-chat-pad { padding:24px 16px 20px !important; }
+  .ao-composer-pad { padding:0 16px 18px !important; }
+  .ao-module-pad { padding:26px 18px !important; }
+  .ao-stat-grid { grid-template-columns:repeat(2,1fr) !important; }
+  .ao-summary-grid { grid-template-columns:repeat(2,1fr) !important; }
+}
+@media (max-width: 460px) {
+  .ao-stat-grid, .ao-summary-grid { grid-template-columns:1fr !important; }
+}
+body { font-family:'IBM Plex Sans', system-ui, sans-serif; -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
+::-webkit-scrollbar { width:9px; height:9px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:var(--border-2); border-radius:99px; border:2px solid transparent; background-clip:padding-box; }
+::-webkit-scrollbar-thumb:hover { background:var(--border-3); background-clip:padding-box; }
+textarea { font-family:inherit; resize:none; }
+@keyframes ao-blink { 0%,49%{opacity:1} 50%,100%{opacity:0} }
+@keyframes ao-spin { to { transform:rotate(360deg) } }
+@keyframes ao-pulse { 0%,100%{ opacity:1 } 50%{ opacity:.4 } }
+@keyframes ao-ring { 0%{ box-shadow:0 0 0 0 rgba(129,140,248,.4) } 70%{ box-shadow:0 0 0 6px rgba(129,140,248,0) } 100%{ box-shadow:0 0 0 0 rgba(129,140,248,0) } }
+@keyframes ao-fadeup { from { opacity:0; transform:translateY(8px) } to { opacity:1; transform:none } }
+@keyframes ao-fadein { from { opacity:0 } to { opacity:1 } }
+@keyframes ao-stepin { from { opacity:0; transform:translateX(-6px) } to { opacity:1; transform:none } }
+@keyframes ao-bar { 0%{ transform:scaleY(.35) } 50%{ transform:scaleY(1) } 100%{ transform:scaleY(.35) } }
+@keyframes ao-slidein { from { opacity:0; transform:translateX(20px) } to { opacity:1; transform:none } }
+
+/* ░░ Hover utilities — components use verbatim inline styles for base appearance; these
+   express the design's `style-hover` states. !important is required to win over inline. ░░ */
+.ao-h-s2:hover { background:var(--surface-2) !important; }
+.ao-h-s3:hover { background:var(--surface-3) !important; }
+.ao-h-b3:hover { border-color:var(--border-3) !important; }
+.ao-h-cmd:hover { background:rgba(129,140,248,.12) !important; }
+.ao-h-chip:hover { border-color:rgba(129,140,248,.4) !important; color:var(--text-2) !important; }
+.ao-h-newchat:hover { background:rgba(99,102,241,.18) !important; border-color:rgba(129,140,248,.45) !important; }
+.ao-h-tfcard:hover { border-color:rgba(129,140,248,.5) !important; background:rgba(99,102,241,.07) !important; }
+.ao-h-costcard:hover { border-color:rgba(52,211,153,.4) !important; background:rgba(52,211,153,.05) !important; }
+.ao-h-signout:hover { background:rgba(248,113,113,.08) !important; }
+.ao-h-reject:hover { background:rgba(248,113,113,.1) !important; border-color:rgba(248,113,113,.4) !important; color:var(--red-2) !important; }
+.ao-h-amber:hover { background:rgba(251,191,36,.18) !important; }
+.ao-h-bright:hover { filter:brightness(1.08); }
+.ao-h-ref:hover { border-color:rgba(129,140,248,.3) !important; }
+.ao-h-modulecta:hover { border-color:rgba(129,140,248,.5) !important; }
+.ao-h-row:hover { background:var(--surface) !important; }
+.ao-h-int:hover { border-color:var(--border-2) !important; }
+
+/* Conversation history row: reveal rename/delete actions on hover. */
+.ao-session-actions { opacity: 0; transition: opacity .12s ease; }
+.ao-session-row:hover .ao-session-actions { opacity: 1; }

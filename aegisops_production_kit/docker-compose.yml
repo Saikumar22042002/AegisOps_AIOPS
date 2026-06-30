@@ -1,0 +1,236 @@
+# ════════════════════════════════════════════════════════════════════════
+#  AegisOps — local production stack (all services REAL).
+#
+#  Default `docker compose up -d` starts ONLY the backing services. The app
+#  (api + frontend) runs on the host via `make dev` for fast iteration.
+#  To run the app containerized too:  docker compose --profile full up -d
+# ════════════════════════════════════════════════════════════════════════
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  # ── PostgreSQL + pgvector — app data + RAG embeddings (+ a `langfuse` DB) ──
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-aegisops}
+      POSTGRES_USER: ${POSTGRES_USER:-aegisops}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aegisops}
+    ports: ["${POSTGRES_PORT:-5432}:5432"]
+    volumes:
+      - "pgdata:/var/lib/postgresql/data"
+      # Init scripts run only on first boot (empty volume): create the langfuse DB + extensions.
+      - "./infra/postgres/init:/docker-entrypoint-initdb.d:ro"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aegisops} -d ${POSTGRES_DB:-aegisops}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # ── Redis — cache, queues, ephemeral checkpoints, idempotency keys ──
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    logging: *default-logging
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    ports: ["6379:6379"]
+    volumes: ["redisdata:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # ── Neo4j — context graph ──
+  neo4j:
+    image: neo4j:5.26
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-aegisops-neo4j}
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 1G
+    ports: ["7474:7474", "7687:7687"]
+    volumes:
+      - "neo4jdata:/data"
+      - "neo4jlogs:/logs"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  # ── Keycloak — OIDC auth + RBAC (realm `aegisops` auto-imported) ──
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0
+    restart: unless-stopped
+    logging: *default-logging
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+      KC_HTTP_ENABLED: "true"
+    ports: ["8080:8080", "9000:9000"]
+    volumes:
+      - "./infra/keycloak:/opt/keycloak/data/import:ro"
+    healthcheck:
+      # KC 25 exposes health on the management port (9000). /bin/sh is bash on the UBI image, so /dev/tcp works.
+      test:
+        - "CMD-SHELL"
+        - "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '\"status\": \"UP\"'"
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+
+  # ── Langfuse v2 — LLM observability (single shared Postgres) ──
+  langfuse:
+    image: langfuse/langfuse:2
+    restart: unless-stopped
+    logging: *default-logging
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-aegisops}:${POSTGRES_PASSWORD:-aegisops}@postgres:5432/langfuse
+      NEXTAUTH_SECRET: ${SECRET_KEY:-change-me-to-a-long-random-string}
+      NEXTAUTH_URL: ${LANGFUSE_HOST:-http://localhost:3001}
+      SALT: ${SECRET_KEY:-change-me-to-a-long-random-string}
+      TELEMETRY_ENABLED: "false"
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
+      # Auto-provision an org/project/user + API keys on first boot so the backend connects with no manual UI step.
+      LANGFUSE_INIT_ORG_ID: aegisops
+      LANGFUSE_INIT_ORG_NAME: AegisOps
+      LANGFUSE_INIT_PROJECT_ID: aegisops
+      LANGFUSE_INIT_PROJECT_NAME: AegisOps
+      # Fixed init keys decoupled from the app's LANGFUSE_PUBLIC_KEY so INIT never reassigns the
+      # app's key to this bootstrap project on restart (the app key can target any project).
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: pk-lf-aegisops-local
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: sk-lf-aegisops-local
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:-admin@aegisops.local}
+      LANGFUSE_INIT_USER_NAME: AegisOps Admin
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-aegisops-admin}
+    ports: ["3001:3000"]
+    healthcheck:
+      # Langfuse's Next.js server binds to the container hostname (not loopback), so probe $HOSTNAME.
+      test: ["CMD-SHELL", "wget -qO- http://$${HOSTNAME}:3000/api/public/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+
+  # ── OpenTelemetry Collector — traces + metrics ──
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.115.1
+    restart: unless-stopped
+    logging: *default-logging
+    command: ["--config=/etc/otel/otel-collector.yaml"]
+    volumes:
+      - "./infra/otel/otel-collector.yaml:/etc/otel/otel-collector.yaml:ro"
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8889:8889"   # Prometheus exporter (collector metrics + forwarded app metrics)
+
+  # ── Prometheus — metrics scrape ──
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    restart: unless-stopped
+    logging: *default-logging
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+    volumes:
+      - "./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro"
+      - "promdata:/prometheus"
+    ports: ["9090:9090"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # ── Grafana — dashboards (provisioned) ──
+  grafana:
+    image: grafana/grafana:11.4.0
+    restart: unless-stopped
+    logging: *default-logging
+    depends_on: [prometheus]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - "./infra/grafana/provisioning:/etc/grafana/provisioning:ro"
+      - "./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro"
+      - "grafanadata:/var/lib/grafana"
+    ports: ["3002:3000"]
+
+  # ── API (FastAPI + LangGraph) — `full` profile only; otherwise run via `make dev` ──
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: aegisops-api:local
+    restart: unless-stopped
+    logging: *default-logging
+    profiles: ["full"]
+    env_file: [.env]
+    environment:
+      # Inside the compose network the datastores are reachable by service name.
+      POSTGRES_HOST: postgres
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-aegisops}:${POSTGRES_PASSWORD:-aegisops}@postgres:5432/${POSTGRES_DB:-aegisops}
+      REDIS_URL: redis://redis:6379/0
+      NEO4J_URI: bolt://neo4j:7687
+      KEYCLOAK_URL: http://keycloak:8080
+      LANGFUSE_HOST: http://langfuse:3000
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      PROMETHEUS_URL: http://prometheus:9090
+      GRAFANA_URL: http://grafana:3000
+    ports: ["8000:8000"]
+    volumes:
+      - "${KUBECONFIG_HOST:-./infra/kube/empty-kubeconfig}:/root/.kube/config:ro"
+      - "tfstate:/app/.terraform-state"
+      - "./infra/terraform-workspaces:/app/infra/terraform-workspaces"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      neo4j: { condition: service_healthy }
+      keycloak: { condition: service_started }
+      langfuse: { condition: service_started }
+      otel-collector: { condition: service_started }
+
+  # ── Frontend (Next.js) — `full` profile only; otherwise run via `make dev` ──
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: aegisops-frontend:local
+    restart: unless-stopped
+    logging: *default-logging
+    profiles: ["full"]
+    environment:
+      NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:8000}
+      NEXT_PUBLIC_KEYCLOAK_URL: ${NEXT_PUBLIC_KEYCLOAK_URL:-http://localhost:8080}
+      NEXT_PUBLIC_KEYCLOAK_REALM: ${NEXT_PUBLIC_KEYCLOAK_REALM:-aegisops}
+      NEXT_PUBLIC_KEYCLOAK_CLIENT_ID: ${NEXT_PUBLIC_KEYCLOAK_CLIENT_ID:-aegisops-frontend}
+    ports: ["3000:3000"]
+    depends_on:
+      api: { condition: service_started }
+
+volumes:
+  pgdata:
+  redisdata:
+  neo4jdata:
+  neo4jlogs:
+  promdata:
+  grafanadata:
+  tfstate:

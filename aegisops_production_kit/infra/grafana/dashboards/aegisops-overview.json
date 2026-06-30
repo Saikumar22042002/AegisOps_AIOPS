@@ -1,0 +1,66 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "links": [],
+  "liveNow": false,
+  "refresh": "15s",
+  "schemaVersion": 39,
+  "tags": ["aegisops"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timezone": "browser",
+  "title": "AegisOps · Overview",
+  "uid": "aegisops-overview",
+  "version": 1,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Targets up",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "mappings": [], "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] } }, "overrides": [] },
+      "targets": [ { "expr": "sum(up)", "refId": "A" } ]
+    },
+    {
+      "id": 2,
+      "title": "API request rate (req/s)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 9, "x": 6, "y": 0 },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10 }, "unit": "reqps" }, "overrides": [] },
+      "targets": [ { "expr": "sum by (method) (rate(aegisops_api_requests_total[5m]))", "legendFormat": "{{method}}", "refId": "A" } ]
+    },
+    {
+      "id": 3,
+      "title": "API p95 latency (s)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 9, "x": 15, "y": 0 },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10 }, "unit": "s" }, "overrides": [] },
+      "targets": [ { "expr": "histogram_quantile(0.95, sum by (le) (rate(aegisops_api_request_duration_seconds_bucket[5m])))", "legendFormat": "p95", "refId": "A" } ]
+    },
+    {
+      "id": 4,
+      "title": "Agent runs by domain",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "bars", "fillOpacity": 40 } }, "overrides": [] },
+      "targets": [ { "expr": "sum by (domain, status) (rate(aegisops_agent_runs_total[5m]))", "legendFormat": "{{domain}} · {{status}}", "refId": "A" } ]
+    },
+    {
+      "id": 5,
+      "title": "LLM latency p95 (s)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10 }, "unit": "s" }, "overrides": [] },
+      "targets": [ { "expr": "histogram_quantile(0.95, sum by (le) (rate(aegisops_llm_latency_seconds_bucket[5m])))", "legendFormat": "p95", "refId": "A" } ]
+    }
+  ],
+  "__inputs": [],
+  "templating_note": "DS_PROMETHEUS resolves to the provisioned Prometheus datasource."
+}
