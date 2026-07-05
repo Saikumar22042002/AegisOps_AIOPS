@@ -46,6 +46,22 @@ class GCPReader:
         client = compute_v1.InstancesClient()
         return await self._run(lambda: [{"name": i.name, "status": i.status, "machine_type": i.machine_type.split("/")[-1]} for i in client.list(project=self.project, zone=zone)])
 
+    async def list_all_instances(self) -> list[dict[str, Any]]:
+        """All Compute instances across every zone (AggregatedList) — read-only."""
+        self._require()
+        client = compute_v1.InstancesClient()
+
+        def _collect() -> list[dict[str, Any]]:
+            out: list[dict[str, Any]] = []
+            for zone_path, scoped in client.aggregated_list(project=self.project):
+                for i in (scoped.instances or []):
+                    out.append({"name": i.name, "status": i.status,
+                                "zone": zone_path.split("/")[-1],
+                                "machine_type": i.machine_type.split("/")[-1] if i.machine_type else None})
+            return out
+
+        return await self._run(_collect)
+
     async def ping(self) -> bool:
         self._require()
         client = resourcemanager_v3.ProjectsClient()

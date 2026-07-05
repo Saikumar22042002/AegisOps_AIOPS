@@ -132,6 +132,34 @@ class ContextGraph:
             id=self.context_id, summary=redact(summary),
         )
 
+    async def add_resource(self, *, name: str, cloud: str, resource_type: str, provider_id: str | None,
+                           region: str | None, run_id: str | None, session_id: str | None,
+                           attributes: dict | None = None) -> None:
+        """Record a provisioned resource in the graph with resource ↔ run ↔ session relationships.
+
+        (Context)-[:PROVISIONED]->(Resource); (Run)-[:CREATED]->(Resource); (Session)-[:HAS_RUN]->(Run).
+        Sensitive attributes are redacted. Facts here mirror the DB inventory (never LLM-inferred).
+        """
+        await self._ensure_open()
+        await self._write(
+            """
+            MATCH (c:Context {id:$id})
+            MERGE (res:Resource {provider_id:$pid})
+              SET res.name=$name, res.cloud=$cloud, res.type=$rtype, res.region=$region,
+                  res.context_id=$id, res.status='active', res.attributes=$attrs, res.updated_at=timestamp()
+            MERGE (c)-[:PROVISIONED]->(res)
+            FOREACH (_ IN CASE WHEN $run_id IS NULL THEN [] ELSE [1] END |
+              MERGE (run:Run {id:$run_id})
+              MERGE (run)-[:CREATED]->(res)
+              FOREACH (__ IN CASE WHEN $session_id IS NULL THEN [] ELSE [1] END |
+                MERGE (sess:Session {id:$session_id})
+                MERGE (sess)-[:HAS_RUN]->(run)))
+            """,
+            id=self.context_id, pid=provider_id or f"{cloud}:{name}", name=name, cloud=cloud,
+            rtype=resource_type, region=region, run_id=run_id, session_id=session_id,
+            attrs=json.dumps(redact_dict(attributes or {})),
+        )
+
     async def add_evidence(self, *, kind: str, ref: str, detail: dict | None = None) -> None:
         await self._ensure_open()
         await self._write(
@@ -197,4 +225,42 @@ class ContextGraph:
             SET c.closed=true, c.resolution=$resolution, c.closed_at=timestamp()
             """,
             id=self.context_id, resolution=redact(resolution),
+        )
+
+
+async def resource_provenance(*, provider_id: str | None = None, name: str | None = None) -> dict | None:
+    """Global graph read: a resource's provenance (context/run/session) + relationships.
+
+    Used to enrich a day-2 read with where a resource came from — read from the graph, not inferred.
+    """
+    driver = get_driver()
+    async with driver.session() as session:
+        result = await session.run(
+            """
+            MATCH (res:Resource)
+            WHERE ($pid IS NOT NULL AND res.provider_id=$pid) OR ($name IS NOT NULL AND res.name=$name)
+            OPTIONAL MATCH (run:Run)-[:CREATED]->(res)
+            OPTIONAL MATCH (sess:Session)-[:HAS_RUN]->(run)
+            OPTIONAL MATCH (c:Context)-[:PROVISIONED]->(res)
+            RETURN res.name AS name, res.provider_id AS provider_id, res.status AS status,
+                   run.id AS run_id, sess.id AS session_id, c.id AS context_id
+            LIMIT 1
+            """,
+            pid=provider_id, name=name,
+        )
+        rows = [r.data() async for r in result]
+        return rows[0] if rows else None
+
+
+async def mark_resource_destroyed_graph(*, name: str | None = None, provider_id: str | None = None) -> None:
+    """Global graph write: mark a resource destroyed (across whatever context created it)."""
+    driver = get_driver()
+    async with driver.session() as session:
+        await session.run(
+            """
+            MATCH (res:Resource)
+            WHERE ($pid IS NOT NULL AND res.provider_id=$pid) OR ($name IS NOT NULL AND res.name=$name)
+            SET res.status='destroyed', res.updated_at=timestamp()
+            """,
+            pid=provider_id, name=name,
         )

@@ -26,10 +26,33 @@ from .router import router
 from .servicenow_agent import servicenow_update
 from .sre import sre_analyze
 from .state import AgentState
+from . import timing
 
 log = structlog.get_logger(__name__)
 
 _graph = None
+
+
+def _timed(name: str, fn):
+    """Wrap a graph node to record real start/end timings into run_steps.
+
+    Not used for `approval` (it self-times across the human-in-the-loop interrupt) or
+    `cloudops_plan` (it records finer sub-steps: cloudops_agent, policy_evaluation, planner).
+    None of the wrapped nodes raise LangGraph's interrupt, so a plain try/except is safe.
+    """
+
+    async def wrapper(state: AgentState, config):
+        run_id = state.get("run_id")
+        await timing.start_step(run_id, name)
+        try:
+            result = await fn(state, config)
+        except Exception as e:  # noqa: BLE001 - record the failure timing, then propagate
+            await timing.end_step(run_id, name, status="failed", error=str(e))
+            raise
+        await timing.end_step(run_id, name, status="done")
+        return result
+
+    return wrapper
 
 
 def _after_router(state: AgentState) -> str:
@@ -45,6 +68,10 @@ def _after_router(state: AgentState) -> str:
 
 
 def _after_plan(state: AgentState) -> str:
+    # A plan node that needs the user to clarify (ambiguous cloud, no approved module, invalid
+    # inputs) routes to `general`, which streams the clarification message to the user.
+    if state.get("needs_clarification"):
+        return "general"
     if state.get("needs_change") and state.get("approval_status") == "pending":
         return "approval"
     return "finalize"
@@ -53,24 +80,24 @@ def _after_plan(state: AgentState) -> str:
 def build_graph(checkpointer):
     g = StateGraph(AgentState)
 
-    g.add_node("router", router)
-    g.add_node("cloudops_plan", cloudops_plan)
-    g.add_node("devops_plan", devops_plan)
-    g.add_node("sre_analyze", sre_analyze)
-    g.add_node("knowledge", knowledge)
-    g.add_node("general", general)
-    g.add_node("approval", approval)
-    g.add_node("execute", execute)
-    g.add_node("verify", verify)
-    g.add_node("finalize", finalize)
-    g.add_node("servicenow_update", servicenow_update)
-    g.add_node("notify", notify)
+    g.add_node("router", _timed("router", router))
+    g.add_node("cloudops_plan", cloudops_plan)  # self-records cloudops_agent/policy_evaluation/planner
+    g.add_node("devops_plan", _timed("devops_plan", devops_plan))
+    g.add_node("sre_analyze", _timed("sre_analyze", sre_analyze))
+    g.add_node("knowledge", _timed("knowledge", knowledge))
+    g.add_node("general", _timed("general", general))
+    g.add_node("approval", approval)  # self-times across the human-in-the-loop interrupt
+    g.add_node("execute", _timed("execute", execute))
+    g.add_node("verify", _timed("verify", verify))
+    g.add_node("finalize", _timed("finalize", finalize))
+    g.add_node("servicenow_update", _timed("servicenow_update", servicenow_update))
+    g.add_node("notify", _timed("notify", notify))
 
     g.add_edge(START, "router")
     g.add_conditional_edges("router", _after_router,
                             ["cloudops_plan", "devops_plan", "sre_analyze", "knowledge", "general"])
     for plan_node in ("cloudops_plan", "devops_plan", "sre_analyze"):
-        g.add_conditional_edges(plan_node, _after_plan, ["approval", "finalize"])
+        g.add_conditional_edges(plan_node, _after_plan, ["approval", "finalize", "general"])
     g.add_edge("knowledge", "finalize")
     g.add_edge("general", "finalize")
     g.add_conditional_edges("approval", approval_decision, ["execute", "finalize"])

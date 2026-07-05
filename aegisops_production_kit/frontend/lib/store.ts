@@ -46,6 +46,7 @@ function fromApiMessage(m: any): ChatMessage {
     confidentiality: conf && conf.level ? { level: conf.level, score: conf.score ?? 0 } : undefined,
     analysis: { summary: analysis.summary, cards: analysis.reasoning ?? [] },
     references: analysis.references ?? [],
+    paramRequest: analysis.param_request ?? undefined,
     tab: "conversation",
   };
 }
@@ -73,6 +74,9 @@ interface UIState {
   role: string;
   feedback: Record<string, "up" | "down" | null>;
   activeRunId: string | null;
+  // The message whose run the artifact panel is bound to. `null` = follow the latest run.
+  // Clicking any past message pins the panel to THAT message's run (its own timeline/audit).
+  selectedMessageId: string | null;
   sessionId: string | null;
   runError: string | null;
   sessions: SessionMeta[];
@@ -90,6 +94,7 @@ interface UIState {
   setSelector: (field: "org" | "env" | "cloud" | "region" | "model" | "role", value: string) => void;
   navTo: (nav: NavKey) => void;
   openArtifact: (tab: ArtifactTab) => void;
+  selectMessage: (id: string) => void;
   toggleArtifact: () => void;
   closeArtifact: () => void;
   toggleTimeline: () => void;
@@ -135,6 +140,7 @@ export const useUI = create<UIState>((set, get) => ({
   role: "Platform Admin",
   feedback: {},
   activeRunId: null,
+  selectedMessageId: null,
   sessionId: null,
   runError: null,
   sessions: [],
@@ -156,6 +162,11 @@ export const useUI = create<UIState>((set, get) => ({
   setSelector: (field, value) => set({ [field]: value, menu: null } as Partial<UIState>),
   navTo: (nav) => set({ activeNav: nav, cmdkOpen: false, mobileNavOpen: false, menu: null }),
   openArtifact: (tab) => set({ artifactOpen: true, activeArtifact: tab }),
+  // Pin the artifact panel to a specific message's run (its own timeline/reasoning/terraform/
+  // logs/metrics/traces/references/approvals), fetched live from /runs/{runId}/*. Bumping the
+  // nonce forces the panel to refetch for the newly selected run.
+  selectMessage: (id) =>
+    set((s) => (s.selectedMessageId === id ? {} : { selectedMessageId: id, artifactOpen: true, artifactNonce: s.artifactNonce + 1 })),
   toggleArtifact: () => set((s) => ({ artifactOpen: !s.artifactOpen })),
   closeArtifact: () => set({ artifactOpen: false }),
   toggleTimeline: () => set((s) => ({ timelineOpen: !s.timelineOpen })),
@@ -167,7 +178,7 @@ export const useUI = create<UIState>((set, get) => ({
   newChat: () => {
     persistLast(null);
     set({ messages: [], input: "", activeNav: "workspace", streaming: false,
-          activeRunId: null, sessionId: null, runError: null, approval: "pending" });
+          activeRunId: null, selectedMessageId: null, sessionId: null, runError: null, approval: "pending" });
   },
 
   loadSidebar: async () => {
@@ -181,14 +192,16 @@ export const useUI = create<UIState>((set, get) => ({
 
   openSession: async (id) => {
     set({ activeNav: "workspace", mobileNavOpen: false, sessionId: id, messages: [],
-          streaming: false, runError: null, approval: "pending", activeRunId: null });
+          streaming: false, runError: null, approval: "pending", activeRunId: null, selectedMessageId: null });
     persistLast(id);
     try {
       const { messages } = await api.get<{ messages: any[] }>(`/sessions/${id}/messages`);
+      // Each restored message keeps its OWN run_id (see fromApiMessage) so clicking any of them
+      // pins the panel to that message's run. Default the panel to the most recent run.
       const mapped = messages.map(fromApiMessage);
-      // Surface the latest run so the artifact panel can hydrate for this thread.
-      const lastRun = [...messages].reverse().find((m) => m.run_id)?.run_id ?? null;
-      set({ messages: mapped, activeRunId: lastRun, artifactNonce: get().artifactNonce + 1 });
+      const lastRunMsg = [...mapped].reverse().find((m) => m.isAI && m.runId);
+      set({ messages: mapped, activeRunId: lastRunMsg?.runId ?? null,
+            selectedMessageId: lastRunMsg?.id ?? null, artifactNonce: get().artifactNonce + 1 });
     } catch (e) {
       set({ runError: e instanceof Error ? e.message : "failed to load conversation" });
     }
@@ -233,6 +246,9 @@ export const useUI = create<UIState>((set, get) => ({
     const aiId = "ai" + Date.now();
     set((s) => ({
       input: "", streaming: true, runError: null,
+      // Follow the new run live: pin the panel to this message so its timeline updates in real
+      // time. Bump the nonce so the panel drops any previously-shown run immediately.
+      selectedMessageId: aiId, artifactNonce: s.artifactNonce + 1,
       messages: [
         ...s.messages,
         { id: "u" + Date.now(), isUser: true, text: t },
@@ -261,6 +277,15 @@ export const useUI = create<UIState>((set, get) => ({
         const m = get().messages.find((x) => x.id === aiId);
         if (!m) return;
         switch (ev.event) {
+          case "run": {
+            // First event: bind this message to its real run id (panel goes live, message links
+            // to its run from the start). Adopt the server session id if we have none yet.
+            const rid = String(ev.data.runId);
+            patchMsg(set, aiId, { runId: rid });
+            set((s) => ({ activeRunId: rid,
+                          sessionId: s.sessionId ?? (ev.data.sessionId ? String(ev.data.sessionId) : null) }));
+            break;
+          }
           case "step": {
             const steps = [...(m.steps ?? []), { label: String(ev.data.label) }];
             patchMsg(set, aiId, { steps, stepIdx: steps.length - 1 });
@@ -271,6 +296,10 @@ export const useUI = create<UIState>((set, get) => ({
             break;
           case "analysis":
             patchMsg(set, aiId, { analysis: { summary: String(ev.data.summary ?? ""), cards: (ev.data.reasoningCards as any) ?? [] } });
+            break;
+          case "params":
+            // Structured "required inputs" request → render the param card on this message.
+            patchMsg(set, aiId, { paramRequest: ev.data as any });
             break;
           case "reference":
             patchMsg(set, aiId, { references: [...(m.references ?? []), ev.data as any] });
@@ -283,8 +312,9 @@ export const useUI = create<UIState>((set, get) => ({
             break;
           case "interrupt":
             patchMsg(set, aiId, { interrupt: ev.data, runId: String(ev.data.runId), showTimeline: false });
+            // Approval needs attention — pull the panel to this run and show its plan.
             set((s) => ({ activeRunId: String(ev.data.runId), approval: "pending", artifactOpen: true,
-                          activeArtifact: "terraform", artifactNonce: s.artifactNonce + 1 }));
+                          activeArtifact: "terraform", selectedMessageId: aiId, artifactNonce: s.artifactNonce + 1 }));
             break;
           case "error":
             patchMsg(set, aiId, { error: String(ev.data.message), streaming: false });

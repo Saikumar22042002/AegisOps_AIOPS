@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../lib/auth";
 import { BrandShield } from "../lib/icons";
 import { useUI } from "../lib/store";
-import type { ChatMessage } from "../lib/types";
+import type { ChatMessage, ParamRequest } from "../lib/types";
 
 export function Workspace() {
   const artifactOpen = useUI((s) => s.artifactOpen);
@@ -69,6 +69,9 @@ function AiMessage({ m }: { m: ChatMessage }) {
   const approval = useUI((s) => s.approval);
   const approveRun = useUI((s) => s.approveRun);
   const openArtifact = useUI((s) => s.openArtifact);
+  const selectMessage = useUI((s) => s.selectMessage);
+  const selected = useUI((s) => s.selectedMessageId === m.id);
+  const artifactOpen = useUI((s) => s.artifactOpen);
   const { user } = useAuth();
   const canApprove = !!user?.can_approve;
   const feedback = useUI((s) => s.feedback);
@@ -81,7 +84,15 @@ function AiMessage({ m }: { m: ChatMessage }) {
   const confColor = conf?.level === "High" ? "var(--red)" : conf?.level === "Medium" ? "var(--amber)" : "var(--green)";
 
   return (
-    <div style={{ display: "flex", gap: 15 }}>
+    <div
+      onClick={() => selectMessage(m.id)}
+      title="Show this message's run in the artifact panel"
+      // Clicking any message pins the artifact panel to THAT message's run. The left accent
+      // (same idiom as the sidebar's active row) marks which message the panel is bound to.
+      // Left padding is always reserved so toggling the accent never shifts the layout.
+      style={{ display: "flex", gap: 15, cursor: "pointer", marginLeft: -14, paddingLeft: 14,
+               boxShadow: selected && artifactOpen ? "inset 2px 0 0 var(--accent-2)" : "none", transition: "box-shadow .15s" }}
+    >
       <div style={avatarAI}><BrandShield size={15} filled={false} /></div>
       <div style={{ flex: 1, minWidth: 0, paddingTop: 2 }}>
         {/* meta chips */}
@@ -154,6 +165,8 @@ function AiMessage({ m }: { m: ChatMessage }) {
             {m.error && (
               <div style={{ marginTop: 12, fontSize: 12.5, color: "var(--red-2)", background: "rgba(248,113,113,.08)", border: "1px solid rgba(248,113,113,.25)", borderRadius: 10, padding: "10px 13px" }}>{m.error}</div>
             )}
+
+            {m.paramRequest && (m.paramRequest.items?.length ?? 0) > 0 && <ParamRequestCard req={m.paramRequest} />}
 
             {/* artifact cards + approval gate when a plan exists */}
             {summary && (
@@ -241,6 +254,34 @@ function AnalysisTab({ m }: { m: ChatMessage }) {
         </div>
       ))}
       {cards.length === 0 && refs.length === 0 && <div style={{ fontSize: 12.5, color: "var(--text-4)" }}>No analysis yet for this message.</div>}
+    </div>
+  );
+}
+
+function ParamRequestCard({ req }: { req: ParamRequest }) {
+  // "Required inputs" card — same visual idiom as the analysis/artifact cards (design tokens only).
+  return (
+    <div style={{ marginTop: 14, border: "1px solid var(--border)", borderLeft: "2px solid var(--accent-2)", borderRadius: 12, background: "var(--surface)", padding: "14px 16px" }}>
+      <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em", color: "var(--accent-2)", fontWeight: 600, marginBottom: 11 }}>Required to proceed</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
+        {req.items.map((it) => (
+          <div key={it.name} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{it.label}</span>
+              <span style={{ fontSize: 10, color: "var(--amber)", fontWeight: 500, padding: "1px 7px", borderRadius: 99, background: "rgba(251,191,36,.12)" }}>required</span>
+            </div>
+            {it.help && <div style={{ fontSize: 12, color: "var(--text-3)", lineHeight: 1.5 }}>{it.help}</div>}
+            {it.choices && it.choices.length > 0 && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 2 }}>
+                {it.choices.map((ch) => (
+                  <span key={ch} style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: "var(--text-2)", padding: "2px 8px", borderRadius: 6, background: "var(--surface-2)", border: "1px solid var(--border)" }}>{ch}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      <div style={{ fontSize: 11.5, color: "var(--text-4)", marginTop: 12 }}>Reply with these values — e.g. “name web-01, t3.large, ubuntu, key my-key”.</div>
     </div>
   );
 }

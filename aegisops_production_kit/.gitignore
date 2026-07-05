@@ -4,6 +4,8 @@
 !.env.example
 frontend/.env.local
 /secrets/
+infra/secrets/
+*-sa.json
 
 # Terraform
 *.tfstate
@@ -26,6 +28,8 @@ out/
 coverage/
 playwright-report/
 test-results/
+# Playwright saved auth state (contains a live session cookie)
+frontend/e2e/.auth/
 
 # Misc
 .DS_Store

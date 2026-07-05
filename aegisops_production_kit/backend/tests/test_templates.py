@@ -15,9 +15,20 @@ def test_select_multicloud() -> None:
     assert templates.select("gcp", "gcs").key == "gcp.gcs"
 
 
-def test_select_falls_back_to_generic_module() -> None:
-    t = templates.select("aws", "module")
-    assert t is not None and t.key == "generic.module"
+def test_select_is_cloud_safe() -> None:
+    # No cross-cloud fallback: an Azure/GCP "ec2" request must NEVER resolve to the AWS module.
+    # (Phase 5: "ec2" on azure/gcp is a synonym for that cloud's VM, so it resolves to
+    # azure.vm / gcp.vm — still the requested cloud, never aws.ec2.)
+    assert templates.select("azure", "ec2").key == "azure.vm"
+    assert templates.select("gcp", "ec2").key == "gcp.vm"
+    assert templates.select("azure", "ec2").cloud == "azure"
+    assert templates.select("gcp", "ec2").cloud == "gcp"
+    # No runtime/generic module escape hatch (2.3): unknown resource → None (agent clarifies).
+    assert templates.select("aws", "module") is None
+    # Genuinely unsupported cloud/resource combos → None, never a wrong-cloud plan.
+    assert templates.select("aws", "storage") is None      # "storage" is Azure-branded
+    assert templates.select("gcp", "resource_group") is None
+    assert templates.select("kubernetes", "vm") is None     # no k8s provisioning templates
 
 
 def test_catalog_covers_three_clouds() -> None:

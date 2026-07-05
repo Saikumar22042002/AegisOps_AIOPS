@@ -76,6 +76,46 @@ class AWSReader:
         res = await self._run(rds.describe_db_instances)
         return [{"id": d["DBInstanceIdentifier"], "engine": d["Engine"], "status": d["DBInstanceStatus"], "class": d.get("DBInstanceClass")} for d in res["DBInstances"]]
 
+    async def list_instances(self, region: str | None = None) -> list[dict[str, Any]]:
+        """All EC2 instances in the region with state/type/name (read-only)."""
+        ec2 = self._client("ec2", region)
+        res = await self._run(ec2.describe_instances)
+        out: list[dict[str, Any]] = []
+        for resv in res.get("Reservations", []):
+            for i in resv.get("Instances", []):
+                name = next((t["Value"] for t in i.get("Tags", []) if t["Key"] == "Name"), None)
+                out.append({"id": i["InstanceId"], "state": i.get("State", {}).get("Name"),
+                            "type": i.get("InstanceType"), "name": name,
+                            "public_ip": i.get("PublicIpAddress"), "private_ip": i.get("PrivateIpAddress")})
+        return out
+
+    async def list_buckets(self) -> list[dict[str, Any]]:
+        """All S3 buckets in the account (bucket listing is global, read-only)."""
+        s3 = self._client("s3")
+        res = await self._run(s3.list_buckets)
+        return [{"name": b["Name"],
+                 "created": b["CreationDate"].isoformat() if b.get("CreationDate") else None}
+                for b in res.get("Buckets", [])]
+
+    async def bucket_taken(self, name: str) -> bool | None:
+        """Is this globally-unique bucket name already in use (by anyone)? Read-only HeadBucket.
+
+        True = taken (ours or another account's — 403 means it exists but isn't ours),
+        False = free, None = undetermined (treat as unknown; let the plan/apply decide).
+        """
+        s3 = self._client("s3")
+        try:
+            await self._run(s3.head_bucket, Bucket=name)
+            return True
+        except Exception as e:  # noqa: BLE001 - botocore ClientError carries the status code
+            code = str(getattr(e, "response", {}).get("Error", {}).get("Code", "")) if hasattr(e, "response") else ""
+            if code in {"404", "NoSuchBucket", "NotFound"}:
+                return False
+            if code in {"403", "AccessDenied", "Forbidden"}:
+                return True  # exists, owned by someone else
+            log.warning("aws.head_bucket_failed", bucket=name, error=str(e))
+            return None
+
     async def check_quota_eks(self, region: str | None = None) -> dict[str, Any]:
         """Availability pre-check: current EKS cluster count vs a typical soft limit."""
         clusters = await self.list_eks_clusters(region)

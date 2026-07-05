@@ -15,7 +15,11 @@ try:
     from azure.identity import ClientSecretCredential
     from azure.mgmt.compute import ComputeManagementClient
     from azure.mgmt.network import NetworkManagementClient
-    from azure.mgmt.resource import ResourceManagementClient
+
+    # azure-mgmt-resource ≥ 23 no longer re-exports ResourceManagementClient from the package
+    # root (the top level is a namespace with only the versioned `resources` subpackage) — it lives
+    # at azure.mgmt.resource.resources. Import it there so discovery works with the pinned SDK.
+    from azure.mgmt.resource.resources import ResourceManagementClient
 
     _HAVE_AZURE = True
 except Exception:  # noqa: BLE001

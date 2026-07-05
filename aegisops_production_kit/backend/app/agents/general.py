@@ -42,8 +42,13 @@ async def general(state: AgentState, config) -> dict:
     try:
         answer = await llm.stream_answer(settings, _SYSTEM, state["message"], emitter)
     except GeminiError as e:
-        await emitter.error(str(e), code="llm_unavailable")
-        return {"answer": "", "confidentiality": {"level": "Low", "score": 0.0}}
+        # Honest failure, clean run: the graph completes with a real message instead of
+        # crashing and persisting an empty "completed" state (Phase 7 / BUG-03).
+        msg = (f"The reasoning engine couldn't complete a response ({str(e)[:160]}). "
+               "Nothing was changed — please send that again.")
+        await emitter.token(msg)
+        await emitter.error(str(e), code="llm_unavailable", retriable=True)
+        return {"answer": msg, "confidentiality": {"level": "Low", "score": 0.0}}
 
     c = classify(answer)
     await emitter.confidentiality(c.level, c.score)

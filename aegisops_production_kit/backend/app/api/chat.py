@@ -55,12 +55,19 @@ class ApprovalRequest(BaseModel):
 
 
 async def _sse(channel: RunChannel, replay_after: int = 0):
+    # Track ids replayed from history so an event that is both in the ring buffer and still
+    # pending in the queue (e.g. the leading `run` event emitted before this consumer starts)
+    # is delivered exactly once, never duplicated.
+    seen: set[int] = set()
     for past in channel.replay_after(replay_after):
+        seen.add(past["id"])
         yield {"event": past["event"], "data": json.dumps(past["data"]), "id": str(past["id"])}
     while True:
         item = await channel.queue.get()
         if item is DONE:
             break
+        if item["id"] in seen:
+            continue
         yield {"event": item["event"], "data": json.dumps(item["data"]), "id": str(item["id"])}
 
 
@@ -88,7 +95,8 @@ async def _persist_result(run_id: str, session_id: str, org_id: str, state: dict
             content=state.get("answer", ""), confidentiality_level=conf.get("level"),
             confidentiality_score=conf.get("score"), context_id=run_id,
             trace_id=state.get("trace_id"), run_id=uuid.UUID(run_id),
-            analysis={"references": state.get("references", []), "reasoning": state.get("reasoning_cards", [])},
+            analysis={"references": state.get("references", []), "reasoning": state.get("reasoning_cards", []),
+                      "param_request": state.get("param_request")},
         )
         s.add(msg)
         await s.flush()
@@ -129,18 +137,33 @@ async def chat(body: ChatRequest, request: Request, user: User = Depends(get_cur
 
     async def _drive():
         from ..agents.events import Emitter
+        emitter = Emitter(channel)
         try:
+            # Lead with the run identity so the client binds its live artifact panel to THIS
+            # run's id (and learns the real session id) from the very first event — before any
+            # step/token. This is what lets the timeline update live and lets the persisted
+            # message link to its run from the moment it starts.
+            await emitter.run({"runId": run_id, "sessionId": session_id})
             res = await run_graph(run_id, channel, initial=initial)
             state = res["state"]
-            status_ = "awaiting_approval" if res["interrupted"] else "completed"
+            error = res.get("error")
+            # A graph failure must be persisted as FAILED with a real message — never as an
+            # empty "completed" run (that produced the "Agent Agent / Classified → intent"
+            # placeholder timeline of screenshots 15/16). (Phase 7 / BUG-03.)
+            status_ = "failed" if error else ("awaiting_approval" if res["interrupted"] else "completed")
+            if error and not state.get("answer"):
+                state = {**state, "answer": f"⚠️ This run failed unexpectedly: {error}. "
+                                            "Nothing was changed — please send that again.",
+                         "outcome": state.get("outcome") or {"status": "failed", "error": error}}
             msg_id = await _persist_result(run_id, session_id, org_id, state, status_)
             AGENT_RUNS.labels(domain=state.get("domain", "general"), workflow=state.get("workflow", "-"),
                               status=status_, env=body.context.env or "na").inc()
             if not res["interrupted"]:
-                await Emitter(channel).done({
+                await emitter.done({
                     "messageId": msg_id, "runId": run_id, "traceId": run_id,
                     "contextId": state.get("context_id", run_id), "snowId": state.get("snow_id"),
-                    "outcome": state.get("outcome", {"status": "completed"}),
+                    "outcome": state.get("outcome") or ({"status": "failed", "error": error} if error
+                                                        else {"status": "completed"}),
                 })
         finally:
             await channel.close()
@@ -168,14 +191,22 @@ async def resolve_approval(run_id: str, body: ApprovalRequest,
 
     async def _drive():
         from ..agents.events import Emitter
+        emitter = Emitter(channel)
         try:
+            await emitter.run({"runId": run_id, "sessionId": session_id})
             res = await run_graph(run_id, channel, resume=resume_value)
             state = res["state"]
-            msg_id = await _persist_result(run_id, session_id, org_id, state, "completed")
-            await Emitter(channel).done({
+            error = res.get("error")
+            status_ = "failed" if error else "completed"
+            if error and not state.get("answer"):
+                state = {**state, "answer": f"⚠️ The continuation failed unexpectedly: {error}.",
+                         "outcome": state.get("outcome") or {"status": "failed", "error": error}}
+            msg_id = await _persist_result(run_id, session_id, org_id, state, status_)
+            await emitter.done({
                 "messageId": msg_id, "runId": run_id, "traceId": run_id,
                 "contextId": state.get("context_id", run_id), "snowId": state.get("snow_id"),
-                "outcome": state.get("outcome", {"status": body.decision}),
+                "outcome": state.get("outcome") or ({"status": "failed", "error": error} if error
+                                                    else {"status": body.decision}),
             })
         finally:
             await channel.close()

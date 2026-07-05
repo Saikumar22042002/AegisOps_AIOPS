@@ -65,6 +65,19 @@ export interface Analysis {
   cards?: { title: string; conf?: string; body: string }[];
 }
 
+export interface ParamRequestItem {
+  name: string;
+  label: string;
+  kind?: string;
+  choices?: string[] | null;
+  help?: string;
+}
+export interface ParamRequest {
+  template: string;
+  items: ParamRequestItem[];
+  collected?: Record<string, unknown>;
+}
+
 export interface ChatMessage {
   id: string;
   isUser?: boolean;
@@ -82,6 +95,7 @@ export interface ChatMessage {
   confidentiality?: { level: string; score: number };
   intent?: string;
   workflow?: string;
+  paramRequest?: ParamRequest | null;
   interrupt?: Record<string, unknown> | null;
   consoleLines?: { stream: string; line: string }[];
   error?: string | null;

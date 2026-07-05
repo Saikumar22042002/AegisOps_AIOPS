@@ -61,6 +61,10 @@ class Emitter:
     def __init__(self, channel: RunChannel) -> None:
         self.ch = channel
 
+    async def run(self, data: dict) -> None:
+        """First event of a stream: binds the client's live panel to this run immediately."""
+        await self.ch.emit("run", data)
+
     async def step(self, index: int, label: str) -> None:
         await self.ch.emit("step", {"index": index, "label": label})
 
@@ -69,6 +73,10 @@ class Emitter:
 
     async def analysis(self, summary: str, cards: list) -> None:
         await self.ch.emit("analysis", {"summary": summary, "reasoningCards": cards})
+
+    async def params(self, data: dict) -> None:
+        """Structured 'required inputs' request rendered as a param card in the message."""
+        await self.ch.emit("params", data)
 
     async def reference(self, ref: dict) -> None:
         await self.ch.emit("reference", ref)

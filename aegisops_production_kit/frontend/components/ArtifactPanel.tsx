@@ -16,28 +16,40 @@ export function ArtifactPanel() {
   const activeArtifact = useUI((s) => s.activeArtifact);
   const openArtifact = useUI((s) => s.openArtifact);
   const closeArtifact = useUI((s) => s.closeArtifact);
-  const runId = useUI((s) => s.activeRunId);
   const nonce = useUI((s) => s.artifactNonce);
-  // Live console lines streamed for the active run (Logs tab prefers these over the snapshot).
-  // Return the actual array (or null) — never a fresh [] — so the selector identity is stable
-  // and the component re-renders only when console output actually changes.
-  const liveConsole = useUI((s) => {
-    const m = s.messages.find((x) => x.isAI && x.runId === runId);
-    return m?.consoleLines ?? null;
+
+  // The panel ALWAYS reflects the run of the currently selected/active message — never a stale
+  // "latest run". `selectedMessageId` pins a specific message (its own run); with none set it
+  // follows the newest run in the thread. Returns existing message objects (stable identity),
+  // so unrelated state changes don't re-render and a static selection doesn't refetch.
+  const panelMsg = useUI((s) => {
+    const explicit = s.selectedMessageId ? s.messages.find((m) => m.id === s.selectedMessageId) : null;
+    if (explicit) return explicit;
+    return [...s.messages].reverse().find((m) => m.isAI && (m.runId || m.streaming)) ?? null;
   });
+  const runId = panelMsg?.runId ?? null;
+  const isLive = !!panelMsg?.streaming;
+  const liveSteps = panelMsg?.steps ?? null;
+  // Live console lines streamed for the selected run (Logs overlays these on the snapshot).
+  const liveConsole = panelMsg?.consoleLines ?? null;
+
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     let alive = true;
-    if (!runId) { setData(null); return; }
+    // A new selection/run — drop the previous run's data immediately so the panel is never
+    // shown bound to a stale run while the new fetch is in flight.
+    setData(null);
+    if (!runId) { setLoading(false); return; }
     setLoading(true);
     api.get(`/runs/${runId}/${activeArtifact}`)
       .then((d) => { if (alive) setData(d); })
       .catch(() => { if (alive) setData(null); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
-    // `nonce` bumps when a run starts/interrupts/completes or an approval resolves -> refetch.
+    // runId changes when a different message is selected; `nonce` bumps on run start/interrupt/
+    // done/approval -> refetch that run's persisted artifacts.
   }, [runId, activeArtifact, nonce]);
 
   return (
@@ -61,6 +73,11 @@ export function ArtifactPanel() {
 
       <div style={{ flex: 1, overflowY: "auto", minHeight: 0, padding: 18 }}>
         {(() => {
+          // While the selected run is LIVE, the Timeline streams from the graph's step events in
+          // real time (the persisted node view isn't complete until the run finishes).
+          if (activeArtifact === "timeline" && isLive) {
+            return (liveSteps?.length ?? 0) > 0 ? <LiveTimeline steps={liveSteps!} /> : <Empty msg="Starting run…" />;
+          }
           // Logs: overlay the real streamed console lines (apply/plan output) on top of the
           // DB-derived snapshot so the tab reflects the live run, not just persisted summary.
           const effective =
@@ -73,7 +90,7 @@ export function ArtifactPanel() {
                   })),
                 ] }
               : data;
-          if (!runId) return <Empty msg="Run a request in the workspace to populate artifacts." />;
+          if (!runId) return <Empty msg="Run a request in the workspace, or select a message to view its run." />;
           if (loading && !effective) return <Empty msg="Loading…" />;
           if (!effective) return <Empty msg="No data for this artifact yet." />;
           return <TabBody tab={activeArtifact} data={effective} />;
@@ -100,7 +117,38 @@ function TabBody({ tab, data }: { tab: ArtifactTab; data: any }) {
 }
 
 function statusColor(s: string) {
-  return { done: "var(--green)", running: "var(--accent-2)", pending: "var(--amber)", rejected: "var(--red)", cancelled: "var(--border-2)" }[s] || "var(--border-3)";
+  return { done: "var(--green)", running: "var(--accent-2)", pending: "var(--amber)", rejected: "var(--red)", failed: "var(--red)", cancelled: "var(--border-2)" }[s] || "var(--border-3)";
+}
+
+// Real-time timeline for an in-flight run, rendered from the graph's streamed step events.
+// Same node/connector visual as the persisted <Timeline>, so the handoff at `done` is seamless.
+function LiveTimeline({ steps }: { steps: { label: string }[] }) {
+  return (
+    <>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+        <span style={eyebrow}>LangGraph execution</span>
+        <span style={{ marginLeft: "auto", fontSize: 11, fontFamily: "'IBM Plex Mono',monospace", color: "var(--text-3)" }}>running</span>
+      </div>
+      <div style={{ paddingLeft: 4 }}>
+        {steps.map((st, i) => {
+          const last = i === steps.length - 1;
+          return (
+            <div key={i} style={{ display: "flex", gap: 14, position: "relative", paddingBottom: 18 }}>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0 }}>
+                <span style={{ width: 24, height: 24, borderRadius: 99, background: "var(--surface-3)", border: `1.5px solid ${last ? "var(--accent-2)" : "var(--green)"}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  {last ? <Icon kind="spin" color="var(--accent-2)" /> : <Icon kind="check" color="var(--green)" />}
+                </span>
+                {!last && <span style={{ width: 1.5, flex: 1, background: "var(--border-2)", marginTop: 2, minHeight: 16 }} />}
+              </div>
+              <div style={{ paddingTop: 2, flex: 1 }}>
+                <div style={{ fontSize: 13.5, color: "var(--text)", fontWeight: 500 }}>{st.label}</div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
 }
 
 function Timeline({ data }: { data: any }) {
@@ -108,14 +156,14 @@ function Timeline({ data }: { data: any }) {
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
         <span style={eyebrow}>LangGraph execution</span>
-        <span style={{ marginLeft: "auto", fontSize: 11, fontFamily: "'IBM Plex Mono',monospace", color: "var(--text-3)" }}>{data.elapsed} · {data.mode}</span>
+        <span style={{ marginLeft: "auto", fontSize: 11, fontFamily: "'IBM Plex Mono',monospace", color: "var(--text-3)" }}>{[data.elapsed, data.total, data.mode].filter(Boolean).join(" · ")}</span>
       </div>
       <div style={{ paddingLeft: 4 }}>
         {(data.nodes ?? []).map((n: any, i: number) => (
           <div key={i} style={{ display: "flex", gap: 14, position: "relative", paddingBottom: 18 }}>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0 }}>
               <span style={{ width: 24, height: 24, borderRadius: 99, background: "var(--surface-3)", border: `1.5px solid ${statusColor(n.status)}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                {n.status === "done" ? <Icon kind="check" color="var(--green)" /> : n.status === "running" ? <Icon kind="spin" color="var(--accent-2)" /> : n.status === "rejected" ? <Icon kind="x" color="var(--red)" /> : <span style={{ width: 7, height: 7, borderRadius: 99, background: statusColor(n.status) }} />}
+                {n.status === "done" ? <Icon kind="check" color="var(--green)" /> : n.status === "running" ? <Icon kind="spin" color="var(--accent-2)" /> : n.status === "rejected" || n.status === "failed" ? <Icon kind="x" color="var(--red)" /> : <span style={{ width: 7, height: 7, borderRadius: 99, background: statusColor(n.status) }} />}
               </span>
               {!n.last && <span style={{ width: 1.5, flex: 1, background: "var(--border-2)", marginTop: 2, minHeight: 16 }} />}
             </div>

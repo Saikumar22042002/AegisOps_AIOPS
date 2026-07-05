@@ -15,6 +15,7 @@ from langgraph.types import interrupt
 from ..db.models import Approval
 from ..db.session import get_sessionmaker
 from ..graph_db.context_graph import ContextGraph
+from . import timing
 from .runtime import emitter_of
 from .state import AgentState
 
@@ -27,8 +28,12 @@ async def approval(state: AgentState, config) -> dict:
         return {"approval_status": "not_required"}
 
     payload = state.get("interrupt_payload") or {"kind": "approval", "runId": state["run_id"]}
+    # Record the approval start now; end after the human decides. start_step preserves the first
+    # start across the resume re-entry, so the recorded duration is the real human-wait time.
+    await timing.start_step(state.get("run_id"), "approval", human_vs_auto="human")
     # Pause the graph; the value returned is whatever POST /approvals/{runId} resumes with.
     decision = interrupt(payload)
+    await timing.end_step(state.get("run_id"), "approval", status="done")
 
     if isinstance(decision, dict):
         status = decision.get("decision", "rejected")

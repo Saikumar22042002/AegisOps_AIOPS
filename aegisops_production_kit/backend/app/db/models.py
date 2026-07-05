@@ -227,6 +227,30 @@ class Integration(Base):
     last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class Resource(Base):
+    """Provisioned-resource inventory (day-2). One row per resource the platform created, so it
+    can be referenced by name/context later ("test-vm", "the instance I created") and operated on.
+    Org-scoped. `inputs` stores the validated Terraform variables used, so a modify re-plan can be
+    reconstructed; `attributes` holds live-ish key attributes (IPs, VPC, subnet, SGs, tags)."""
+
+    __tablename__ = "resources"
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    session_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True, index=True)
+    run_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("runs.id", ondelete="SET NULL"), nullable=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False, index=True)  # stable name (e.g. test-vm)
+    cloud: Mapped[str] = mapped_column(String(20), nullable=False)
+    region: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    resource_type: Mapped[str] = mapped_column(String(60), nullable=False)  # aws_instance | vpc | s3_bucket | ...
+    provider_id: Mapped[str | None] = mapped_column(String(200), nullable=True)  # i-…, vpc-…
+    workspace: Mapped[str | None] = mapped_column(String(120), nullable=True)  # TF workspace/state ref
+    status: Mapped[str] = mapped_column(String(20), default="active")  # active | terminated | destroyed
+    attributes: Mapped[dict | None] = mapped_column(JSONB, nullable=True)  # ips, vpc_id, subnet_id, sgs, tags, key_name…
+    inputs: Mapped[dict | None] = mapped_column(JSONB, nullable=True)  # validated TF vars (to rebuild a modify plan)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class Notification(Base):
     __tablename__ = "notifications"
     id: Mapped[uuid.UUID] = _pk()

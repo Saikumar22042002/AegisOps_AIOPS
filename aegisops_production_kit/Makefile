@@ -11,7 +11,7 @@ COMPOSE  ?= docker compose
 
 .DEFAULT_GOAL := help
 .PHONY: help up up-full down logs ps migrate seed dev dev-api dev-web \
-        install build test test-cov lint fmt e2e reset
+        install build test test-backend test-frontend test-cov lint fmt e2e reset
 
 help: ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -65,12 +65,18 @@ dev-web: ## Run frontend only (next :3000)
 	cd frontend && npm run dev
 
 # ── Quality ──────────────────────────────────────────────────────────────
-test: ## Backend pytest + frontend vitest
-	cd backend && pytest -q
+test: ## Backend pytest (in the test container) + frontend vitest
+	$(COMPOSE) --profile test run --rm api-test
 	cd frontend && npm test
 
-test-cov: ## Backend tests with coverage
-	cd backend && pytest --cov=app --cov-report=term-missing
+test-backend: ## Backend pytest only, in the containerized environment (real PG/Redis/Neo4j)
+	$(COMPOSE) --profile test run --rm api-test
+
+test-frontend: ## Frontend vitest + RTL only
+	cd frontend && npm test
+
+test-cov: ## Backend tests with coverage (in the test container)
+	$(COMPOSE) --profile test run --rm api-test sh -lc "pip install -q pytest pytest-asyncio pytest-cov testcontainers anyio && pytest --cov=app --cov-report=term-missing"
 
 lint: ## Lint backend (ruff) + frontend (eslint)
 	cd backend && ruff check .

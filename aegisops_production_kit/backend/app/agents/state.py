@@ -32,11 +32,14 @@ class AgentState(TypedDict, total=False):
     cloud: str
     resource: str
     action: Literal["create", "modify", "destroy", "read"]
+    target: str                   # reference to an EXISTING resource for day-2 ops (name/context)
     raw_inputs: str
     parsed_inputs: dict[str, Any]
     validation_errors: list
     needs_clarification: bool
     clarification: str
+    collecting: bool              # mid multi-turn parameter collection (resumed via Redis)
+    param_request: dict[str, Any] # structured "required inputs" payload for the UI
     llm_unavailable: bool
     interrupt_payload: dict[str, Any]
 

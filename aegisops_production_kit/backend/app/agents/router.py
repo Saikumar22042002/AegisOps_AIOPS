@@ -17,7 +17,7 @@ from ..integrations.gemini import get_gemini
 from ..integrations.servicenow import get_servicenow
 from ..metrics import AGENT_RUNS
 from ..settings import get_settings
-from . import llm, templates
+from . import intent_guard, llm, params, templates
 from .runtime import emitter_of
 from .state import AgentState
 
@@ -33,13 +33,24 @@ Domains:
 - knowledge: questions answered from runbooks/RCAs/design docs (no side effects).
 - general: everything else / conversational.
 
-For cloudops, also identify cloud (aws|azure|gcp|kubernetes|vmware), resource (s3|ec2|rds|vpc|eks|storage|resource_group|gcs|module|other), and action (create|modify|destroy|read).
+For cloudops, also identify cloud (aws|azure|gcp|kubernetes|vmware), resource (s3|ec2|rds|vpc|eks|vm|aks|postgres|gke|cloudsql|storage|resource_group|gcs|database|module|other), and action:
+- create: provision a brand-new resource. Requires an explicit instruction (create/provision/launch/deploy…).
+- read: query existing resources or account state — counts, listings, status, attributes. ANY question
+  ("how many…", "are any… running", "what is…", "did I create…", "is it created…", "list…") is ALWAYS
+  action=read — a question is never create/modify/destroy.
+- modify: change an EXISTING resource (e.g. add security-group inbound ports to an instance).
+- destroy: tear down an existing resource. ONLY when the user explicitly asks to destroy/delete/remove/terminate.
+Also identify `target`: the name or reference of the EXISTING resource a read/modify/destroy acts on
+(e.g. "test-vm", "the instance I created", "the earlier EC2"), or null for a brand-new create.
+For a broad question about everything created ("did I create any resources", "list my resources"),
+use action "read" and target "all".
 
 Available CloudOps templates:
 {catalog}
 
 JSON shape:
 {{"domain": "...", "cloud": "aws|azure|gcp|null", "resource": "...|null", "action": "create|modify|destroy|read|null",
+  "target": "<existing resource name/reference>|null",
   "intent": "<short label>", "confidence": 0.0-1.0, "reason": "<one sentence>"}}"""
 
 
@@ -48,6 +59,32 @@ async def router(state: AgentState, config) -> dict:
     settings = get_settings()
     message = state["message"]
     await emitter.step(0, "Understood intent")
+
+    # If we're mid parameter-collection for this session AND this message plausibly answers the
+    # pending request, continue the SAME provisioning request (reuse cloud/resource/ticket, no
+    # re-classification, no new ServiceNow ticket). A question or a new request must NEVER be
+    # swallowed by the pending record (BUG-01 root cause: a stale destroy_vpc collection hijacked
+    # "How many s3 buckets are running in aws?" and re-asked for a VPC name — screenshots 19/20).
+    session_id = state.get("session_id")
+    if session_id:
+        pending = await params.load_pending(session_id)
+        if pending:
+            if intent_guard.is_new_request(message):
+                # Topic change: abandon the pending collection and classify this message fresh.
+                await params.clear_pending(session_id)
+                log.info("router.pending_abandoned", session_id=session_id,
+                         pending_intent=pending.get("intent"), pending_action=pending.get("action"),
+                         shape=intent_guard.message_shape(message))
+                await emitter.step(1, f"Set aside the pending {pending.get('intent', 'request')} — "
+                                      "handling your new message")
+            else:
+                await emitter.step(1, f"Continuing → {pending.get('cloud', 'cloud')} provisioning")
+                return {"domain": "cloudops", "collecting": True,
+                        "intent": pending.get("intent", "provision"), "intent_confidence": 1.0,
+                        "routing_reason": "Collecting the required parameters for your pending request.",
+                        "cloud": pending.get("cloud"), "resource": pending.get("resource"),
+                        "action": pending.get("action", "create"),
+                        "snow_id": pending.get("snow_id"), "context_id": pending.get("context_id")}
 
     gemini = get_gemini(settings)
     if not gemini.enabled:
@@ -81,7 +118,28 @@ async def router(state: AgentState, config) -> dict:
         "cloud": (cls.get("cloud") or "").lower() or None,
         "resource": (cls.get("resource") or "").lower() or None,
         "action": (cls.get("action") or "create").lower(),
+        "target": (cls.get("target") or "").strip() or None,
     }
+
+    # Hard safety guard (Phase 7 / BUG-01): deterministic, regex-only — even if the LLM misfires,
+    # a status/inventory question can never carry a side-effecting action, and a destroy requires
+    # the user's own explicit destructive verb. This is what makes "How many s3 buckets are
+    # running?" → destroy_vpc (screenshot 20) structurally impossible.
+    guarded = intent_guard.guard_classification(message, updates)
+    if guarded:
+        note = guarded.pop("guard_note", "read-only downgrade")
+        log.warning("router.safety_guard", note=note, original_intent=intent,
+                    original_action=updates.get("action"), confidence=confidence)
+        updates.update(guarded)
+        intent = updates.get("intent", intent)
+        await emitter.step(1, f"Safety guard · {note}")
+        if updates.get("needs_clarification"):
+            return updates
+
+    # Broad inventory question with no usable target → list everything (Phase 7 / BUG-04).
+    if (updates["domain"] == "cloudops" and updates["action"] == "read"
+            and not updates.get("target") and intent_guard.is_broad_inventory_question(message)):
+        updates["target"] = "all"
 
     # Ambiguity guard — never take destructive action on unclear intent.
     if confidence < 0.45:

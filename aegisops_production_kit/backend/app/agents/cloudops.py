@@ -10,8 +10,7 @@ does every mutation, and only after the human-approval gate.
 from __future__ import annotations
 
 import json
-import os
-import uuid
+import re
 
 import structlog
 
@@ -24,55 +23,94 @@ from ..tools import aws as aws_tool
 from ..tools import azure as azure_tool
 from ..tools import gcp as gcp_tool
 from ..tools.terraform import TerraformError, TerraformRunner
-from . import llm, templates
+from . import intent_guard, inventory, llm, params, provider_errors, templates, timing
 from .runtime import emitter_of
 from .state import AgentState
 
 log = structlog.get_logger(__name__)
 
 
-async def _extract_inputs(settings, schema, message: str) -> dict:
-    """Extract structured inputs from NL via Gemini, merged with free-form key=value parsing."""
+async def _extract_ports(settings, message: str) -> list[int]:
+    """Pull the TCP ports the user wants to open (day-2 SG modify)."""
+    import re
+
+    ports: list[int] = []
+    gemini = get_gemini(settings)
+    if gemini.enabled:
+        try:
+            r = await llm.classify_json(
+                settings,
+                'Extract only the TCP port numbers the user explicitly wants to open. '
+                'Respond with ONLY JSON: {"ingress_ports": [<int>, ...]}.', message)
+            ports = [int(p) for p in (r.get("ingress_ports") or []) if 0 < int(p) <= 65535]
+        except Exception as e:  # noqa: BLE001
+            log.warning("cloudops.port_extract_failed", error=str(e))
+    if not ports:  # fallback: digits following the word "port(s)"
+        m = re.search(r"ports?\b([\d,\s/and]+)", message, re.IGNORECASE)
+        if m:
+            ports = [int(n) for n in re.findall(r"\d{1,5}", m.group(1)) if 0 < int(n) <= 65535]
+    return sorted(set(ports))
+
+
+async def _extract_inputs(settings, template, message: str) -> dict:
+    """Extract this module's parameter values from NL via Gemini, merged with free-form parsing."""
     from ..schemas.workflows import parse_freeform
 
     inputs = parse_freeform(message)
     gemini = get_gemini(settings)
     if gemini.enabled:
-        fields = list(schema.model_fields.keys())
+        fields = params.extraction_fields(template.key) or ", ".join(template.schema.model_fields.keys())
         system = (
-            "Extract Terraform input values from the user's request. Respond with ONLY a JSON "
-            f"object using these keys when present: {fields}. Omit unknown keys. Lists as JSON arrays."
+            "Extract provisioning parameter values from the user's message for a Terraform module. "
+            f"Look for these fields (use the exact names as JSON keys): {fields}. "
+            "Respond with ONLY a JSON object; omit any field not present in the message. "
+            "Normalize OS synonyms: 'ubuntu'->'ubuntu-22.04', 'amazon linux'/'al2023'->'amazon-linux-2023', "
+            "'windows'->'windows-2022'. If the user asks to create/generate a key pair, use \"create\". "
+            "Lists as JSON arrays."
         )
         try:
             extracted = await llm.classify_json(settings, system, message)
-            inputs = {**extracted, **inputs}  # explicit free-form wins
+            clean = {k: v for k, v in extracted.items() if v not in (None, "")}
+            inputs = {**clean, **inputs}  # explicit free-form key=value wins over the LLM
         except Exception as e:  # noqa: BLE001
             log.warning("cloudops.extract_failed", error=str(e))
     return inputs
 
 
-def _generate_generic_workspace(settings, run_id: str, inputs: dict) -> str:
-    """Write a per-run workspace wrapping an arbitrary published module (escape hatch)."""
-    base = os.path.join(settings.terraform_workspaces_dir, "_generated", run_id)
-    os.makedirs(base, exist_ok=True)
-    var_lines = "\n".join(f'  {k} = jsondecode(var.module_vars)["{k}"]' for k in inputs.get("variables", {}))
-    hcl = f'''terraform {{
-  required_version = ">= 1.6"
-  backend "local" {{}}
-}}
-variable "module_vars" {{ type = string, default = "{{}}" }}
-module "this" {{
-  source = "{inputs['source']}"
-  {'version = "' + inputs['version'] + '"' if inputs.get('version') else ''}
-{var_lines}
-}}
-'''
-    # variable with comma is invalid HCL; fix to multiline form.
-    hcl = hcl.replace('variable "module_vars" { type = string, default = "{}" }',
-                      'variable "module_vars" {\n  type    = string\n  default = "{}"\n}')
-    with open(os.path.join(base, "main.tf"), "w") as f:
-        f.write(hcl)
-    return os.path.join("_generated", run_id)
+def _invalid_fields(exc: Exception) -> list[tuple[str, str]]:
+    """Field-level messages from a Pydantic ValidationError (for a specific clarification)."""
+    try:
+        return [(str(e.get("loc", ["input"])[0]), e.get("msg", "invalid")) for e in exc.errors()]  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001
+        return [("input", str(exc))]
+
+
+# Resource vocabulary → cloud hint (fallback only, when neither the request nor the UI names a
+# cloud). ONLY cloud-branded service names are hinted (S3/RDS/VPC/EKS→aws, Storage/Resource
+# Group→azure, GCS→gcp). Compute/"VM"/"ec2" is deliberately NOT hinted: a VM request with no
+# named cloud is genuinely cross-cloud, so it must ask rather than silently defaulting to AWS.
+_CLOUDS = {"aws", "azure", "gcp"}
+_RESOURCE_CLOUD = {"s3": "aws", "rds": "aws", "vpc": "aws", "eks": "aws",
+                   "resource_group": "azure", "storage": "azure", "gcs": "gcp"}
+
+
+def resolve_cloud(state: AgentState) -> tuple[str | None, str]:
+    """Resolve the target cloud with explicit priority (2.1):
+
+    (a) a cloud named in the request (router-extracted), (b) the UI cloud selector, (c) a hint
+    from the resource vocabulary. If still ambiguous, return (None, reason) so the agent asks
+    the user — it must NEVER silently default to AWS.
+    """
+    explicit = (state.get("cloud") or "").lower()
+    if explicit in _CLOUDS:
+        return explicit, "named in request"
+    ui = (state.get("user", {}).get("cloud") or "").lower()
+    if ui in _CLOUDS:
+        return ui, "UI cloud selector"
+    hint = _RESOURCE_CLOUD.get((state.get("resource") or "").lower())
+    if hint:
+        return hint, f"inferred from resource '{state.get('resource')}'"
+    return None, "ambiguous"
 
 
 async def _availability(settings, cloud: str, region: str, emitter) -> dict:
@@ -104,50 +142,172 @@ async def _availability(settings, cloud: str, region: str, emitter) -> dict:
 async def cloudops_plan(state: AgentState, config) -> dict:
     emitter = emitter_of(config)
     settings = get_settings()
-    cloud = state.get("cloud") or "aws"
-    resource = state.get("resource") or "module"
+    run_id = state.get("run_id")
     action = state.get("action") or "create"
     region = state.get("user", {}).get("region", "us-east-1")
     context_id = state.get("context_id") or state["run_id"]
     cg = ContextGraph(context_id, state.get("org_id", ""))
 
+    # ── Day-2 operations on an EXISTING resource (Phase 4): resolve it from inventory.
+    # A BROAD target ("all") is not a single-resource lookup — it falls through to the
+    # discovery path below, which answers with live per-cloud counts AND the full inventory
+    # listing (Phase 7 / BUG-04).
+    target = state.get("target")
+    if action == "read" and target and not inventory.is_broad_ref(target):
+        return await _read_resource(state, config, target)
+    if action == "modify":
+        return await _modify_resource(state, config, target)
+
+    # ── Read path: discovery only, no Terraform. Runs BEFORE cloud resolution because a
+    # read-only question must never hard-fail on cloud ambiguity — it can answer across every
+    # cloud the question names (or all configured ones). (Phase 7 / BUG-01, BUG-04.)
+    if action == "read":
+        await timing.start_step(run_id, "cloudops_agent")
+        r = await _read_path(state, config)
+        await timing.end_step(run_id, "cloudops_agent", status="done")
+        return r
+
+    # 2.1 — resolve the target cloud with explicit priority; never silently default to AWS.
+    cloud, cloud_reason = resolve_cloud(state)
+    if cloud is None:
+        await emitter.step(2, "Cloud ambiguous — asking user")
+        return {"needs_clarification": True, "needs_change": False,
+                "clarification": "Which cloud should I target — **AWS**, **Azure**, or **GCP**? "
+                                 "I couldn't tell from your request or the workspace cloud selector."}
+    resource = (state.get("resource") or "").lower()
+    log.info("cloudops.cloud_resolved", cloud=cloud, reason=cloud_reason, resource=resource, run_id=run_id)
+    await emitter.step(2, f"Target cloud · {cloud.upper()} ({cloud_reason})")
+
+    # 2.2 — select the cloud-specific template. No cross-cloud fallback: if this cloud has no
+    # approved module for the resource, clarify honestly (don't provision on a different cloud).
     template = templates.select(cloud, resource)
     if template is None:
-        return {"needs_clarification": True, "needs_change": False,
-                "clarification": f"I don't have an approved template for {cloud}/{resource}. "
-                                 "Tell me the resource type (e.g. s3, vpc, eks, storage, gcs) or a Terraform module source."}
+        await emitter.step(3, f"No approved {cloud}/{resource or '?'} module")
+        supported = ", ".join(sorted(f"{t.cloud}/{t.resource}" for t in templates.TEMPLATES))
+        return {"needs_clarification": True, "needs_change": False, "cloud": cloud,
+                "clarification": f"I resolved the target cloud to **{cloud.upper()}**, but there's no approved "
+                                 f"Terraform module for **{cloud}/{resource or 'that resource'}** yet, so I can't plan "
+                                 f"it — and I won't provision it on another cloud. Currently supported: {supported}."}
 
-    await emitter.step(2, f"Selected workflow · {template.key} {template.version}")
+    await emitter.step(3, f"Selected workflow · {template.key} {template.version}")
 
-    # ── Read path: discovery only, no Terraform ──
-    if action == "read":
-        return await _read_path(state, config, cloud, region, template)
+    # ── Interactive parameter collection (3.1–3.3) ──
+    # Ask ONLY for decision-critical params with no safe default; default the rest (region/VPC/subnet).
+    # Collection spans chat turns via a Redis pending record keyed by session.
+    session_id = state.get("session_id")
+    pending_rec: dict = {}
+    if state.get("collecting") and session_id:
+        pending_rec = await params.load_pending(session_id) or {}
 
-    # ── Inputs ──
-    inputs = await _extract_inputs(settings, template.schema, state["message"])
+    # Belt-and-suspenders destructive gate (Phase 7 / BUG-01): a destroy plan requires the user's
+    # own explicit destructive verb — in this message, or in the turn that legitimately armed this
+    # pending collection (`destructive_ok`, stamped below). Whatever the classifier said, a
+    # read-shaped message can never reach `terraform plan -destroy`.
+    destroy_confirmed = (intent_guard.explicitly_destructive(state.get("message", ""))
+                         or bool(pending_rec.get("destructive_ok")))
+    if action == "destroy" and not destroy_confirmed:
+        await emitter.step(3, "Destructive request not explicitly confirmed — stopping")
+        log.warning("cloudops.destroy_blocked", run_id=run_id, intent=state.get("intent"))
+        return {"needs_clarification": True, "needs_change": False, "cloud": cloud,
+                "clarification": "This came through as a **destroy** operation, but nothing in your "
+                                 "request explicitly asks to tear anything down, so I stopped — nothing "
+                                 "was changed. If you do want it destroyed, say so explicitly (e.g. "
+                                 "“destroy the VPC named prod-network”)."}
+
+    await timing.start_step(run_id, "cloudops_agent")
+
+    def _pending_record(collected: dict) -> dict:
+        return {"template": template.key, "cloud": cloud, "resource": resource, "action": action,
+                "intent": state.get("intent"), "collected": collected,
+                "snow_id": state.get("snow_id"), "context_id": context_id,
+                # Only a turn whose own words were explicitly destructive can arm a destroy
+                # continuation — a stale/legacy record without this flag can never resume one.
+                "destructive_ok": action == "destroy" and destroy_confirmed}
+
+    prior: dict = pending_rec.get("collected", {})
+    extracted = await _extract_inputs(settings, template, state["message"])
+    collected = {**prior, **{k: v for k, v in extracted.items() if v not in (None, "", [])}}
+    # GCP resources default the project to the configured one (never asked).
+    if cloud == "gcp" and not collected.get("project"):
+        collected["project"] = settings.google_cloud_project
+
+    # Missing decision-critical params → ask for exactly those (never for defaulted VPC/subnet).
+    missing = params.missing_required(template.key, collected)
+    if missing:
+        req = params.request_payload(template.key, collected)
+        msg = params.summary_text(template.key, collected)
+        if session_id:
+            await params.save_pending(session_id, _pending_record(collected))
+        await emitter.params(req)
+        await emitter.token(msg)
+        cc = classify(msg)
+        await emitter.confidentiality(cc.level, cc.score)
+        await timing.end_step(run_id, "cloudops_agent", status="done")
+        return {"needs_change": False, "approval_status": "not_required", "collecting": True,
+                "cloud": cloud, "resource": resource, "answer": msg, "param_request": req,
+                "parsed_inputs": collected, "confidentiality": {"level": cc.level, "score": cc.score}}
+
+    # All required present → validate the concrete Terraform variables against the module schema.
+    if session_id:
+        await params.clear_pending(session_id)
     try:
-        validated = template.schema(**inputs).model_dump()
-    except Exception as e:  # noqa: BLE001 - Pydantic ValidationError → actionable clarification
+        validated = template.schema(**params.to_tf_vars(template.key, collected)).model_dump()
+    except Exception as e:  # noqa: BLE001 - Pydantic ValidationError → per-field clarification, no plan
+        bad = _invalid_fields(e)
+        labels = {p.name: p.label for p in params.specs_for(template.key)}
+        for fname, _ in bad:
+            collected.pop(fname, None)  # drop the invalid value so it's re-asked specifically
+        if session_id:
+            await params.save_pending(session_id, _pending_record(collected))
+        detail = "; ".join(f"**{labels.get(f, f)}** — {m}" for f, m in bad) or str(e)
+        msg = f"That value didn't validate: {detail}. Please send a valid value."
+        await emitter.params(params.request_payload(template.key, collected))
+        await emitter.token(msg)
+        cc = classify(msg)
+        await emitter.confidentiality(cc.level, cc.score)
+        await timing.end_step(run_id, "cloudops_agent", status="failed", error=str(e))
         await cg.add_step(order=1, name="validate_inputs", agent="cloudops", tool="pydantic", status="failed")
-        await cg.update_step(order=1, status="failed", error=str(e))
-        return {"needs_clarification": True, "needs_change": False, "validation_errors": [str(e)],
-                "clarification": f"I need a bit more to provision {template.resource}: {e}"}
+        return {"needs_change": False, "approval_status": "not_required", "collecting": True,
+                "cloud": cloud, "resource": resource, "answer": msg, "parsed_inputs": collected,
+                "confidentiality": {"level": cc.level, "score": cc.score}}
+
+    # ── S3 names are GLOBALLY unique — read-only HeadBucket precheck so the user isn't burned
+    # by a 409 at apply time (Phase 7 / BUG-07). Best-effort: unknown ⇒ proceed to plan.
+    if template.key == "aws.s3" and aws_tool.get_aws(settings).enabled:
+        taken = await aws_tool.get_aws(settings).bucket_taken(validated["bucket_name"])
+        if taken:
+            bad_name = validated["bucket_name"]
+            collected.pop("bucket_name", None)
+            if session_id:
+                await params.save_pending(session_id, _pending_record(collected))
+            msg = (f"The bucket name **`{bad_name}`** is already taken — S3 bucket names are "
+                   "globally unique across ALL AWS customers, so common names are long gone. "
+                   "Pick a more distinctive one (e.g. prefix it with your org or project, "
+                   "like `acme-payments-logs`) and send it over.")
+            await emitter.step(4, f"Bucket name “{bad_name}” is taken — asking for another")
+            await emitter.params(params.request_payload(template.key, collected))
+            await emitter.token(msg)
+            cc = classify(msg)
+            await emitter.confidentiality(cc.level, cc.score)
+            await timing.end_step(run_id, "cloudops_agent", status="done")
+            return {"needs_change": False, "approval_status": "not_required", "collecting": True,
+                    "cloud": cloud, "resource": resource, "answer": msg, "parsed_inputs": collected,
+                    "confidentiality": {"level": cc.level, "score": cc.score}}
 
     # ── Availability (real SDK reads) ──
-    await emitter.step(3, f"Queried {cloud.upper()} · {region}")
+    await emitter.step(4, f"Queried {cloud.upper()} · {region}")
     avail = await _availability(settings, cloud, region, emitter)
     for c in avail["checks"]:
         await emitter.console("stdout", f"availability: {c['name']} = {'ok' if c['passed'] else 'n/a'} {c.get('detail','')}")
+    await timing.end_step(run_id, "cloudops_agent", status="done")
 
-    # ── Terraform plan ──
+    # ── Terraform plan ── (fixed reviewed module; user inputs passed strictly as -var)
     workspace = template.workspace
     tf_vars = validated
-    if template.key == "generic.module":
-        workspace = _generate_generic_workspace(settings, state["run_id"], validated)
-        tf_vars = {"module_vars": json.dumps(validated.get("variables", {}))}
 
     mode = "destroy" if action == "destroy" else "apply"
     await emitter.step(4, "Ran terraform plan")
+    await timing.start_step(run_id, "planner", tool="terraform")
     runner = TerraformRunner(workspace, settings)
 
     async def on_line(stream: str, line: str) -> None:
@@ -158,13 +318,27 @@ async def cloudops_plan(state: AgentState, config) -> dict:
         await runner.plan(tf_vars, destroy=(action == "destroy"), on_line=on_line)
         plan = await runner.show_plan()
     except TerraformError as e:
+        await timing.end_step(run_id, "planner", status="failed", error=str(e))
+        # Classify the provider failure and explain it in plain English (Phase 7 / BUG-05) —
+        # the raw trace stays in the Logs tab; the conversation gets cause + next step.
+        failure = provider_errors.classify_provider_error(str(e))
+        friendly = provider_errors.failure_message(failure, str(e), mode="plan")
         await emitter.error(f"terraform plan failed: {e}", code="terraform_error", retriable=True)
+        await emitter.token(friendly)
+        cc = classify(friendly)
+        await emitter.confidentiality(cc.level, cc.score)
         await cg.add_step(order=2, name="terraform_plan", agent="cloudops", tool="terraform", status="failed")
         await cg.update_step(order=2, status="failed", error=str(e))
-        return {"needs_change": False, "approval_status": "not_required",
-                "answer": f"Terraform plan failed: {e}", "outcome": {"status": "plan_failed"}}
+        return {"needs_change": False, "approval_status": "not_required", "answer": friendly,
+                "confidentiality": {"level": cc.level, "score": cc.score},
+                "outcome": {"status": "plan_failed", "error": str(e)[:500],
+                            "failure": failure.__dict__ if failure else None}}
+    await timing.end_step(run_id, "planner", status="done", result=plan["summary"])
 
+    await timing.start_step(run_id, "policy_evaluation")
     policy_checks = template.policy_fn(validated)
+    await timing.end_step(run_id, "policy_evaluation", status="done",
+                          result={"passed": sum(1 for p in policy_checks if p["passed"]), "total": len(policy_checks)})
     plan_json = {"summary": plan["summary"], "diff": plan["diff"], "workspace": template.workspace,
                  "policy_checks": policy_checks, "mode": mode}
 
@@ -202,6 +376,7 @@ async def cloudops_plan(state: AgentState, config) -> dict:
 
     return {
         "workflow": template.key, "workflow_version": template.version,
+        "cloud": cloud, "resource": resource,
         "parsed_inputs": validated, "plan_json": plan_json, "diff": plan["diff"],
         "policy_checks": policy_checks, "dependencies": avail["checks"],
         "execution_mode": mode, "needs_change": True, "approval_status": "pending",
@@ -212,30 +387,338 @@ async def cloudops_plan(state: AgentState, config) -> dict:
     }
 
 
-async def _read_path(state, config, cloud, region, template) -> dict:
+# Which resource kind a read question is about (normalizes per-cloud synonyms).
+_READ_KINDS = {
+    "vm": {"ec2", "vm", "gce", "instance", "compute", "server", "machine"},
+    "storage": {"s3", "gcs", "storage", "bucket", "blob", "object_storage", "storage_account"},
+    "db": {"rds", "database", "db", "postgres", "postgresql", "cloudsql", "sql", "mysql"},
+    "k8s": {"eks", "aks", "gke", "k8s", "kubernetes", "cluster"},
+    "network": {"vpc", "network", "subnet"},
+}
+_CLOUD_WORDS = {"aws": r"\baws\b|\bamazon\b", "azure": r"\bazure\b", "gcp": r"\bgcp\b|\bgoogle\b"}
+
+
+def _read_kind(resource: str) -> str:
+    r = (resource or "").lower()
+    return next((k for k, words in _READ_KINDS.items() if r in words), "any")
+
+
+async def _discover_aws(settings, kind: str, region: str) -> list[str]:
+    r = aws_tool.get_aws(settings)
+    if not r.enabled:
+        return ["credentials not configured"]
+    out: list[str] = []
+    if kind in ("vm", "any"):
+        inst = await r.list_instances(region)
+        running = [i for i in inst if i.get("state") == "running"]
+        out.append(f"{len(running)} running EC2 instance(s)"
+                   + (f" ({', '.join(i['name'] or i['id'] for i in running[:5])})" if running else "")
+                   + (f" of {len(inst)} total" if len(inst) != len(running) else ""))
+    if kind in ("storage", "any"):
+        buckets = await r.list_buckets()
+        out.append(f"{len(buckets)} S3 bucket(s)"
+                   + (f" ({', '.join(b['name'] for b in buckets[:5])}{'…' if len(buckets) > 5 else ''})" if buckets else ""))
+    if kind in ("db", "any"):
+        out.append(f"{len(await r.list_databases(region))} RDS instance(s)")
+    if kind == "k8s":
+        out.append(f"{len(await r.list_eks_clusters(region))} EKS cluster(s)")
+    if kind in ("network", "any"):
+        out.append(f"{len(await r.list_vpcs(region))} VPC(s)")
+    return out
+
+
+async def _discover_azure(settings, kind: str) -> list[str]:
+    r = azure_tool.get_azure(settings)
+    if not r.enabled:
+        return ["credentials not configured"]
+    out: list[str] = []
+    if kind in ("vm", "any"):
+        vms = await r.list_vms()
+        out.append(f"{len(vms)} VM(s)"
+                   + (f" ({', '.join(v['name'] for v in vms[:5])})" if vms else ""))
+    if kind in ("network", "any"):
+        out.append(f"{len(await r.list_vnets())} VNet(s)")
+    if kind in ("storage", "db", "k8s") and not out:
+        out.append(f"live {kind} listing isn't wired for Azure yet — the AegisOps inventory below covers what I created")
+    return out
+
+
+async def _discover_gcp(settings, kind: str) -> list[str]:
+    r = gcp_tool.get_gcp(settings)
+    if not r.enabled:
+        return ["credentials not configured"]
+    out: list[str] = []
+    if kind in ("vm", "any"):
+        inst = await r.list_all_instances()
+        running = [i for i in inst if (i.get("status") or "").upper() == "RUNNING"]
+        out.append(f"{len(running)} running Compute instance(s)"
+                   + (f" ({', '.join(i['name'] for i in running[:5])})" if running else "")
+                   + (f" of {len(inst)} total" if len(inst) != len(running) else ""))
+    if kind in ("network", "any"):
+        out.append(f"{len(await r.list_networks())} network(s)")
+    if kind in ("storage", "db", "k8s") and not out:
+        out.append(f"live {kind} listing isn't wired for GCP yet — the AegisOps inventory below covers what I created")
+    return out
+
+
+async def _read_path(state, config) -> dict:
+    """Read-only account discovery — real SDK reads, no Terraform, no approval needed.
+
+    Multi-cloud aware (Phase 7): answers for every cloud named in the question, else the
+    resolved/selected cloud, else every configured cloud. Counts the resource kind actually
+    asked about (instances/buckets/databases/clusters/VPCs), and always includes what the
+    AegisOps inventory recorded — never a destructive or provisioning workflow.
+    """
     emitter = emitter_of(config)
     settings = get_settings()
-    await emitter.step(3, f"Queried {cloud.upper()} · {region}")
-    summary = []
+    message = (state.get("message") or "").lower()
+    region = state.get("user", {}).get("region", "us-east-1")
+    kind = _read_kind(state.get("resource"))
+
+    clouds = [c for c, pat in _CLOUD_WORDS.items() if re.search(pat, message)]
+    if not clouds:
+        resolved, _why = resolve_cloud(state)
+        clouds = [resolved] if resolved else [c for c, tool in
+                  (("aws", aws_tool.get_aws(settings)), ("azure", azure_tool.get_azure(settings)),
+                   ("gcp", gcp_tool.get_gcp(settings))) if tool.enabled] or ["aws"]
+
+    await emitter.step(3, f"Querying {', '.join(c.upper() for c in clouds)} · read-only")
+    sections: list[str] = []
+    for cloud in clouds:
+        try:
+            found = await (_discover_aws(settings, kind, region) if cloud == "aws"
+                           else _discover_azure(settings, kind) if cloud == "azure"
+                           else _discover_gcp(settings, kind))
+            sections.append(f"**{cloud.upper()}**: " + ", ".join(found))
+            for f in found:
+                await emitter.console("stdout", f"discovery[{cloud}]: {f}")
+        except Exception as e:  # noqa: BLE001 - one cloud failing must not sink the others
+            log.warning("cloudops.discovery_failed", cloud=cloud, error=str(e))
+            f = provider_errors.classify_provider_error(str(e))
+            sections.append(f"**{cloud.upper()}**: discovery failed — "
+                            + (f"{f.title}. {f.next_step}" if f else str(e)[:140]))
+
+    # What AegisOps itself provisioned (the inventory) — always part of the answer. For a
+    # broad "did I create any resources" question, render the full grouped listing.
     try:
-        if cloud == "aws":
-            r = aws_tool.get_aws(settings)
-            if r.enabled:
-                vpcs = await r.list_vpcs(region)
-                dbs = await r.list_databases(region)
-                summary = [f"{len(vpcs)} VPC(s)", f"{len(dbs)} RDS instance(s)"]
-            else:
-                summary = ["AWS not configured"]
+        mine = await inventory.list_active(state["org_id"], clouds=clouds)
+        if inventory.is_broad_ref(state.get("target")) or intent_guard.is_broad_inventory_question(message):
+            # Broad = everything created, across ALL clouds (not just the ones asked about).
+            sections.append("\n" + _render_inventory_list(await inventory.list_active(state["org_id"])))
+        elif mine:
+            names = ", ".join(f"{m['name']} ({m['cloud']} {m['resource_type']})" for m in mine[:8])
+            sections.append(f"**Provisioned by AegisOps**: {len(mine)} active — {names}")
         else:
-            summary = [f"{cloud} discovery requires configured credentials"]
+            sections.append("**Provisioned by AegisOps**: none recorded for these clouds")
     except Exception as e:  # noqa: BLE001
-        await emitter.error(f"discovery failed: {e}", code="discovery_error", retriable=True)
-    text = f"Discovered in {cloud} {region}: " + ", ".join(summary)
+        log.warning("cloudops.inventory_list_failed", error=str(e))
+
+    text = "\n".join(sections)
     await emitter.token(text)
     c = classify(text)
     await emitter.confidentiality(c.level, c.score)
+    await emitter.analysis(
+        summary="Read-only discovery via cloud SDK reads plus the AegisOps inventory — no "
+                "infrastructure was changed and no approval was needed.",
+        cards=[{"title": "Read-only query", "conf": "",
+                "body": f"kind={kind} · clouds={', '.join(clouds)} · region={region}"}])
     return {"needs_change": False, "approval_status": "not_required", "answer": text,
             "confidentiality": {"level": c.level, "score": c.score}}
+
+
+def _render_inventory_list(matches: list[dict]) -> str:
+    """Human summary of every active inventoried resource, grouped by cloud (BUG-04)."""
+    if not matches:
+        return ("I haven't provisioned any resources in this workspace yet — nothing is recorded "
+                "in the inventory. (Failed applies leave no active resource, and destroyed ones "
+                "are removed from this list.) Ask me to create something — e.g. "
+                "“create an EC2 instance in AWS”.")
+    by_cloud: dict[str, list[dict]] = {}
+    for m in matches:
+        by_cloud.setdefault(m["cloud"], []).append(m)
+    lines = [f"I've provisioned **{len(matches)}** active resource(s):"]
+    for cloud in sorted(by_cloud):
+        lines.append(f"\n**{cloud.upper()}**")
+        for m in by_cloud[cloud]:
+            bits = [f"• **{m['name']}** — {m['resource_type']}"]
+            if m.get("provider_id"):
+                bits.append(f"(`{m['provider_id']}`)")
+            if m.get("region"):
+                bits.append(f"· {m['region']}")
+            created = (m.get("created_at") or "")[:16].replace("T", " ")
+            if created:
+                bits.append(f"· created {created}")
+            lines.append(" ".join(bits))
+    lines.append("\nAsk about any of them by name for full details (IPs, VPC, ports, …).")
+    return "\n".join(lines)
+
+
+async def _read_resource(state: AgentState, config, target: str) -> dict:
+    """Day-2 READ: return a specific inventoried resource's real recorded values (reconciled)."""
+    emitter = emitter_of(config)
+    settings = get_settings()
+    org_id = state["org_id"]
+    await emitter.step(2, f"Looking up “{target}” in inventory")
+    matches, kind = await inventory.resolve(org_id, target)
+
+    async def _say(msg: str) -> dict:
+        await emitter.token(msg)
+        cc = classify(msg)
+        await emitter.confidentiality(cc.level, cc.score)
+        return {"needs_change": False, "approval_status": "not_required", "answer": msg,
+                "confidentiality": {"level": cc.level, "score": cc.score}}
+
+    # Broad inventory question ("did I create any resources…") → list EVERYTHING active,
+    # grouped by cloud — never the literal-match refusal (Phase 7 / BUG-04, screenshots 14/16).
+    if kind == "all":
+        await emitter.step(3, f"Inventory · {len(matches)} active resource(s)")
+        await emitter.analysis(
+            summary="Listed every active resource recorded in the AegisOps inventory for this "
+                    "workspace (successful applies only; failed/destroyed runs leave no active resource).",
+            cards=[{"title": "Inventory listing", "conf": "", "body": f"{len(matches)} active resource(s)"}])
+        return await _say(_render_inventory_list(matches))
+
+    if not matches:
+        return await _say(f"I couldn't find a resource matching “{target}” in what I've provisioned for you. "
+                          "Tell me its exact name, or create it first — I won't guess.")
+    if len(matches) > 1:
+        return await _say(f"More than one resource matches “{target}”: "
+                          f"{', '.join(m['name'] for m in matches)}. Which one do you mean?")
+    res = await inventory.reconcile(matches[0], settings)
+    await emitter.step(3, f"Recalled {res['name']} · {res.get('provider_id') or ''}")
+    attrs = res.get("attributes") or {}
+    inputs = res.get("inputs") or {}
+    lines = [f"**{res['name']}** — {res['cloud']} {res['resource_type']}"
+             + (f" (`{res['provider_id']}`)" if res.get("provider_id") else "") + ":"]
+    # Size/type comes from the validated inputs the resource was created with (asked-for
+    # attribute in screenshot 6 — "instance size" — was previously never surfaced).
+    size = inputs.get("instance_type") or inputs.get("machine_type") or inputs.get("size") or inputs.get("tier")
+    if size:
+        lines.append(f"• Size / type: `{size}`")
+    if res.get("region"):
+        lines.append(f"• Region: `{res['region']}`")
+    for label, key in [("VPC", "vpc_id"), ("Subnet", "subnet_id"), ("Private IP", "private_ip"),
+                       ("Public IP", "public_ip"), ("Public DNS", "public_dns"),
+                       ("Security group", "security_group_id"), ("Key pair", "key_name"), ("State", "state")]:
+        if attrs.get(key):
+            lines.append(f"• {label}: `{attrs[key]}`")
+    if attrs.get("ingress_ports"):
+        lines.append(f"• Open inbound ports: {attrs['ingress_ports']}")
+    if res.get("status") != "active":
+        lines.append(f"• ⚠️ Status: {res['status']}")
+    # Relationships come from the context graph (never inferred): who provisioned it.
+    prov = await inventory.provenance(provider_id=res.get("provider_id"), name=res["name"])
+    if prov and (prov.get("run_id") or prov.get("session_id")):
+        lines.append(f"• Provisioned by run `{str(prov.get('run_id') or '')[:8]}`"
+                     + (f" in session `{str(prov.get('session_id'))[:8]}`" if prov.get("session_id") else "")
+                     + " (context graph)")
+    msg = "\n".join(lines)
+    await emitter.token(msg)
+    cc = classify(msg)
+    await emitter.confidentiality(cc.level, cc.score)
+    await emitter.analysis(
+        summary=f"Recalled “{res['name']}” from the provisioned-resource inventory (matched by {kind}); "
+                "these are this resource's real recorded attributes, not a generic account discovery.",
+        cards=[{"title": "Resolved resource", "conf": "",
+                "body": f"{res['name']} · {res.get('provider_id')} · workspace {res['workspace']}"}])
+    return {"needs_change": False, "approval_status": "not_required", "answer": msg,
+            "cloud": res["cloud"], "resource": res["resource_type"],
+            "confidentiality": {"level": cc.level, "score": cc.score}}
+
+
+async def _modify_resource(state: AgentState, config, target: str | None) -> dict:
+    """Day-2 MODIFY: change an inventoried resource via its module + variables + approval gate."""
+    emitter = emitter_of(config)
+    settings = get_settings()
+    run_id = state.get("run_id")
+    org_id = state["org_id"]
+
+    async def _say(msg: str) -> dict:
+        await emitter.token(msg)
+        cc = classify(msg)
+        await emitter.confidentiality(cc.level, cc.score)
+        return {"needs_change": False, "approval_status": "not_required", "answer": msg,
+                "confidentiality": {"level": cc.level, "score": cc.score}}
+
+    await emitter.step(2, f"Resolving “{target or 'resource'}” for modification")
+    matches, _kind = await inventory.resolve(org_id, target)
+    if not matches:
+        return await _say(f"I couldn't find a resource matching “{target or 'that'}” to modify. "
+                          "Tell me its exact name, or create it first — I won't invent one.")
+    if len(matches) > 1:
+        return await _say(f"More than one resource matches “{target}”: "
+                          f"{', '.join(m['name'] for m in matches)}. Which should I modify?")
+    res = matches[0]
+    template = templates.select(res["cloud"], res["resource_type"])
+    if template is None or res["resource_type"] not in ("ec2", "vm"):
+        return await _say(f"I can currently modify inbound ports on compute instances (AWS EC2, Azure/GCP VM); "
+                          f"modifying {res['cloud']}/{res['resource_type']} isn't supported yet.")
+    ports = await _extract_ports(settings, state["message"])
+    if not ports:
+        return await _say(f"What change should I make to **{res['name']}**? I can add inbound TCP ports — "
+                          f"e.g. “add inbound ports 8501, 8502 to {res['name']}”.")
+
+    base = dict(res.get("inputs") or {})
+    current = [int(p) for p in (base.get("ingress_ports") or [])]
+    merged = {**base, "ingress_ports": sorted(set(current) | set(ports))}
+    try:
+        validated = template.schema(**merged).model_dump()
+    except Exception as e:  # noqa: BLE001
+        return await _say(f"Couldn't build a valid modification for {res['name']}: {e}")
+
+    await emitter.step(3, f"Planning inbound {ports} on {res['name']}")
+    await timing.start_step(run_id, "cloudops_agent")
+    await timing.end_step(run_id, "cloudops_agent", status="done")
+    await timing.start_step(run_id, "planner", tool="terraform")
+    runner = TerraformRunner(res["workspace"] or template.workspace, settings)
+
+    async def on_line(stream: str, line: str) -> None:
+        await emitter.console(stream, line)
+
+    try:
+        await runner.init(on_line)
+        await runner.plan(validated, on_line=on_line)
+        plan = await runner.show_plan()
+    except TerraformError as e:
+        await timing.end_step(run_id, "planner", status="failed", error=str(e))
+        failure = provider_errors.classify_provider_error(str(e))
+        friendly = provider_errors.failure_message(failure, str(e), mode="plan")
+        await emitter.error(f"terraform plan failed: {e}", code="terraform_error", retriable=True)
+        await emitter.token(friendly)
+        cc = classify(friendly)
+        await emitter.confidentiality(cc.level, cc.score)
+        return {"needs_change": False, "approval_status": "not_required", "answer": friendly,
+                "confidentiality": {"level": cc.level, "score": cc.score},
+                "outcome": {"status": "plan_failed", "error": str(e)[:500],
+                            "failure": failure.__dict__ if failure else None}}
+    await timing.end_step(run_id, "planner", status="done", result=plan["summary"])
+    await timing.start_step(run_id, "policy_evaluation")
+    policy_checks = template.policy_fn(validated)
+    await timing.end_step(run_id, "policy_evaluation", status="done")
+
+    plan_json = {"summary": plan["summary"], "diff": plan["diff"],
+                 "workspace": res["workspace"] or template.workspace, "policy_checks": policy_checks, "mode": "apply"}
+    cc = classify(json.dumps({"modify": res["name"], "ports": ports}))
+    await emitter.confidentiality(cc.level, cc.score)
+    reasoning = [
+        {"title": "Day-2 modification", "conf": "",
+         "body": f"Add inbound TCP {ports} to {res['name']}'s security group (resource {res.get('provider_id')})."},
+        {"title": "Plan", "conf": "",
+         "body": f"+{plan['summary']['add']} ~{plan['summary']['change']} -{plan['summary']['destroy']}"},
+    ]
+    await emitter.analysis(summary=f"Planned a security-group change on {res['name']}; awaiting approval.", cards=reasoning)
+    interrupt_payload = {"kind": "approval", "runId": state["run_id"], "workflow": template.key, "plan": plan_json,
+                         "diff": plan["diff"], "policyChecks": policy_checks, "mode": "apply",
+                         "cloud": res["cloud"], "resource": res["resource_type"]}
+    await emitter.step(9, "Awaiting approval")
+    await emitter.interrupt(interrupt_payload)
+    return {"workflow": template.key, "workflow_version": template.version, "cloud": res["cloud"],
+            "resource": res["resource_type"], "parsed_inputs": validated, "plan_json": plan_json,
+            "diff": plan["diff"], "policy_checks": policy_checks, "execution_mode": "apply",
+            "needs_change": True, "approval_status": "pending", "reasoning_cards": reasoning,
+            "interrupt_payload": interrupt_payload, "confidentiality": {"level": cc.level, "score": cc.score},
+            "answer": f"Planned adding inbound {', '.join(map(str, ports))} to **{res['name']}** "
+                      f"(~{plan['summary']['change']} changed). Review and approve to apply."}
 
 
 async def cloudops_execute(state: AgentState, config) -> dict:
@@ -246,12 +729,15 @@ async def cloudops_execute(state: AgentState, config) -> dict:
         return {}
     context_id = state.get("context_id") or state["run_id"]
     cg = ContextGraph(context_id, state.get("org_id", ""))
-    template = templates.select(state.get("cloud") or "aws", state.get("resource") or "module")
-    workspace = template.workspace
-    if template.key == "generic.module":
-        workspace = os.path.join("_generated", state["run_id"])
-    runner = TerraformRunner(workspace, settings)
+    # Use the cloud/resource resolved + persisted by cloudops_plan (never re-default to AWS).
+    template = templates.select(state.get("cloud"), state.get("resource"))
     mode = state.get("execution_mode", "apply")
+    if template is None:
+        await emitter.error("No approved module for the resolved cloud/resource; refusing to execute.",
+                            code="template_error")
+        return {"outcome": {"status": f"{mode}_failed", "error": "template not found for resolved cloud/resource"}}
+    workspace = template.workspace
+    runner = TerraformRunner(workspace, settings)
 
     idem_key = idempotency.make_key("tf-exec", state["run_id"], mode)
     if not await idempotency.claim(idem_key):
@@ -280,11 +766,41 @@ async def cloudops_execute(state: AgentState, config) -> dict:
                         else runner.apply(on_line))
     except TerraformError as e:
         await idempotency.release(idem_key)
+        # Classify + explain the failure in the conversation (Phase 7 / BUG-05); raw trace
+        # stays in the Logs tab. Also report what (if anything) is left in Terraform state so
+        # the user knows whether partial resources remain.
+        failure = provider_errors.classify_provider_error(str(e))
+        friendly = provider_errors.failure_message(failure, str(e), mode=mode)
+        try:
+            leftover = await runner.state_list()
+        except Exception:  # noqa: BLE001 - the state report is best-effort
+            leftover = None
+        if leftover is not None:
+            friendly += ("\n\n**State check:** "
+                         + (f"{len(leftover)} resource(s) remain in Terraform state "
+                            f"(`{'`, `'.join(leftover[:6])}`) — a retry will reconcile them, or ask "
+                            "me to destroy this workspace to clean up."
+                            if leftover else "no partial resources were left behind."))
         await emitter.error(f"terraform {mode} failed: {e}", code="terraform_error", retriable=True)
+        await emitter.token(friendly)
+        cc = classify(friendly)
+        await emitter.confidentiality(cc.level, cc.score)
         await _cg(cg.update_step(order=3, status="failed", error=str(e)))
-        return {"outcome": {"status": f"{mode}_failed", "error": str(e)}}
+        return {"outcome": {"status": f"{mode}_failed", "error": str(e)[:500],
+                            "failure": failure.__dict__ if failure else None},
+                "answer": friendly,
+                "confidentiality": {"level": cc.level, "score": cc.score}}
 
     await idempotency.store_result(idem_key, result)
     await _cg(cg.update_step(order=3, status="done", result={"mode": mode}))
     outcome = {"status": "applied" if mode == "apply" else "destroyed", **result}
+    # Inventory (Phase 4): record the resource on apply; mark it destroyed on teardown.
+    try:
+        if mode == "destroy":
+            name = inventory.name_from_inputs(state.get("parsed_inputs") or {}, template.resource)
+            await inventory.mark_destroyed(state["org_id"], template.workspace, name=name)
+        else:
+            await inventory.record_from_apply(state, template, result.get("outputs", {}))
+    except Exception as e:  # noqa: BLE001 - inventory bookkeeping must never fail a real apply
+        log.warning("cloudops.inventory_failed", error=str(e))
     return {"outcome": outcome, "tool_results": [result]}

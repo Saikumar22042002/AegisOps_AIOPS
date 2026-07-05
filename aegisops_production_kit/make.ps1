@@ -30,7 +30,9 @@ switch ($Target.ToLower()) {
       "dev        Run backend + frontend together",
       "dev-api    Run backend only (uvicorn :8000)",
       "dev-web    Run frontend only (next :3000)",
-      "test       Backend pytest + frontend vitest",
+      "test       Backend pytest (test container) + frontend vitest",
+      "test-backend  Backend pytest only (containerized, real datastores)",
+      "test-frontend Frontend vitest + RTL only",
       "lint       Lint backend (ruff) + frontend (eslint)",
       "fmt        Format/auto-fix backend",
       "e2e        Playwright E2E (app must be running)",
@@ -59,9 +61,13 @@ switch ($Target.ToLower()) {
   "dev-api"  { Push-Location backend; uvicorn app.main:app --reload --host 0.0.0.0 --port 8000; Pop-Location }
   "dev-web"  { Push-Location frontend; npm run dev; Pop-Location }
   "test" {
-    Push-Location backend; pytest -q; Pop-Location
+    # Backend tests run INSIDE the containerized environment (real PG/Redis/Neo4j), because the
+    # slim prod image has no pytest — the `api-test` service adds the test tools at runtime.
+    Invoke-Compose @("--profile", "test", "run", "--rm", "api-test")
     Push-Location frontend; npm test; Pop-Location
   }
+  "test-backend"  { Invoke-Compose @("--profile", "test", "run", "--rm", "api-test") }
+  "test-frontend" { Push-Location frontend; npm test; Pop-Location }
   "lint" {
     Push-Location backend; ruff check .; Pop-Location
     Push-Location frontend; npm run lint; Pop-Location

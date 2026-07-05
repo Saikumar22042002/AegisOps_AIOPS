@@ -10,3 +10,46 @@ services:
   api:
     volumes:
       - "./backend/app:/app/app"
+      # GCP service-account key for the Terraform google provider (gitignored host dir).
+      - "./infra/secrets:/secrets:ro"
+
+  # ── Test runner (profile `test`, never auto-starts) ───────────────────────────
+  # The prod API image is intentionally slim (`pip install .` — no dev extras), so it
+  # has no pytest. This service reuses that already-built image, adds ONLY the test
+  # tools at runtime, and runs the suite against the LIVE compose datastores (reachable
+  # by service name) — the same real PG/Redis/Neo4j the app uses. Host source is mounted
+  # over the baked copy (PYTHONPATH=/app) so tests always run against current code, and
+  # runs as root so pip can install into the image's site-packages. Invoke via:
+  #   docker compose --profile test run --rm api-test              # full suite
+  #   docker compose --profile test run --rm api-test pytest -q -k routing
+  api-test:
+    image: aegisops-api:local
+    profiles: ["test"]
+    user: root
+    working_dir: /app
+    env_file: [.env]
+    environment:
+      PYTHONPATH: /app
+      PYTHONDONTWRITEBYTECODE: "1"
+      POSTGRES_HOST: postgres
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-aegisops}:${POSTGRES_PASSWORD:-aegisops}@postgres:5432/${POSTGRES_DB:-aegisops}
+      REDIS_URL: redis://redis:6379/0
+      NEO4J_URI: bolt://neo4j:7687
+      KEYCLOAK_URL: http://keycloak:8080
+      LANGFUSE_HOST: http://langfuse:3000
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      PROMETHEUS_URL: http://prometheus:9090
+      # Integration tests use these running datastores directly (no testcontainers/DinD).
+      AEGISOPS_TEST_LIVE_DATASTORES: "1"
+    volumes:
+      - "./backend:/app"
+      - "./infra/secrets:/secrets:ro"
+      - "./infra/terraform-workspaces:/app/infra/terraform-workspaces"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      neo4j: { condition: service_healthy }
+    command:
+      - "sh"
+      - "-lc"
+      - "pip install -q pytest pytest-asyncio pytest-cov testcontainers anyio && pytest -q"

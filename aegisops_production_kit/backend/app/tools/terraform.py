@@ -9,6 +9,7 @@ already-approved, saved plan; it does not bypass the gate.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from typing import Any
@@ -49,6 +50,17 @@ class TerraformRunner:
             env["AWS_DEFAULT_REGION"] = s.aws_default_region
             if s.aws_session_token:
                 env["AWS_SESSION_TOKEN"] = s.aws_session_token
+        # Azure — the azurerm provider authenticates via ARM_* (service principal).
+        if s.azure_client_id:
+            env["ARM_CLIENT_ID"] = s.azure_client_id
+            env["ARM_CLIENT_SECRET"] = s.azure_client_secret
+            env["ARM_TENANT_ID"] = s.azure_tenant_id
+            env["ARM_SUBSCRIPTION_ID"] = s.azure_subscription_id
+        # GCP — the google provider authenticates via a service-account key file + project.
+        if s.google_cloud_project:
+            env["GOOGLE_PROJECT"] = s.google_cloud_project
+        if s.google_application_credentials:
+            env["GOOGLE_APPLICATION_CREDENTIALS"] = s.google_application_credentials
         return env
 
     def _console(self) -> CommandConsole:
@@ -78,12 +90,43 @@ class TerraformRunner:
             raise TerraformError("terraform plan failed:\n" + "\n".join(res.stderr[-15:]))
         return await self.show_plan()
 
+    async def _capture_json(self, args: list[str]) -> tuple[int, str, str]:
+        """Run a JSON-emitting terraform command capturing stdout RAW (no line pump, no
+        redaction). The streamed console applies `redact()` per line, which can corrupt a big
+        plan JSON (VM plans embed key material that trips the maskers) — the corrupted blob
+        then failed to parse and the plan summary silently became +0 ~0 -0 (Phase 7): approvers
+        were shown "0 resources" for plans that actually added 8. Raw capture is safe here:
+        the parsed JSON is reduced to addresses/actions, and `output()` strips sensitive
+        values before anything is surfaced or persisted.
+        """
+        if not os.path.isdir(self.workdir):
+            raise TerraformError(f"Terraform workspace not found: {self.workdir}")
+        proc = await asyncio.create_subprocess_exec(
+            *args, cwd=self.workdir, env={**os.environ, **self._env()},
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        out, err = await proc.communicate()
+        return proc.returncode or 0, out.decode(errors="replace"), err.decode(errors="replace")
+
     async def show_plan(self) -> dict[str, Any]:
-        res = await self._console().run([self.bin, "show", "-json", self.plan_file])
-        if res.returncode != 0:
-            raise TerraformError("terraform show failed")
-        data = _parse_last_json(res.stdout) or {}
+        rc, out, err = await self._capture_json([self.bin, "show", "-json", self.plan_file])
+        if rc != 0:
+            raise TerraformError("terraform show failed:\n" + err[-2000:])
+        try:
+            data = json.loads(out.strip())
+        except json.JSONDecodeError as e:
+            # NEVER degrade to a fake +0 summary — an approver must not approve a plan card
+            # that claims zero changes for a plan that isn't zero.
+            raise TerraformError(f"could not parse the plan JSON ({e}); refusing to report a "
+                                 "zero-change summary for an unparsed plan") from e
         return _summarize_plan(data)
+
+    async def state_list(self) -> list[str]:
+        """Resource addresses currently in this workspace's state (read-only; for honest
+        partial-failure reporting)."""
+        rc, out, _err = await self._capture_json([self.bin, "state", "list"])
+        if rc != 0:
+            return []  # no state file yet ⇒ nothing applied
+        return [line.strip() for line in out.splitlines() if line.strip()]
 
     async def apply(self, on_line: LineCallback | None = None) -> dict[str, Any]:
         """Apply the previously-saved, human-approved plan."""
@@ -105,11 +148,18 @@ class TerraformRunner:
         return {"destroyed": True}
 
     async def output(self) -> dict[str, Any]:
-        res = await self._console().run([self.bin, "output", "-json"])
-        if res.returncode != 0:
+        rc, out, _err = await self._capture_json([self.bin, "output", "-json"])
+        if rc != 0:
             return {"outputs": {}}
-        data = _parse_last_json(res.stdout) or {}
-        return {"outputs": {k: v.get("value") for k, v in data.items()}}
+        try:
+            data = json.loads(out.strip()) or {}
+        except json.JSONDecodeError:
+            log.warning("terraform.output_parse_failed")
+            return {"outputs": {}}
+        # Exclude sensitive outputs (e.g. private_key_pem) — never surface/persist secret material.
+        # The operator retrieves them out-of-band via `terraform output -raw <name>`.
+        return {"outputs": {k: v.get("value") for k, v in data.items() if not v.get("sensitive")},
+                "sensitive_outputs": [k for k, v in data.items() if v.get("sensitive")]}
 
 
 def _parse_last_json(lines: list[str]) -> dict | None:

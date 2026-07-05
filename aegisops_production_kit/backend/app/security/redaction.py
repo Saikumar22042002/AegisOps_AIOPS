@@ -10,13 +10,25 @@ import re
 
 _MASK = "••••REDACTED••••"
 
-# Order matters; most specific first.
+# Order matters; most specific first. Each pattern falls into exactly one substitution branch
+# by its capturing-group count (see `redact`): 3 groups = keep-first-and-last (mask the middle);
+# 2 groups = keep-first, mask-second; 0/1 groups = mask the whole match.
 _PATTERNS: list[re.Pattern[str]] = [
+    # Private-key block: keep the BEGIN/END markers, mask the body (3 groups).
     re.compile(r"(?i)(-----BEGIN[^-]+PRIVATE KEY-----)(.*?)(-----END[^-]+PRIVATE KEY-----)", re.DOTALL),
-    re.compile(r"AKIA[0-9A-Z]{16}"),  # AWS access key id
-    re.compile(r"(?i)(aws_secret_access_key\s*[=:]\s*)([^\s\"']+)"),
+    # AWS access key ids: long-term (AKIA) + STS temporary/sandbox (ASIA) (0 groups → whole).
+    re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
+    # Authorization: Bearer <token> (2 groups → keep the header prefix, mask the token).
     re.compile(r"(?i)(authorization:\s*bearer\s+)([A-Za-z0-9._\-]+)"),
-    re.compile(r"(?i)\b(password|passwd|pwd|secret|token|api[_-]?key|client[_-]?secret)(\s*[=:]\s*)([^\s\"';,]+)"),
+    # key=value / "key": "value" for any secret-shaped key — including compound/underscored/
+    # quoted names (aws_session_token, AWS_SESSION_TOKEN, "SessionToken", AccessKeyId,
+    # client_secret). 2 groups: group1 = name+separator (+opening quote, kept), group2 = the
+    # secret value (masked). This masks the VALUE — the previous 3-group form leaked it.
+    re.compile(
+        r"(?i)([\w.\-]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|"
+        r"client[_-]?secret|session[_-]?token|private[_-]?key|credential)[\w.\-]*[\"']?\s*[=:]\s*[\"']?)"
+        r"([^\s\"';,]+)"
+    ),
     re.compile(r"\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\b"),  # JWT
     re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b"),  # GitHub tokens
 ]
@@ -37,7 +49,9 @@ def redact(text: str) -> str:
     return out
 
 
-_SENSITIVE_KEYS = re.compile(r"(?i)(password|passwd|pwd|secret|token|api[_-]?key|client[_-]?secret|credential|private[_-]?key)")
+_SENSITIVE_KEYS = re.compile(
+    r"(?i)(password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|client[_-]?secret|"
+    r"session[_-]?token|credential|private[_-]?key)")
 
 
 def redact_dict(data: dict) -> dict:
