@@ -5,7 +5,10 @@ from __future__ import annotations
 import re
 
 from ..integrations.gemini import get_gemini
+from ..logging_conf import get_logger
 from ..settings import Settings
+
+log = get_logger(__name__)
 
 
 def chunk_text(text: str, max_chars: int = 1200, overlap: int = 150) -> list[str]:
@@ -34,8 +37,16 @@ def chunk_text(text: str, max_chars: int = 1200, overlap: int = 150) -> list[str
 
 
 async def embed_texts(settings: Settings, texts: list[str]) -> list[list[float]] | None:
-    """Return embeddings, or None if no embedding model is configured."""
+    """Return embeddings, or None when the embedding model is unavailable.
+
+    None means "no vectors" — chunks persist with NULL embeddings and retrieval degrades
+    to pg_trgm keyword search (the same documented degrade as running with no key at all).
+    An unusable key is reported loudly, never silently swallowed into fake vectors."""
     gemini = get_gemini(settings)
     if not gemini.enabled:
         return None
-    return await gemini.aembed(texts)
+    try:
+        return await gemini.aembed(texts)
+    except Exception as exc:  # noqa: BLE001 — degrade to keyword recall, loudly
+        log.warning("embeddings.unavailable_degrading_to_keyword", error=str(exc))
+        return None

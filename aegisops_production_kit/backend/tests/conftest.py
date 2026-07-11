@@ -82,12 +82,19 @@ async def live_redis():
 
 @pytest.fixture
 async def org_id(live_db) -> str:
-    """The seeded default organization id (integration; requires `make seed` has run)."""
+    """The seeded primary organization id (integration; requires `make seed` has run)."""
+    from sqlalchemy import select
+
     from app.db import repositories as repo
+    from app.db.models import Organization
     from app.db.session import session_scope
 
     async with session_scope() as s:
-        org = await repo.get_default_org(s)
+        org = await repo.get_org_by_slug(s, "northwind-financial")
+        if not org:  # non-standard seeds: fall back to the oldest org
+            org = (await s.execute(
+                select(Organization).order_by(Organization.created_at).limit(1)
+            )).scalar_one_or_none()
     if not org:
         pytest.skip("no seeded organization; run `make seed`")
     return str(org.id)

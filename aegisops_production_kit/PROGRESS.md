@@ -599,9 +599,21 @@ explained instead of crashing).
       `docs/fix/04…`; `docs/fix/05…` reconciled to the authoritative architecture;
       `docs/fix/07_roadmap.md` re-emitted as Phases 1–3 with per-item acceptance tests;
       execution checklist appended to `FIX.md §8`. **Awaiting owner review before Stage B.**
-- [ ] **Phase 1 — Trustworthy** (S0 S1 S2 S3 S4 S5 · A1+B7 A2 A4 A5 · B5 B6 · U4 · honesty
+- [~] **Phase 1 — Trustworthy** (S0 S1 S2 S3 S4 S5 · A1+B7 A2 A4 A5 · B5 B6 · U4 · honesty
       labels · O2 C1 D1 D4). Exit gate: two orgs isolated in API+UI; no self-approve in prod;
       exactly one apply under concurrent approve; reveal gated+audited; no dishonest surface.
+  - [x] **S0 multi-tenancy** (2026-07-11): principal→(org_id,user_id) via Keycloak org claim
+        (group-membership mapper; realm defines northwind-financial + acme-industrial groups)
+        with the `users` mirror (by keycloak_sub, username/email fallback for seeded rows)
+        updated on login; `get_default_org` deleted — every endpoint resolves via
+        `repo.org_for(user)`; `Session.user_id` populated on /chat + /sessions; org predicates
+        on sessions/chat/approvals/feedback/modules/overview/notifications/knowledge; two orgs
+        + five users seeded (incl. bob.chen/eve.ops @ Acme Industrial). Flag
+        `AEGISOPS_TENANCY=strict|legacy` (default strict). Evidence: `tests/test_tenancy.py`
+        8/8 green (resolver matrix + endpoint isolation, cross-org 404); full backend suite
+        402 passed / 2 skipped; vitest 25 passed. Note: existing dev Keycloak containers must
+        be recreated to import the new groups/mapper; invalid-Gemini-key environments now seed
+        with NULL embeddings + loud warning (keyword recall degrade, per invariant 7).
 - [ ] **Phase 2 — Production harness + Context Engine** (B1 B2 B3 B4 · A3 + latency pass ≤15s ·
       M1 M2 M3 M5 · U1 + defaults honesty · U2 U3 · O1 O3 · D2 U5 U8 · P16). Exit gate:
       worker-kill mid-apply recovers exactly once; multi-worker streaming; turn-20-of-100 recall

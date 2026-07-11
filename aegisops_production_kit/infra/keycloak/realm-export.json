@@ -12,6 +12,10 @@
   "accessTokenLifespan": 1800,
   "ssoSessionIdleTimeout": 3600,
   "ssoSessionMaxLifespan": 36000,
+  "groups": [
+    { "name": "northwind-financial" },
+    { "name": "acme-industrial" }
+  ],
   "roles": {
     "realm": [
       { "name": "platform-admin", "description": "Full control incl. approve/reject/apply" },
@@ -41,7 +45,21 @@
         "pkce.code.challenge.method": "S256",
         "post.logout.redirect.uris": "http://localhost:3000/*"
       },
-      "fullScopeAllowed": true
+      "fullScopeAllowed": true,
+      "protocolMappers": [
+        {
+          "name": "org-membership",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "claim.name": "org",
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
     },
     {
       "clientId": "aegisops-backend",
@@ -70,6 +88,18 @@
             "id.token.claim": "false",
             "access.token.claim": "true"
           }
+        },
+        {
+          "name": "org-membership",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "claim.name": "org",
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
         }
       ]
     }
@@ -83,7 +113,8 @@
       "firstName": "Maya",
       "lastName": "Okafor",
       "credentials": [{ "type": "password", "value": "aegisops", "temporary": false }],
-      "realmRoles": ["platform-admin"]
+      "realmRoles": ["platform-admin"],
+      "groups": ["/northwind-financial"]
     },
     {
       "username": "dev.engineer",
@@ -93,7 +124,8 @@
       "firstName": "Dev",
       "lastName": "Engineer",
       "credentials": [{ "type": "password", "value": "aegisops", "temporary": false }],
-      "realmRoles": ["devops-engineer"]
+      "realmRoles": ["devops-engineer"],
+      "groups": ["/northwind-financial"]
     },
     {
       "username": "audit.viewer",
@@ -103,7 +135,30 @@
       "firstName": "Audit",
       "lastName": "Viewer",
       "credentials": [{ "type": "password", "value": "aegisops", "temporary": false }],
-      "realmRoles": ["read-only"]
+      "realmRoles": ["read-only"],
+      "groups": ["/northwind-financial"]
+    },
+    {
+      "username": "bob.chen",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "bob.chen@acme-industrial.com",
+      "firstName": "Bob",
+      "lastName": "Chen",
+      "credentials": [{ "type": "password", "value": "aegisops", "temporary": false }],
+      "realmRoles": ["org-admin"],
+      "groups": ["/acme-industrial"]
+    },
+    {
+      "username": "eve.ops",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "eve.ops@acme-industrial.com",
+      "firstName": "Eve",
+      "lastName": "Ops",
+      "credentials": [{ "type": "password", "value": "aegisops", "temporary": false }],
+      "realmRoles": ["devops-engineer"],
+      "groups": ["/acme-industrial"]
     }
   ]
 }

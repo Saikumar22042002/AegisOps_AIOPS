@@ -107,14 +107,21 @@ async def _persist_result(run_id: str, session_id: str, org_id: str, state: dict
 async def chat(body: ChatRequest, request: Request, user: User = Depends(get_current_user),
                settings: Settings = Depends(get_settings)):
     async with session_scope() as s:
-        org = await repo.get_default_org(s)
-        if not org:
-            raise HTTPException(500, "No organization seeded; run `make seed`.")
+        org = await repo.org_for(s, user)
         org_id = str(org.id)
+        owner_id = uuid.UUID(user.user_id) if user.user_id else None
         if body.sessionId:
+            # The caller may only continue a session that exists in THEIR org (S0).
+            try:
+                sess = await s.get(Session, uuid.UUID(body.sessionId))
+            except ValueError:
+                raise HTTPException(404, "session not found") from None
+            if not sess or sess.org_id != org.id:
+                raise HTTPException(404, "session not found")
             session_id = body.sessionId
         else:
-            sess = Session(org_id=org.id, title=body.message[:80] or "New conversation")
+            sess = Session(org_id=org.id, user_id=owner_id,
+                           title=body.message[:80] or "New conversation")
             s.add(sess)
             await s.flush()
             session_id = str(sess.id)
@@ -178,8 +185,12 @@ async def resolve_approval(run_id: str, body: ApprovalRequest,
     if body.decision not in {"approved", "rejected"}:
         raise HTTPException(400, "decision must be 'approved' or 'rejected'")
     async with session_scope() as s:
-        run = await s.get(Run, uuid.UUID(run_id))
-        if not run:
+        try:
+            run = await s.get(Run, uuid.UUID(run_id))
+        except ValueError:
+            raise HTTPException(404, "run not found") from None
+        # S0 org predicate: a run outside the approver's org does not exist for them.
+        if not run or (user.org_id and str(run.org_id) != user.org_id):
             raise HTTPException(404, "run not found")
         if run.status != "awaiting_approval":
             raise HTTPException(status.HTTP_409_CONFLICT, "run is not awaiting approval")

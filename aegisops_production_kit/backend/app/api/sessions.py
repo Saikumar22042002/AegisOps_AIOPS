@@ -38,7 +38,7 @@ class FeedbackRequest(BaseModel):
 @router.get("/sessions")
 async def list_sessions(user: User = Depends(get_current_user)) -> dict:
     async with session_scope() as s:
-        org = await repo.get_default_org(s)
+        org = await repo.org_for(s, user)
         rows = (await s.execute(
             select(Session).where(Session.org_id == org.id).order_by(Session.created_at.desc()).limit(100)
         )).scalars()
@@ -49,11 +49,25 @@ async def list_sessions(user: User = Depends(get_current_user)) -> dict:
 @router.post("/sessions")
 async def create_session(body: NewSession, user: User = Depends(get_current_user)) -> dict:
     async with session_scope() as s:
-        org = await repo.get_default_org(s)
-        sess = Session(org_id=org.id, title=body.title or "New conversation")
+        org = await repo.org_for(s, user)
+        sess = Session(org_id=org.id,
+                       user_id=uuid.UUID(user.user_id) if user.user_id else None,
+                       title=body.title or "New conversation")
         s.add(sess)
         await s.flush()
         return {"id": str(sess.id), "title": sess.title, "status": sess.status}
+
+
+async def _org_session(s, session_id: str, user: User) -> Session:
+    """Load a session iff it belongs to the caller's org; 404 otherwise (no enumeration)."""
+    org = await repo.org_for(s, user)
+    try:
+        sess = await s.get(Session, uuid.UUID(session_id))
+    except ValueError:
+        raise HTTPException(404, "session not found") from None
+    if not sess or sess.org_id != org.id:
+        raise HTTPException(404, "session not found")
+    return sess
 
 
 @router.get("/sessions/{session_id}/messages")
@@ -76,10 +90,7 @@ async def rename_session(session_id: str, body: RenameSession, user: User = Depe
     if not title:
         raise HTTPException(400, "title must not be empty")
     async with session_scope() as s:
-        org = await repo.get_default_org(s)
-        sess = await s.get(Session, uuid.UUID(session_id))
-        if not sess or sess.org_id != org.id:
-            raise HTTPException(404, "session not found")
+        sess = await _org_session(s, session_id, user)
         sess.title = title[:300]
         return {"id": session_id, "title": sess.title, "status": sess.status}
 
@@ -87,10 +98,7 @@ async def rename_session(session_id: str, body: RenameSession, user: User = Depe
 @router.delete("/sessions/{session_id}")
 async def delete_session(session_id: str, user: User = Depends(get_current_user)) -> dict:
     async with session_scope() as s:
-        org = await repo.get_default_org(s)
-        sess = await s.get(Session, uuid.UUID(session_id))
-        if not sess or sess.org_id != org.id:
-            raise HTTPException(404, "session not found")
+        sess = await _org_session(s, session_id, user)
         # Messages cascade (relationship delete-orphan + FK ON DELETE CASCADE); runs detach (session_id -> NULL).
         await s.delete(sess)
     return {"id": session_id, "status": "deleted"}
@@ -101,9 +109,7 @@ async def close_session(session_id: str, user: User = Depends(get_current_user))
     from datetime import datetime, timezone
 
     async with session_scope() as s:
-        sess = await s.get(Session, uuid.UUID(session_id))
-        if not sess:
-            raise HTTPException(404, "session not found")
+        sess = await _org_session(s, session_id, user)
         sess.status = "closed"
         sess.closed_at = datetime.now(timezone.utc)
         return {"id": session_id, "status": "closed"}
@@ -114,9 +120,13 @@ async def submit_feedback(body: FeedbackRequest, user: User = Depends(get_curren
     if body.value not in {"up", "down"}:
         raise HTTPException(400, "value must be 'up' or 'down'")
     async with session_scope() as s:
-        org = await repo.get_default_org(s)
-        msg = await s.get(Message, uuid.UUID(body.messageId))
-        if not msg:
+        org = await repo.org_for(s, user)
+        try:
+            msg = await s.get(Message, uuid.UUID(body.messageId))
+        except ValueError:
+            raise HTTPException(404, "message not found") from None
+        # S0 org predicate: a message outside the caller's org does not exist for them.
+        if not msg or msg.org_id != org.id:
             raise HTTPException(404, "message not found")
         s.add(Feedback(org_id=org.id, message_id=msg.id, value=body.value,
                        comment=body.comment, sensitive=body.sensitive))

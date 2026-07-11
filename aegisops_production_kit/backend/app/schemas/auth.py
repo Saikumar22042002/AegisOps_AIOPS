@@ -20,7 +20,9 @@ class User(BaseModel):
     can_approve: bool = False
     can_initiate: bool = False
     can_execute: bool = False
-    org: str | None = None
+    org: str | None = None  # org slug (Keycloak claim or mirror row)
+    org_id: str | None = None  # organizations.id the principal resolved to (S0)
+    user_id: str | None = None  # users.id mirror row for the principal (S0)
 
 
 class AuthResponse(BaseModel):

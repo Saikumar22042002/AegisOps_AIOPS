@@ -5,14 +5,31 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..settings import get_settings
 from .models import AuditLog, Integration, Notification, Organization
 
 
-async def get_default_org(session: AsyncSession) -> Organization | None:
-    return (await session.execute(select(Organization).order_by(Organization.created_at).limit(1))).scalar_one_or_none()
+async def org_for(session: AsyncSession, user: Any) -> Organization:
+    """The authenticated principal's organization (S0). This is the ONLY way an endpoint
+    may resolve an org — never a platform-wide default. In `legacy` tenancy mode (rollback
+    flag) an unresolved principal falls back to the oldest org, preserving pre-S0 behavior."""
+    org_id = getattr(user, "org_id", None)
+    if org_id:
+        org = await session.get(Organization, uuid.UUID(org_id))
+        if org:
+            return org
+    if get_settings().aegisops_tenancy == "legacy":
+        org = (await session.execute(
+            select(Organization).order_by(Organization.created_at).limit(1)
+        )).scalar_one_or_none()
+        if org:
+            return org
+        raise HTTPException(500, "No organization seeded; run `make seed`.")
+    raise HTTPException(403, "Your account has no organization membership on this platform.")
 
 
 async def get_org_by_slug(session: AsyncSession, slug: str) -> Organization | None:

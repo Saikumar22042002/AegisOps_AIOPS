@@ -14,10 +14,11 @@ import secrets
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
 
+from ..db.session import session_scope
 from ..integrations.keycloak import AuthError, KeycloakOIDC, TokenSet, generate_pkce, get_oidc
 from ..logging_conf import get_logger
 from ..schemas.auth import AuthResponse, LoginRequest, User
-from ..security import sessions
+from ..security import sessions, tenancy
 from ..security.deps import COOKIE_NAME, get_current_user, user_from_claims
 from ..settings import Settings, get_settings
 
@@ -45,15 +46,35 @@ def _set_session_cookie(response: Response, sid: str, settings: Settings) -> Non
 async def _establish_session(tokens: TokenSet, oidc: KeycloakOIDC, settings: Settings) -> tuple[str, User]:
     claims = await oidc.validate(tokens.access_token)
     user = user_from_claims(claims)
+
+    # S0 tenancy: map the principal to (org_id, user_id) — Keycloak `org` claim wins,
+    # `users` mirror row is the fallback — and update the mirror on login. Cached on the
+    # server-side session so per-request auth stays DB-free.
+    try:
+        async with session_scope() as s:
+            resolved = await tenancy.resolve_tenancy(
+                s, sub=user.sub, username=user.username, email=user.email,
+                name=user.name, roles=user.roles, org_slug=user.org,
+            )
+        user.org_id, user.user_id, user.org = resolved.org_id, resolved.user_id, resolved.org_slug
+    except tenancy.TenancyError as exc:
+        if settings.aegisops_tenancy == "strict":
+            log.info("auth.tenancy_refused", user=user.username, reason=str(exc))
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from None
+        log.warning("auth.tenancy_unresolved_legacy", user=user.username, reason=str(exc))
+
     sid = await sessions.create_session(
         {
             "user": user.model_dump(),
             "access_token": tokens.access_token,
             "refresh_token": tokens.refresh_token,
             "expires_at": tokens.expires_at,
+            "org_id": user.org_id,
+            "user_id": user.user_id,
+            "org_slug": user.org,
         }
     )
-    log.info("auth.session_created", user=user.username, roles=user.roles)
+    log.info("auth.session_created", user=user.username, roles=user.roles, org=user.org)
     return sid, user
 
 

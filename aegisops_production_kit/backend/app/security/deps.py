@@ -19,6 +19,20 @@ from . import rbac, sessions
 COOKIE_NAME = "aegis_session"
 
 
+def _org_claim(claims: dict) -> str | None:
+    """The org slug from the token. The Keycloak group-membership mapper emits a list
+    (e.g. ["northwind-financial"]); a plain string claim is accepted too."""
+    org = claims.get("org")
+    if isinstance(org, list):
+        if len(org) > 1:
+            # Membership in several org groups is ambiguous — refuse to guess.
+            return None
+        org = org[0] if org else None
+    if isinstance(org, str):
+        return org.strip("/") or None
+    return None
+
+
 def user_from_claims(claims: dict) -> User:
     realm_roles = claims.get("realm_access", {}).get("roles", [])
     roles = [r for r in realm_roles if r in rbac.ALL_ROLES]
@@ -32,7 +46,7 @@ def user_from_claims(claims: dict) -> User:
         can_approve=rbac.can_approve(roles),
         can_initiate=rbac.can_initiate(roles),
         can_execute=rbac.can_execute(roles),
-        org=claims.get("org"),
+        org=_org_claim(claims),
     )
 
 
@@ -67,6 +81,28 @@ async def get_current_user(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session") from None
 
     user = user_from_claims(claims)
+
+    # S0 tenancy: org_id/user_id are resolved at login and cached on the server-side
+    # session. Sessions created before that (or by a pre-S0 deploy) resolve lazily once.
+    org_id, user_id = sess.get("org_id"), sess.get("user_id")
+    if not (org_id and user_id) and settings.aegisops_tenancy == "strict":
+        from ..db.session import session_scope
+        from . import tenancy
+
+        try:
+            async with session_scope() as s:
+                resolved = await tenancy.resolve_tenancy(
+                    s, sub=user.sub, username=user.username, email=user.email,
+                    name=user.name, roles=user.roles, org_slug=user.org,
+                )
+        except tenancy.TenancyError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from None
+        org_id, user_id = resolved.org_id, resolved.user_id
+        sess["org_id"], sess["user_id"], sess["org_slug"] = org_id, user_id, resolved.org_slug
+        await sessions.update_session(aegis_session, sess)
+    user.org_id, user.user_id = org_id, user_id
+    user.org = user.org or sess.get("org_slug")
+
     bind_correlation(user=user.username)
     return user
 

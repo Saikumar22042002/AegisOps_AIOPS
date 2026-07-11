@@ -24,6 +24,8 @@ from app.settings import get_settings
 
 log = get_logger("seed")
 
+# S0 multi-tenancy: TWO organizations are seeded so isolation is demonstrable end-to-end
+# (API + UI). Slugs match the Keycloak org groups in infra/keycloak/realm-export.json.
 ORG_NAME = "Northwind Financial"
 ORG_SLUG = "northwind-financial"
 
@@ -31,6 +33,31 @@ SEED_USERS = [
     {"username": "maya.okafor", "email": "maya.okafor@northwind.com", "name": "Maya Okafor", "roles": ["platform-admin"]},
     {"username": "dev.engineer", "email": "dev.engineer@northwind.com", "name": "Dev Engineer", "roles": ["devops-engineer"]},
     {"username": "audit.viewer", "email": "audit.viewer@northwind.com", "name": "Audit Viewer", "roles": ["read-only"]},
+]
+
+ORG_B_NAME = "Acme Industrial"
+ORG_B_SLUG = "acme-industrial"
+
+ORG_B_USERS = [
+    {"username": "bob.chen", "email": "bob.chen@acme-industrial.com", "name": "Bob Chen", "roles": ["org-admin"]},
+    {"username": "eve.ops", "email": "eve.ops@acme-industrial.com", "name": "Eve Ops", "roles": ["devops-engineer"]},
+]
+
+ORG_B_DOCUMENTS = [
+    {
+        "title": "Acme plant-floor VPN runbook",
+        "source": "runbook", "kind": "runbook", "uri": "kb://acme/plant-floor-vpn",
+        "content": (
+            "Acme Industrial — plant-floor VPN runbook\n\n"
+            "Site-to-site VPN between the acme-ot VPC (10.80.0.0/16) and the plant-floor network. "
+            "Tunnels terminate on the acme-vgw gateway; BGP over two tunnels for failover. "
+            "Any change to the tunnel configuration requires a change request and approval."
+        ),
+    },
+]
+
+ORG_B_NOTIFICATIONS = [
+    ("Welcome to AegisOps · Acme Industrial", "info", "var(--green)"),
 ]
 
 INTEGRATIONS = [
@@ -124,57 +151,67 @@ def ensure_extensions(settings) -> None:
     log.info("seed.extensions_ready")
 
 
+async def _seed_org(session, settings, *, name: str, slug: str, member_count: int,
+                    users: list[dict], notifications: list[tuple], documents: list[dict]) -> int:
+    """Seed one organization (idempotent). Returns the number of documents ingested."""
+    org = (await session.execute(select(Organization).where(Organization.slug == slug))).scalar_one_or_none()
+    if not org:
+        org = Organization(name=name, slug=slug, plan="enterprise", member_count=member_count)
+        session.add(org)
+        await session.flush()
+    log.info("seed.org", slug=slug, id=str(org.id))
+
+    # Users
+    for u in users:
+        existing = (await session.execute(
+            select(User).where(User.org_id == org.id, User.username == u["username"])
+        )).scalar_one_or_none()
+        if existing:
+            existing.email, existing.name, existing.roles = u["email"], u["name"], u["roles"]
+        else:
+            session.add(User(org_id=org.id, username=u["username"], email=u["email"], name=u["name"], roles=u["roles"]))
+
+    # Integrations
+    for iname, cat, status in INTEGRATIONS:
+        await IntegrationRepo.upsert(session, org.id, name=iname, kind=cat, status=status)
+
+    # Notifications (seed once)
+    existing_notifs = (await session.execute(select(Notification).where(Notification.org_id == org.id))).scalars().first()
+    if not existing_notifs:
+        for title, level, color in notifications:
+            session.add(Notification(org_id=org.id, title=title, level=level, color=color))
+
+    # Knowledge documents -> chunks (+embeddings if Gemini configured)
+    to_ingest = []
+    for d in documents:
+        present = (await session.execute(
+            select(Document).where(Document.org_id == org.id, Document.title == d["title"])
+        )).scalar_one_or_none()
+        if not present:
+            to_ingest.append(d)
+    if to_ingest:
+        await ingest.ingest_many(session, org_id=org.id, settings=settings, docs=to_ingest)
+
+    await AuditRepo.log(session, org_id=org.id, actor="seed", action="seed.completed",
+                        target=slug, detail={"documents": len(to_ingest), "users": len(users)})
+    return len(to_ingest)
+
+
 async def seed_data(settings) -> None:
     db.init_engine(settings)
     async with db.session_scope() as session:
-        # Organization
-        org = (await session.execute(select(Organization).where(Organization.slug == ORG_SLUG))).scalar_one_or_none()
-        if not org:
-            org = Organization(name=ORG_NAME, slug=ORG_SLUG, plan="enterprise", member_count=184)
-            session.add(org)
-            await session.flush()
-        log.info("seed.org", id=str(org.id))
-
-        # Roles
+        # Roles (platform-wide)
         for kebab, display in rbac.ROLE_DISPLAY.items():
             exists = (await session.execute(select(Role).where(Role.name == kebab))).scalar_one_or_none()
             if not exists:
                 session.add(Role(name=kebab, display_name=display, description=display))
 
-        # Users
-        for u in SEED_USERS:
-            existing = (await session.execute(
-                select(User).where(User.org_id == org.id, User.username == u["username"])
-            )).scalar_one_or_none()
-            if existing:
-                existing.email, existing.name, existing.roles = u["email"], u["name"], u["roles"]
-            else:
-                session.add(User(org_id=org.id, username=u["username"], email=u["email"], name=u["name"], roles=u["roles"]))
-
-        # Integrations
-        for name, cat, status in INTEGRATIONS:
-            await IntegrationRepo.upsert(session, org.id, name=name, kind=cat, status=status)
-
-        # Notifications (seed once)
-        existing_notifs = (await session.execute(select(Notification).where(Notification.org_id == org.id))).scalars().first()
-        if not existing_notifs:
-            for title, level, color in NOTIFICATIONS:
-                session.add(Notification(org_id=org.id, title=title, level=level, color=color))
-
-        # Knowledge documents -> chunks (+embeddings if Gemini configured)
-        to_ingest = []
-        for d in DOCUMENTS:
-            present = (await session.execute(
-                select(Document).where(Document.org_id == org.id, Document.title == d["title"])
-            )).scalar_one_or_none()
-            if not present:
-                to_ingest.append(d)
-        if to_ingest:
-            await ingest.ingest_many(session, org_id=org.id, settings=settings, docs=to_ingest)
-
-        await AuditRepo.log(session, org_id=org.id, actor="seed", action="seed.completed",
-                            target=ORG_SLUG, detail={"documents": len(to_ingest), "users": len(SEED_USERS)})
-    log.info("seed.data_done", documents_ingested=len(to_ingest))
+        ingested = await _seed_org(session, settings, name=ORG_NAME, slug=ORG_SLUG, member_count=184,
+                                   users=SEED_USERS, notifications=NOTIFICATIONS, documents=DOCUMENTS)
+        ingested += await _seed_org(session, settings, name=ORG_B_NAME, slug=ORG_B_SLUG, member_count=42,
+                                    users=ORG_B_USERS, notifications=ORG_B_NOTIFICATIONS,
+                                    documents=ORG_B_DOCUMENTS)
+    log.info("seed.data_done", documents_ingested=ingested)
 
 
 def main() -> int:

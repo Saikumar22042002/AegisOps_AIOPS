@@ -28,7 +28,7 @@ class IngestRequest(BaseModel):
 @router.get("/knowledge/search")
 async def search(q: str, user: User = Depends(get_current_user), settings: Settings = Depends(get_settings)) -> dict:
     async with session_scope() as s:
-        org = await repo.get_default_org(s)
+        org = await repo.org_for(s, user)
         results = await retriever.retrieve(s, org_id=org.id, query=q, settings=settings, k=8)
     return {"query": q, "results": results}
 
@@ -37,7 +37,7 @@ async def search(q: str, user: User = Depends(get_current_user), settings: Setti
 async def ingest_doc(body: IngestRequest, user: User = Depends(require_initiator),
                      settings: Settings = Depends(get_settings)) -> dict:
     async with session_scope() as s:
-        org = await repo.get_default_org(s)
+        org = await repo.org_for(s, user)
         doc = await ingest.ingest_document(
             s, org_id=org.id, settings=settings, title=body.title, content=body.content,
             source=body.source, kind=body.kind, uri=body.uri,

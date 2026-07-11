@@ -25,6 +25,11 @@ class Settings(BaseSettings):
 
     # ── App ──
     app_env: Literal["local", "dev", "staging", "production"] = "local"
+    # S0 multi-tenancy. strict: every request is scoped to the authenticated principal's
+    # organization (Keycloak `org` claim wins; the `users` mirror row by keycloak_sub /
+    # username is the fallback for seeded users). legacy: pre-S0 single-default-org
+    # behavior — rollback path only.
+    aegisops_tenancy: Literal["strict", "legacy"] = "strict"
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     cors_origins: str = "http://localhost:3000"

@@ -62,7 +62,7 @@ async def module(name: str, user: AuthUser = Depends(get_current_user),
     if name not in CHROME:
         raise HTTPException(404, "unknown module")
     async with session_scope() as s:
-        org = await repo.get_default_org(s)
+        org = await repo.org_for(s, user)
         oid = org.id
         builder = {
             "projects": _projects, "infrastructure": _infrastructure, "incidents": _incidents,
@@ -181,7 +181,7 @@ async def _settings(s, oid, user, settings):
 async def overview(user: AuthUser = Depends(get_current_user)) -> dict:
     """Real org-scoped figures for the left sidebar: org identity + nav badge counts."""
     async with session_scope() as s:
-        org = await repo.get_default_org(s)
+        org = await repo.org_for(s, user)
         oid = org.id
         # No dedicated Project entity exists; conversations (sessions) are the org's real
         # workspaces, and "open incidents" are runs paused at the human-approval gate.
@@ -197,7 +197,7 @@ async def overview(user: AuthUser = Depends(get_current_user)) -> dict:
 @router.get("/notifications")
 async def notifications(user: AuthUser = Depends(get_current_user)) -> dict:
     async with session_scope() as s:
-        org = await repo.get_default_org(s)
+        org = await repo.org_for(s, user)
         rows = await repo.NotificationRepo.list(s, org.id, limit=30)
         return {"notifications": [{"title": n.title, "time": _ago(n.created_at), "color": n.color or "var(--accent-2)",
                                    "read": n.read} for n in rows]}
