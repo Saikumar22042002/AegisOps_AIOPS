@@ -139,14 +139,18 @@ async def test_broad_reference_lists_everything(clean_inventory):
 
 
 async def test_context_recall_is_type_safe(clean_inventory):
-    # Screenshot 5: "did the previous S3 BUCKET get created?" was answered with the EC2.
-    # A typed descriptive reference must only match that type — or nothing (honest).
+    # Screenshot 5 (old pass): "did the previous S3 BUCKET get created?" was answered with the
+    # EC2. Invariant: a typed descriptive reference NEVER returns a resource of a different
+    # type. (The live org inventory may legitimately contain real buckets from manual testing,
+    # so we assert type-correctness of whatever matches — not emptiness.)
     org = clean_inventory
-    await _record(org, _PREFIX + "only-vm", {"instance_id": "i-vm"})  # an ec2, no buckets
+    await _record(org, _PREFIX + "only-vm", {"instance_id": "i-vm"})  # an ec2 (the newest row)
     matches, kind = await inventory.resolve(org, "the s3 bucket I created earlier")
-    assert matches == [] and kind == "none"     # never the EC2
+    assert all(m["resource_type"] in {"s3", "gcs", "storage"} for m in matches), \
+        f"typed s3 ref returned a non-storage resource: {[m['resource_type'] for m in matches]}"
+    assert not any(m["name"] == _PREFIX + "only-vm" for m in matches)   # never the EC2
     matches2, _ = await inventory.resolve(org, "the instance I created earlier")
-    assert matches2 and matches2[0]["name"] == _PREFIX + "only-vm"   # typed match still works
+    assert matches2 and matches2[0]["name"] == _PREFIX + "only-vm"       # typed match still works
 
 
 async def test_list_active_filters_by_cloud(clean_inventory):
@@ -156,3 +160,46 @@ async def test_list_active_filters_by_cloud(clean_inventory):
     assert any(m["name"] == _PREFIX + "aws-vm" for m in mine)
     assert await inventory.list_active(org, clouds=["azure"]) == [] or all(
         m["cloud"] == "azure" for m in await inventory.list_active(org, clouds=["azure"]))
+
+
+# ═══ A4 — the duplicate-name check is org-scoped (a name active in org A never collides in B) ═══
+
+
+async def _org_b_id() -> str | None:
+    from app.db import repositories as repo
+    async with session_scope() as s:
+        org = await repo.get_org_by_slug(s, "acme-industrial")
+    return str(org.id) if org else None
+
+
+async def test_duplicate_name_check_is_org_scoped(clean_inventory):
+    """A4: list_active (which backs the same-name-create refusal) is scoped to the caller's org,
+    so an identical name active in org A is invisible to org B — no cross-org false collision,
+    and no cross-org leak of what A has provisioned."""
+    org_a = clean_inventory
+    org_b = await _org_b_id()
+    if not org_b or org_b == org_a:
+        pytest.skip("second org (acme-industrial) not seeded; run `make seed`")
+    await _cleanup(org_b)
+    name = _PREFIX + "web-01"
+    try:
+        await _record(org_a, name, {"instance_id": "i-orgA-web01"})
+
+        a_names = {m["name"] for m in await inventory.list_active(org_a)}
+        b_names = {m["name"] for m in await inventory.list_active(org_b)}
+        assert name in a_names, "org A must see its own active resource"
+        assert name not in b_names, "org B must NOT see org A's resource (dup check would false-collide)"
+
+        # The same-name-create dup predicate (cloudops.py:314) reproduced against each org.
+        t = templates.select("aws", "ec2")
+        dup_in_a = [m for m in await inventory.list_active(org_a)
+                    if m["name"] == name and m["workspace"] == t.workspace]
+        dup_in_b = [m for m in await inventory.list_active(org_b)
+                    if m["name"] == name and m["workspace"] == t.workspace]
+        assert dup_in_a and not dup_in_b, "dup refusal fires only within the owning org"
+
+        # Org B resolving that name finds nothing of A's.
+        matches, _kind = await inventory.resolve(org_b, name)
+        assert all(m["provider_id"] != "i-orgA-web01" for m in matches)
+    finally:
+        await _cleanup(org_b)

@@ -614,6 +614,11 @@ explained instead of crashing).
         402 passed / 2 skipped; vitest 25 passed. Note: existing dev Keycloak containers must
         be recreated to import the new groups/mapper; invalid-Gemini-key environments now seed
         with NULL embeddings + loud warning (keyword recall degrade, per invariant 7).
+  - [x] **A4 org-scoped duplicate-name check** (2026-07-12): no logic change — `list_active` was
+        always org-scoped, and S0 now flows the real authenticated org into `state["org_id"]`, so
+        the same-name-create refusal is correctly org-bounded. Evidence:
+        `test_inventory.py::test_duplicate_name_check_is_org_scoped` (org A's active name is
+        invisible to org B; dup predicate fires only within the owning org).
   - [x] **A2 plan_guard at the approval choke-point** (2026-07-12): the approval node re-runs
         `check_plan_actions` before the durable interrupt, so a plan whose actions don't match the
         operation (an apply that would delete/replace, a destroy that would create, a read carrying
