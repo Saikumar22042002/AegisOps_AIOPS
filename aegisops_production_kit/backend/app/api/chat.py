@@ -27,7 +27,7 @@ from ..db.session import session_scope
 from ..logging_conf import bind_correlation, get_logger
 from ..metrics import AGENT_RUNS
 from ..schemas.auth import User
-from ..security.deps import get_current_user, require_approver
+from ..security.deps import authorize_run, get_current_user, require_approver
 from ..settings import Settings, get_settings
 
 log = get_logger(__name__)
@@ -229,6 +229,14 @@ async def resolve_approval(run_id: str, body: ApprovalRequest,
 @router.get("/chat/stream/{run_id}")
 async def chat_stream(run_id: str, user: User = Depends(get_current_user),
                       last_event_id: str | None = Header(default=None)):
+    # S2: authorize BEFORE attaching to the stream — a cross-org run id must 404 whether
+    # or not a live channel exists for it.
+    async with session_scope() as s:
+        try:
+            run = await s.get(Run, uuid.UUID(run_id))
+        except ValueError:
+            raise HTTPException(404, "run not found") from None
+        authorize_run(run, user)
     channel = get_channel(run_id)
     if not channel:
         raise HTTPException(404, "no active stream for this run")
@@ -239,9 +247,11 @@ async def chat_stream(run_id: str, user: User = Depends(get_current_user),
 @router.get("/runs/{run_id}")
 async def get_run(run_id: str, user: User = Depends(get_current_user)) -> dict:
     async with session_scope() as s:
-        run = await s.get(Run, uuid.UUID(run_id))
-        if not run:
-            raise HTTPException(404, "run not found")
+        try:
+            run = await s.get(Run, uuid.UUID(run_id))
+        except ValueError:
+            raise HTTPException(404, "run not found") from None
+        authorize_run(run, user)  # S2: cross-org run reads are 404
         return {
             "id": str(run.id), "intent": run.intent, "confidence": run.confidence,
             "domain": run.domain, "workflow": run.workflow, "version": run.workflow_version,

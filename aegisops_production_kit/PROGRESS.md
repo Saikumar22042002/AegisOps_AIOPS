@@ -614,6 +614,13 @@ explained instead of crashing).
         402 passed / 2 skipped; vitest 25 passed. Note: existing dev Keycloak containers must
         be recreated to import the new groups/mapper; invalid-Gemini-key environments now seed
         with NULL embeddings + loud warning (keyword recall degrade, per invariant 7).
+  - [x] **S2 read/stream authorization** (2026-07-11): shared `authorize_run`/`authorize_session`
+        predicates (security/deps.py) applied on every run read — all 8 artifact tabs, the
+        credentials endpoint, `/runs/{id}`, `/chat/stream/{id}` (authorized BEFORE attaching to
+        the live channel), and `/sessions/{id}/messages`. Cross-org UUIDs → 404 (never 403, no
+        enumeration); invalid UUIDs → 404, not 500. Evidence:
+        `test_tenancy.py::test_cross_org_read_of_every_tab_is_404`; full backend suite
+        403 passed / 2 skipped; vitest 25 passed.
 - [ ] **Phase 2 — Production harness + Context Engine** (B1 B2 B3 B4 · A3 + latency pass ≤15s ·
       M1 M2 M3 M5 · U1 + defaults honesty · U2 U3 · O1 O3 · D2 U5 U8 · P16). Exit gate:
       worker-kill mid-apply recovers exactly once; multi-worker streaming; turn-20-of-100 recall

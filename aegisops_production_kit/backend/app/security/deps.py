@@ -111,6 +111,19 @@ def require_auth(user: User = Depends(get_current_user)) -> User:
     return user
 
 
+def authorize_run(run, user: User) -> None:
+    """S2: a run outside the caller's org does not exist for them (404 — never an
+    enumeration-friendly 403). Applied on every run read/stream endpoint."""
+    if run is None or (user.org_id and str(run.org_id) != user.org_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run not found")
+
+
+def authorize_session(sess, user: User) -> None:
+    """S2: a session outside the caller's org does not exist for them (404)."""
+    if sess is None or (user.org_id and str(sess.org_id) != user.org_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session not found")
+
+
 def require_roles(*allowed: str):
     """Dependency factory: caller must hold at least one of the given realm roles."""
 

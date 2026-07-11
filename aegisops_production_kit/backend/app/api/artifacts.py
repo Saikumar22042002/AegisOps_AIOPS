@@ -10,18 +10,20 @@ from sqlalchemy import select
 from ..db.models import Approval, Message, Run, RunStep
 from ..db.session import session_scope
 from ..schemas.auth import User
-from ..security.deps import get_current_user
+from ..security.deps import authorize_run, get_current_user
 from ..settings import Settings, get_settings
 from ..tools.prometheus import get_prometheus
 
 router = APIRouter(tags=["artifacts"])
 
 
-async def _load(run_id: str):
+async def _load(run_id: str, user: User):
     async with session_scope() as s:
-        run = await s.get(Run, uuid.UUID(run_id))
-        if not run:
-            raise HTTPException(404, "run not found")
+        try:
+            run = await s.get(Run, uuid.UUID(run_id))
+        except ValueError:
+            raise HTTPException(404, "run not found") from None
+        authorize_run(run, user)  # S2: org predicate on every artifact read; 404 on mismatch
         msg = (await s.execute(
             select(Message).where(Message.run_id == run.id, Message.role == "assistant")
             .order_by(Message.created_at.desc()).limit(1)
@@ -70,7 +72,7 @@ def _step_maps(steps: list):
 
 @router.get("/runs/{run_id}/timeline")
 async def timeline(run_id: str, user: User = Depends(get_current_user)) -> dict:
-    run, _msg, approvals, steps = await _load(run_id)
+    run, _msg, approvals, steps = await _load(run_id, user)
     dur, _when, total = _step_maps(steps)
     approved = run.status in {"completed"} and any(a.decision == "approved" for a in approvals)
     rejected = any(a.decision == "rejected" for a in approvals)
@@ -128,14 +130,14 @@ async def timeline(run_id: str, user: User = Depends(get_current_user)) -> dict:
 
 @router.get("/runs/{run_id}/reasoning")
 async def reasoning(run_id: str, user: User = Depends(get_current_user)) -> dict:
-    _run, msg, _, _ = await _load(run_id)
+    _run, msg, _, _ = await _load(run_id, user)
     cards = (msg.analysis or {}).get("reasoning", []) if msg else []
     return {"cards": cards}
 
 
 @router.get("/runs/{run_id}/terraform")
 async def terraform(run_id: str, user: User = Depends(get_current_user)) -> dict:
-    run, _msg, _, _ = await _load(run_id)
+    run, _msg, _, _ = await _load(run_id, user)
     plan = run.plan_json or {}
     return {"summary": plan.get("summary", {"add": 0, "change": 0, "destroy": 0}),
             "diff": plan.get("diff", []), "policy_checks": plan.get("policy_checks", []),
@@ -144,7 +146,7 @@ async def terraform(run_id: str, user: User = Depends(get_current_user)) -> dict
 
 @router.get("/runs/{run_id}/logs")
 async def logs(run_id: str, user: User = Depends(get_current_user)) -> dict:
-    run, _msg, approvals, _ = await _load(run_id)
+    run, _msg, approvals, _ = await _load(run_id, user)
     lines = [{"ts": run.created_at.strftime("%H:%M:%S"), "lvl": "INFO", "lvlColor": "var(--cyan)",
               "msg": f"intent classified: {run.intent} ({run.confidence})"},
              {"ts": run.created_at.strftime("%H:%M:%S"), "lvl": "INFO", "lvlColor": "var(--cyan)",
@@ -166,6 +168,7 @@ async def logs(run_id: str, user: User = Depends(get_current_user)) -> dict:
 
 @router.get("/runs/{run_id}/metrics")
 async def metrics(run_id: str, user: User = Depends(get_current_user), settings: Settings = Depends(get_settings)) -> dict:
+    await _load(run_id, user)  # S2: uniform 404 for cross-org/unknown runs on every tab
     prom = get_prometheus(settings)
     cards = []
     try:
@@ -183,7 +186,7 @@ async def metrics(run_id: str, user: User = Depends(get_current_user), settings:
 
 @router.get("/runs/{run_id}/traces")
 async def traces(run_id: str, user: User = Depends(get_current_user)) -> dict:
-    run, _msg, _, _ = await _load(run_id)
+    run, _msg, _, _ = await _load(run_id, user)
     spans = [{"name": "intent.classify", "dur": "—", "dot": "var(--green)", "indent": "0px", "tokens": ""},
              {"name": "agent.route", "dur": "—", "dot": "var(--green)", "indent": "0px", "tokens": ""}]
     if run.plan_json:
@@ -195,14 +198,57 @@ async def traces(run_id: str, user: User = Depends(get_current_user)) -> dict:
 
 @router.get("/runs/{run_id}/references")
 async def references(run_id: str, user: User = Depends(get_current_user)) -> dict:
-    _run, msg, _, _ = await _load(run_id)
+    _run, msg, _, _ = await _load(run_id, user)
     refs = (msg.analysis or {}).get("references", []) if msg else []
     return {"references": refs}
 
 
+async def _claim_reveal(run_id: str, output: str) -> bool:
+    """One-shot claim for a credential reveal (True exactly once per run+output)."""
+    from ..cache.redis import get_redis
+    return bool(await get_redis().set(f"reveal:{run_id}:{output}", "revealed", nx=True))
+
+
+@router.post("/runs/{run_id}/credentials")
+async def reveal_credential(run_id: str, body: dict, user: User = Depends(get_current_user),
+                            settings: Settings = Depends(get_settings)) -> dict:
+    """One-time reveal of a sensitive Terraform output (private key / generated password) for a
+    run this org executed (Phase 8 / N-02).
+
+    Guarantees: RBAC'd (authenticated user), whitelisted to the run's REAL sensitive outputs,
+    served exactly once (Redis NX claim), read via raw `terraform output -raw` from the run's
+    own state workspace, and never logged/persisted — the value exists only in this response.
+    """
+    from ..tools.terraform import TerraformError, TerraformRunner
+
+    name = str(body.get("output") or "")
+    run, _msg, _apps, _steps = await _load(run_id, user)
+    outcome = run.outcome or {}
+    sensitive = outcome.get("sensitive_outputs") or []
+    if name not in sensitive:
+        raise HTTPException(404, "no such sensitive output on this run")
+    plan = run.plan_json or {}
+    workspace = plan.get("workspace")
+    if not workspace:
+        raise HTTPException(409, "this run has no Terraform workspace to read from")
+    if not await _claim_reveal(run_id, name):
+        raise HTTPException(410, "this credential was already revealed once — for a new copy, "
+                                 "rotate it (re-apply) or retrieve it out-of-band")
+    try:
+        runner = TerraformRunner(workspace, settings, state_workspace=plan.get("state_workspace"))
+        value = await runner.output_raw(name)
+    except TerraformError as e:
+        # Reading failed — release the claim so the user can retry.
+        from ..cache.redis import get_redis
+        await get_redis().delete(f"reveal:{run_id}:{name}")
+        raise HTTPException(502, f"could not read the credential from Terraform state: {e}") from e
+    return {"name": name, "value": value, "one_time": True,
+            "note": "This value is shown exactly once and is not stored by AegisOps."}
+
+
 @router.get("/runs/{run_id}/approvals")
 async def run_approvals(run_id: str, user: User = Depends(get_current_user)) -> dict:
-    run, _msg, approvals, _ = await _load(run_id)
+    run, _msg, approvals, _ = await _load(run_id, user)
     return {
         "risk": (run.plan_json or {}).get("risk", "Medium"),
         "cost_impact": (run.plan_json or {}).get("cost", "—"),

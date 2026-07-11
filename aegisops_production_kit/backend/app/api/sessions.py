@@ -14,7 +14,7 @@ from ..db.session import session_scope
 from ..graph_db.context_graph import ContextGraph
 from ..logging_conf import get_logger
 from ..schemas.auth import User
-from ..security.deps import get_current_user
+from ..security.deps import authorize_session, get_current_user
 
 log = get_logger(__name__)
 router = APIRouter(tags=["sessions"])
@@ -65,16 +65,18 @@ async def _org_session(s, session_id: str, user: User) -> Session:
         sess = await s.get(Session, uuid.UUID(session_id))
     except ValueError:
         raise HTTPException(404, "session not found") from None
-    if not sess or sess.org_id != org.id:
-        raise HTTPException(404, "session not found")
+    if sess is not None and sess.org_id != org.id:
+        sess = None  # cross-org: treat as nonexistent
+    authorize_session(sess, user)
     return sess
 
 
 @router.get("/sessions/{session_id}/messages")
 async def session_messages(session_id: str, user: User = Depends(get_current_user)) -> dict:
     async with session_scope() as s:
+        sess = await _org_session(s, session_id, user)  # S2: cross-org session reads are 404
         rows = (await s.execute(
-            select(Message).where(Message.session_id == uuid.UUID(session_id)).order_by(Message.created_at)
+            select(Message).where(Message.session_id == sess.id).order_by(Message.created_at)
         )).scalars()
         return {"messages": [{
             "id": str(m.id), "role": m.role, "content": m.content,

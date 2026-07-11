@@ -277,6 +277,50 @@ class TestTwoOrgIsolation:
         assert as_member(a).get("/overview").json()["org"]["name"] == ORG_A_NAME
         assert as_member(b).get("/overview").json()["org"]["name"] == ORG_B_NAME
 
+    def test_cross_org_read_of_every_tab_is_404(self, two_orgs, as_member, client):
+        """S2: authorize_run/authorize_session on every read/stream endpoint — a run or
+        session in org A does not exist for org B, on any tab, ever."""
+        async def _mk():
+            from app.db.models import Message, Run, Session
+            from app.db.session import session_scope
+
+            async with session_scope() as s:
+                sess = Session(org_id=uuid.UUID(two_orgs["org_a"]), title="s2")
+                s.add(sess)
+                await s.flush()
+                s.add(Message(org_id=sess.org_id, session_id=sess.id, role="user", content="hi"))
+                run = Run(org_id=sess.org_id, session_id=sess.id, status="completed", mode="plan")
+                s.add(run)
+                await s.flush()
+                return str(sess.id), str(run.id)
+
+        sid, rid = client.portal.call(_mk)
+        two_orgs["session_ids"].append(sid)
+        two_orgs["run_ids"].append(rid)
+
+        a = _member(two_orgs["org_a"], two_orgs["user_a"], ORG_A_SLUG)
+        b = _member(two_orgs["org_b"], two_orgs["user_b"], ORG_B_SLUG)
+
+        run_reads = [f"/runs/{rid}"] + [
+            f"/runs/{rid}/{tab}" for tab in
+            ("timeline", "reasoning", "terraform", "logs", "metrics", "traces", "references", "approvals")
+        ]
+        c = as_member(b)
+        for url in run_reads:
+            assert c.get(url).status_code == 404, f"cross-org {url} must be 404"
+        assert c.get(f"/chat/stream/{rid}").status_code == 404
+        assert c.get(f"/sessions/{sid}/messages").status_code == 404
+        assert c.post(f"/runs/{rid}/credentials", json={"output": "private_key_pem"}).status_code == 404
+
+        # The owner org still reads everything (stream 404s only because no LIVE channel exists).
+        c = as_member(a)
+        for url in run_reads:
+            assert c.get(url).status_code == 200, f"same-org {url} must be readable"
+        assert c.get(f"/sessions/{sid}/messages").status_code == 200
+        # Invalid UUIDs are 404, not 500.
+        assert c.get("/runs/not-a-uuid/timeline").status_code == 404
+        assert c.get("/sessions/not-a-uuid/messages").status_code == 404
+
     def test_knowledge_search_is_org_scoped(self, two_orgs, as_member):
         a = _member(two_orgs["org_a"], two_orgs["user_a"], ORG_A_SLUG)
         b = _member(two_orgs["org_b"], two_orgs["user_b"], ORG_B_SLUG)
