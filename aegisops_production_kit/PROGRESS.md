@@ -583,4 +583,35 @@ explained instead of crashing).
       gitignored; no secret committed. No grep hits for TODO/FIXME/mock/placeholder/NotImplemented
       in app code.
 
+## Q. Production remediation (Stage A/B — 2026-07-11 →)
+
+> The ground-truth analysis (`ANALYSIS.md`) found that several claims above are **not** met by the
+> code as it stands: multi-tenancy is a single default org (P2), credential reveal and read/stream
+> endpoints are under-authorized (P1/P3), the API is not horizontally scalable (in-process SSE
+> channels, P4), policy checks are hardcoded `True` (P8), the Traces tab is static (P9), and SRE
+> remediation reports success without acting (P7). Where this file and the code disagree, the code
+> wins. Remediation is governed by the amended plan.
+
+- [x] **Stage A (docs)** — plan amended per the owner's production directive +
+      `AEGISOPS_TARGET_ARCHITECTURE.md`: decisions 7–13 locked in `FIX.md`; Split-Trust +
+      Governed Executive Loop folded into `docs/fix/01_harness.md`; Context Engine (5 layers,
+      incl. context offloading M5) into `docs/fix/03…`; U6 rewritten + D3 resolved (INVEST) in
+      `docs/fix/04…`; `docs/fix/05…` reconciled to the authoritative architecture;
+      `docs/fix/07_roadmap.md` re-emitted as Phases 1–3 with per-item acceptance tests;
+      execution checklist appended to `FIX.md §8`. **Awaiting owner review before Stage B.**
+- [ ] **Phase 1 — Trustworthy** (S0 S1 S2 S3 S4 S5 · A1+B7 A2 A4 A5 · B5 B6 · U4 · honesty
+      labels · O2 C1 D1 D4). Exit gate: two orgs isolated in API+UI; no self-approve in prod;
+      exactly one apply under concurrent approve; reveal gated+audited; no dishonest surface.
+- [ ] **Phase 2 — Production harness + Context Engine** (B1 B2 B3 B4 · A3 + latency pass ≤15s ·
+      M1 M2 M3 M5 · U1 + defaults honesty · U2 U3 · O1 O3 · D2 U5 U8 · P16). Exit gate:
+      worker-kill mid-apply recovers exactly once; multi-worker streaming; turn-20-of-100 recall
+      in the UI; real failed policy check; real Traces tab; honest model menu.
+- [ ] **Phase 3 — Intelligence layer** (D3 World Model + Reconciliation · dependency closure ·
+      U6 Governed Executive Loop · read-only investigation agents · Module Promotion Pipeline ·
+      M4 · U7 · modify-beyond-ports · cost estimation · P17). Exit gate: VPC→EC2 DAG demo e2e;
+      drift notification; world-model destroy warning; module promotion flow.
+
+Per-item status lives in the **`FIX.md §8` execution checklist** (the single progress tracker);
+this section mirrors phase-level status only.
+
 _Legend: [x] done · [~] partial/scaffolded · [ ] pending._
