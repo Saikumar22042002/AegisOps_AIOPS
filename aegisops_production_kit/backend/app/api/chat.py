@@ -27,7 +27,7 @@ from ..db.session import session_scope
 from ..logging_conf import bind_correlation, get_logger
 from ..metrics import AGENT_RUNS
 from ..schemas.auth import User
-from ..security.deps import authorize_run, get_current_user, require_approver
+from ..security.deps import authorize_run, get_current_user, require_approver, require_initiator
 from ..settings import Settings, get_settings
 
 log = get_logger(__name__)
@@ -104,8 +104,10 @@ async def _persist_result(run_id: str, session_id: str, org_id: str, state: dict
 
 
 @router.post("/chat")
-async def chat(body: ChatRequest, request: Request, user: User = Depends(get_current_user),
+async def chat(body: ChatRequest, request: Request, user: User = Depends(require_initiator),
                settings: Settings = Depends(get_settings)):
+    # S3: read-only roles (auditor/read-only) cannot initiate a run — they can still view
+    # (GET endpoints stay on get_current_user). require_initiator → 403 with a clear message.
     async with session_scope() as s:
         org = await repo.org_for(s, user)
         org_id = str(org.id)

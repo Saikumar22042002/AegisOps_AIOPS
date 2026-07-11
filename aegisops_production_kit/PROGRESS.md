@@ -614,6 +614,11 @@ explained instead of crashing).
         402 passed / 2 skipped; vitest 25 passed. Note: existing dev Keycloak containers must
         be recreated to import the new groups/mapper; invalid-Gemini-key environments now seed
         with NULL embeddings + loud warning (keyword recall degrade, per invariant 7).
+  - [x] **S3 /chat initiator gate** (2026-07-11): `POST /chat` now requires an initiator role
+        (`require_initiator`) — read-only/auditor get a clear 403 and can still view everything;
+        the composer shows an honest read-only notice instead of a dead input box
+        (`can_initiate=false`). Evidence: `test_rbac_endpoints.py::test_chat_requires_initiator`;
+        full backend suite 404 passed / 2 skipped; vitest 25 passed; tsc clean.
   - [x] **S2 read/stream authorization** (2026-07-11): shared `authorize_run`/`authorize_session`
         predicates (security/deps.py) applied on every run read — all 8 artifact tabs, the
         credentials endpoint, `/runs/{id}`, `/chat/stream/{id}` (authorized BEFORE attaching to

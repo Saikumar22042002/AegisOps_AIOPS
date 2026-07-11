@@ -292,12 +292,35 @@ function Composer({ chatMaxWidth }: { chatMaxWidth: string }) {
   const sendText = useUI((s) => s.sendText);
   const streaming = useUI((s) => s.streaming);
   const model = useUI((s) => s.model);
-  const canSend = input.trim() && !streaming;
+  const { user } = useAuth();
+  // S3: read-only roles cannot initiate a run. The backend enforces this (POST /chat →
+  // 403); the composer is honest about it rather than letting the user type into a dead box.
+  const canInitiate = user ? !!user.can_initiate : true;
+  const canSend = !!input.trim() && !streaming && canInitiate;
   const suggestions = [
     "Provision an S3 bucket in AWS us-east-1",
     "Why did checkout latency spike after the 14:20 deploy?",
     "Create a GCS bucket in my GCP project",
   ];
+  if (!canInitiate) {
+    return (
+      <div className="ao-composer-pad" style={{ flexShrink: 0, padding: "0 36px 26px" }}>
+        <div style={{ maxWidth: chatMaxWidth, margin: "0 auto", transition: "max-width .25s" }}>
+          <div style={{ border: "1px solid var(--border-2)", borderRadius: 16, background: "var(--surface-2)", padding: "16px 18px", display: "flex", alignItems: "center", gap: 12 }}>
+            <span style={{ width: 30, height: 30, borderRadius: 8, background: "var(--surface)", border: "1px solid var(--border-2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: "var(--text-4)" }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M6 10V8a6 6 0 1 1 12 0v2m-9 0h6a3 3 0 0 1 3 3v4a3 3 0 0 1-3 3H9a3 3 0 0 1-3-3v-4a3 3 0 0 1 3-3Z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            </span>
+            <div style={{ fontSize: 13, color: "var(--text-3)", lineHeight: 1.5 }}>
+              Your role is <b style={{ color: "var(--text-2)" }}>read-only</b> — you can view every conversation, run, and artifact in your organization, but not start a new request. Ask a Developer, DevOps Engineer, SRE, or an admin to initiate changes.
+            </div>
+          </div>
+          <div style={{ textAlign: "center", fontSize: 11, color: "var(--text-5)", marginTop: 10 }}>
+            {model} · Read-only access · Every destructive action requires an approver.
+          </div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="ao-composer-pad" style={{ flexShrink: 0, padding: "0 36px 26px" }}>
       <div style={{ maxWidth: chatMaxWidth, margin: "0 auto", transition: "max-width .25s" }}>
@@ -314,7 +337,7 @@ function Composer({ chatMaxWidth }: { chatMaxWidth: string }) {
             style={{ width: "100%", background: "transparent", border: "none", outline: "none", color: "var(--text)", fontSize: 15, lineHeight: 1.5, minHeight: 24, maxHeight: 160 }} />
           <div style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 9 }}>
             <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text-5)", fontFamily: "'IBM Plex Mono',monospace" }}>Approval required</span>
-            <button onClick={() => void sendText(input)} style={{ width: 35, height: 35, borderRadius: 9, border: "none", background: canSend ? "var(--accent)" : "var(--border-2)", display: "flex", alignItems: "center", justifyContent: "center", cursor: canSend ? "pointer" : "default" }}>
+            <button onClick={() => void sendText(input)} disabled={!canSend} style={{ width: 35, height: 35, borderRadius: 9, border: "none", background: canSend ? "var(--accent)" : "var(--border-2)", display: "flex", alignItems: "center", justifyContent: "center", cursor: canSend ? "pointer" : "default" }}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 19V5M5.5 11.5 12 5l6.5 6.5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
             </button>
           </div>

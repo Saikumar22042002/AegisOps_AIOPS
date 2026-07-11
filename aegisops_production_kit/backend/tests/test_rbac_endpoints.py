@@ -39,6 +39,21 @@ def test_chat_requires_auth(client: TestClient):
     assert client.post("/chat", json={"message": "create an s3 bucket"}).status_code == 401
 
 
+def test_chat_requires_initiator(as_user):
+    """S3: read-only roles cannot initiate a run — `require_initiator` rejects them at the
+    RBAC boundary, before any datastore is touched. Initiator roles pass that gate (they may
+    still fail later on org resolution / DB, but never with the initiator-gate message)."""
+    for role in ("read-only", "auditor"):
+        r = as_user([role]).post("/chat", json={"message": "create an s3 bucket"})
+        assert r.status_code == 403, f"{role} must not initiate a run"
+        assert "initiate" in r.json()["detail"].lower()
+    for role in ("developer", "sre", "devops-engineer", "cloud-architect", "platform-admin"):
+        r = as_user([role]).post("/chat", json={"message": "create an s3 bucket"})
+        # Passed the initiator gate: any later failure must NOT be the initiator-gate 403.
+        assert not (r.status_code == 403 and "initiate" in r.json().get("detail", "").lower()), \
+            f"{role} was wrongly blocked by the initiator gate"
+
+
 def test_approvals_requires_auth(client: TestClient):
     assert client.post(f"/approvals/{_RUN}", json={"decision": "approved"}).status_code == 401
 
