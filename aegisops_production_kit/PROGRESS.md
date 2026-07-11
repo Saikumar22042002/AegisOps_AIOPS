@@ -614,6 +614,12 @@ explained instead of crashing).
         402 passed / 2 skipped; vitest 25 passed. Note: existing dev Keycloak containers must
         be recreated to import the new groups/mapper; invalid-Gemini-key environments now seed
         with NULL embeddings + loud warning (keyword recall degrade, per invariant 7).
+  - [x] **A2 plan_guard at the approval choke-point** (2026-07-12): the approval node re-runs
+        `check_plan_actions` before the durable interrupt, so a plan whose actions don't match the
+        operation (an apply that would delete/replace, a destroy that would create, a read carrying
+        a plan) is halted at the last gate — never shown to an approver, never applied — even if a
+        plan path skipped the guard. Action derived from state (`execution_mode`/explicit `action`).
+        Evidence: `test_safety_invariants.py::TestApprovalChokePointGuard` (4); full suite 416 passed / 2 skipped.
   - [x] **A1+B7 idempotency wait-or-abort** (2026-07-12): the in-flight-claim fall-through that
         could double-apply (P5) is closed — `cloudops_execute` now returns the stored result if the
         peer finished, WAITS up to a deadline if it's still applying, and ABORTS (never applies) if

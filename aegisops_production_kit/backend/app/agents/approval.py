@@ -15,17 +15,40 @@ from langgraph.types import interrupt
 from ..db.models import Approval
 from ..db.session import get_sessionmaker
 from ..graph_db.context_graph import ContextGraph
-from . import timing
+from . import plan_guard, timing
 from .runtime import emitter_of
 from .state import AgentState
 
 log = structlog.get_logger(__name__)
 
 
+def _guard_action(state: AgentState) -> str:
+    """The action to re-assert the plan against at the choke-point. `execution_mode=="destroy"`
+    is a destroy; every other mutating mode is an apply, for which the create rule (no
+    delete/replace) is the correct, strict invariant — create and modify both forbid tearing
+    anything down, so asserting it here catches a bad plan regardless of which path produced it."""
+    if state.get("action"):
+        return str(state["action"]).lower()
+    return "destroy" if state.get("execution_mode") == "destroy" else "create"
+
+
 async def approval(state: AgentState, config) -> dict:
     emitter = emitter_of(config)
     if not state.get("needs_change") or state.get("approval_status") == "not_required":
         return {"approval_status": "not_required"}
+
+    # A2: re-assert plan_guard at the approval choke-point — the last gate before a human sees
+    # the plan. Even if a plan path forgot to call the guard, a plan whose actions don't match
+    # the operation (an apply that would delete/replace, a destroy that would create) is halted
+    # HERE, before the durable interrupt — never shown to an approver, never applied.
+    violation = plan_guard.check_plan_actions(_guard_action(state), state.get("diff") or [])
+    if violation:
+        log.error("approval.plan_guard_blocked", run_id=state.get("run_id"),
+                  action=_guard_action(state))
+        await emitter.error(violation, code="plan_guard", retriable=False)
+        await emitter.token(violation)
+        return {"approval_status": "blocked", "needs_change": False, "answer": violation,
+                "outcome": {"status": "blocked", "error": "plan_guard: plan/action mismatch"}}
 
     payload = state.get("interrupt_payload") or {"kind": "approval", "runId": state["run_id"]}
     # Record the approval start now; end after the human decides. start_step preserves the first
