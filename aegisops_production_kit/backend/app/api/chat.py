@@ -73,6 +73,15 @@ async def _sse(channel: RunChannel, replay_after: int = 0):
 
 async def _persist_result(run_id: str, session_id: str, org_id: str, state: dict, status_: str) -> str:
     """Persist the assistant message + run state; returns the assistant message id."""
+    from ..security.redaction import redact, redact_dict
+
+    # S4: redaction backstop — nothing persisted to messages.content / runs.outcome may
+    # carry a secret, even if a future agent echoes one into its answer. Console/graph/
+    # Langfuse already redact; this closes the last persistence path (P20).
+    answer = redact(state.get("answer", "") or "")
+    outcome = state.get("outcome")
+    if isinstance(outcome, dict):
+        outcome = redact_dict(outcome)
     async with session_scope() as s:
         run = await s.get(Run, uuid.UUID(run_id))
         if run:
@@ -86,13 +95,13 @@ async def _persist_result(run_id: str, session_id: str, org_id: str, state: dict
             run.mode = state.get("execution_mode", run.mode)
             run.plan_json = state.get("plan_json")
             run.input_json = state.get("parsed_inputs")
-            run.outcome = state.get("outcome")
+            run.outcome = outcome
             run.context_id = state.get("context_id") or run_id
             run.snow_id = state.get("snow_id")
         conf = state.get("confidentiality", {})
         msg = Message(
             org_id=uuid.UUID(org_id), session_id=uuid.UUID(session_id), role="assistant",
-            content=state.get("answer", ""), confidentiality_level=conf.get("level"),
+            content=answer, confidentiality_level=conf.get("level"),
             confidentiality_score=conf.get("score"), context_id=run_id,
             trace_id=state.get("trace_id"), run_id=uuid.UUID(run_id),
             analysis={"references": state.get("references", []), "reasoning": state.get("reasoning_cards", []),

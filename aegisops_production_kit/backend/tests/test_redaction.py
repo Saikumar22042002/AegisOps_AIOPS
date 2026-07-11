@@ -73,3 +73,49 @@ def test_redact_dict_masks_by_key_recursively():
 def test_redact_handles_empty_and_none_safely():
     assert redact("") == ""
     assert redact_dict({}) == {}
+
+
+# ═══ S4 — persist-time backstop: a secret echoed into answer/outcome never reaches the DB ═══
+
+
+class TestPersistBackstop:
+    async def test_planted_secret_in_answer_and_outcome_is_masked_when_persisted(self, live_db, org_id):
+        """S4/P20: even if a future agent echoes a secret into its answer or outcome, the
+        persisted messages.content and runs.outcome are redaction-scanned first."""
+        import uuid as _uuid
+
+        from sqlalchemy import delete
+
+        from app.api.chat import _persist_result
+        from app.db.models import Message, Run, Session
+        from app.db.session import session_scope
+
+        async with session_scope() as s:
+            sess = Session(org_id=_uuid.UUID(org_id), title="s4")
+            s.add(sess)
+            await s.flush()
+            run = Run(org_id=sess.org_id, session_id=sess.id, status="running", mode="plan")
+            s.add(run)
+            await s.flush()
+            sid, rid = str(sess.id), str(run.id)
+
+        state = {
+            "answer": f"Here is your key:\n{_FAKE_PK}\nand password=hunter2 — keep it safe.",
+            "outcome": {"status": "applied", "private_key_pem": _FAKE_PK,
+                        "detail": {"admin_password": "hunter2"}},
+        }
+        try:
+            msg_id = await _persist_result(rid, sid, org_id, state, "completed")
+            async with session_scope() as s:
+                msg = await s.get(Message, _uuid.UUID(msg_id))
+                run = await s.get(Run, _uuid.UUID(rid))
+                assert "MIIEvQIBADANBg" not in msg.content, "private key body leaked into messages.content"
+                assert "hunter2" not in msg.content, "password leaked into messages.content"
+                flat = str(run.outcome)
+                assert "MIIEvQIBADANBg" not in flat, "private key leaked into runs.outcome"
+                assert "hunter2" not in flat, "password leaked into runs.outcome"
+                assert run.outcome["status"] == "applied"  # non-secret fields preserved
+        finally:
+            async with session_scope() as s:
+                await s.execute(delete(Session).where(Session.id == _uuid.UUID(sid)))
+                await s.execute(delete(Run).where(Run.id == _uuid.UUID(rid)))

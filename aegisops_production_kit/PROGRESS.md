@@ -614,6 +614,10 @@ explained instead of crashing).
         402 passed / 2 skipped; vitest 25 passed. Note: existing dev Keycloak containers must
         be recreated to import the new groups/mapper; invalid-Gemini-key environments now seed
         with NULL embeddings + loud warning (keyword recall degrade, per invariant 7).
+  - [x] **S4 persist-time redaction backstop** (2026-07-11): `_persist_result` runs `redact()`
+        on the answer and `redact_dict()` on the outcome before any DB write — a secret echoed
+        by a future agent can no longer persist (P20). Evidence:
+        `test_redaction.py::TestPersistBackstop`; full backend suite 405 passed / 2 skipped.
   - [x] **S3 /chat initiator gate** (2026-07-11): `POST /chat` now requires an initiator role
         (`require_initiator`) — read-only/auditor get a clear 403 and can still view everything;
         the composer shows an honest read-only notice instead of a dead input box
