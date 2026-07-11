@@ -614,6 +614,13 @@ explained instead of crashing).
         402 passed / 2 skipped; vitest 25 passed. Note: existing dev Keycloak containers must
         be recreated to import the new groups/mapper; invalid-Gemini-key environments now seed
         with NULL embeddings + loud warning (keyword recall degrade, per invariant 7).
+  - [x] **B6 no blocking I/O on the event loop** (2026-07-12): `inventory.reconcile`'s sync boto3
+        `describe_instances` (P6) now runs via `anyio.to_thread.run_sync`; the Gemini client no
+        longer does a `models.list()` network call in its constructor (P18) — resolution is lazy
+        and thread-offloaded on first generate/stream. Grep-audit confirms every other agent SDK
+        call routes through the already-offloaded `tools/aws.py`. Evidence:
+        `test_inventory.py::test_reconcile_offloads_blocking_sdk_call` (a concurrent ticker keeps
+        ticking through a 0.4s blocking describe); full backend suite 418 passed / 2 skipped.
   - [x] **A4 org-scoped duplicate-name check** (2026-07-12): no logic change — `list_active` was
         always org-scoped, and S0 now flows the real authenticated org into `state["org_id"]`, so
         the same-name-create refusal is correctly org-bounded. Evidence:

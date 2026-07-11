@@ -221,14 +221,21 @@ async def reconcile(resource: dict, settings) -> dict:
     """
     attrs = dict(resource.get("attributes") or {})
     status = resource.get("status", "active")
+
+    def _describe_ec2() -> list:
+        # Blocking boto3 call — MUST run off the event loop (B6/P6): a cold/regional describe
+        # would otherwise stall every concurrent stream in this worker.
+        import boto3
+        ec2 = boto3.client("ec2", aws_access_key_id=settings.aws_access_key_id,
+                           aws_secret_access_key=settings.aws_secret_access_key,
+                           aws_session_token=settings.aws_session_token or None,
+                           region_name=resource.get("region") or settings.aws_default_region)
+        return ec2.describe_instances(InstanceIds=[resource["provider_id"]]).get("Reservations", [])
+
     try:
         if resource["cloud"] == "aws" and resource["resource_type"] == "ec2" and resource.get("provider_id"):
-            import boto3
-            ec2 = boto3.client("ec2", aws_access_key_id=settings.aws_access_key_id,
-                               aws_secret_access_key=settings.aws_secret_access_key,
-                               aws_session_token=settings.aws_session_token or None,
-                               region_name=resource.get("region") or settings.aws_default_region)
-            resv = ec2.describe_instances(InstanceIds=[resource["provider_id"]]).get("Reservations", [])
+            import anyio
+            resv = await anyio.to_thread.run_sync(_describe_ec2)
             inst = (resv[0]["Instances"][0] if resv and resv[0].get("Instances") else None)
             if inst is None:
                 status = "terminated"

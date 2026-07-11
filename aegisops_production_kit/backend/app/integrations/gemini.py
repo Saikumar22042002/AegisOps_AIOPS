@@ -9,6 +9,7 @@ No fabricated output — if the API is unreachable the call raises and is surfac
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from datetime import datetime, timezone
 from typing import Any
 
 import structlog
@@ -25,19 +26,42 @@ class GeminiError(Exception):
     pass
 
 
+def usage_of(resp: Any) -> dict | None:
+    """Token usage from a google-genai response/chunk (None-safe)."""
+    md = getattr(resp, "usage_metadata", None)
+    if md is None:
+        return None
+    return {"input": getattr(md, "prompt_token_count", None),
+            "output": getattr(md, "candidates_token_count", None),
+            "total": getattr(md, "total_token_count", None)}
+
+
 class GeminiLLM:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self._enabled = bool(settings.gemini_api_key)
         # Client construction does not call the network; calls do.
         self.client = genai.Client(api_key=settings.gemini_api_key or "missing-key")
-        self.model = self._resolve(settings.gemini_model)
+        # P18/B6: DO NOT resolve the model here — `models.list()` is a blocking network call and
+        # this constructor runs inside async handlers (via the get_gemini singleton). Start with
+        # the configured model and resolve lazily, off-thread, on first use.
+        self.model = settings.gemini_model
+        self._model_resolved = False
         self.embed_model = settings.gemini_embedding_model
         self.embed_dim = settings.gemini_embed_dim
 
     @property
     def enabled(self) -> bool:
         return self._enabled
+
+    async def _ensure_model(self) -> None:
+        """Resolve the model to one the key can actually list, once, without blocking the loop."""
+        if self._model_resolved or not self._enabled:
+            self._model_resolved = True
+            return
+        import anyio
+        self.model = await anyio.to_thread.run_sync(self._resolve, self.model)
+        self._model_resolved = True
 
     def _resolve(self, wanted: str) -> str:
         if not self._enabled:
@@ -67,6 +91,7 @@ class GeminiLLM:
         """Stream raw response chunks (caller reads .text and tool-call parts)."""
         if not self._enabled:
             raise GeminiError("GEMINI_API_KEY is not configured")
+        await self._ensure_model()
         stream = await self.client.aio.models.generate_content_stream(
             model=self.model, contents=contents, config=self._config(system, tools)
         )
@@ -86,9 +111,27 @@ class GeminiLLM:
     ) -> types.GenerateContentResponse:
         if not self._enabled:
             raise GeminiError("GEMINI_API_KEY is not configured")
-        return await self.client.aio.models.generate_content(
-            model=self.model, contents=contents, config=self._config(system, tools)
-        )
+        await self._ensure_model()
+        # Each attempt is recorded as one Langfuse generation (tokens/cost/latency; failures
+        # as ERROR generations) under whichever step span is currently open for the run.
+        from .langfuse_client import get_tracer
+
+        t0 = datetime.now(timezone.utc)
+        try:
+            resp = await self.client.aio.models.generate_content(
+                model=self.model, contents=contents, config=self._config(system, tools)
+            )
+        except Exception as e:
+            get_tracer(self.settings).generation(
+                name="gemini.generate", model=self.model,
+                input={"system": system, "prompt": contents if isinstance(contents, str) else str(contents)},
+                start_time=t0, error=str(e))
+            raise
+        get_tracer(self.settings).generation(
+            name="gemini.generate", model=self.model,
+            input={"system": system, "prompt": contents if isinstance(contents, str) else str(contents)},
+            output=resp.text or "", usage=usage_of(resp), start_time=t0)
+        return resp
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=0.5, max=6), reraise=True)
     async def aembed(self, texts: list[str]) -> list[list[float]]:

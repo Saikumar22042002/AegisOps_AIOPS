@@ -203,3 +203,51 @@ async def test_duplicate_name_check_is_org_scoped(clean_inventory):
         assert all(m["provider_id"] != "i-orgA-web01" for m in matches)
     finally:
         await _cleanup(org_b)
+
+
+# ═══ B6 — inventory.reconcile must not block the event loop ═══════════════════════════════════
+
+
+async def test_reconcile_offloads_blocking_sdk_call(monkeypatch):
+    """P6/B6: the boto3 describe in reconcile runs off-thread. Proof: while a deliberately
+    blocking describe sleeps, a concurrent async ticker keeps making progress — impossible if
+    the sync call sat on the event loop."""
+    import asyncio
+    import time as _time
+
+    import boto3
+
+    from app.agents import inventory
+    from app.settings import get_settings
+
+    class _FakeEC2:
+        def describe_instances(self, InstanceIds=None):  # noqa: N803 — boto3 kwarg name
+            _time.sleep(0.4)  # a real BLOCKING call
+            return {"Reservations": [{"Instances": [{
+                "State": {"Name": "running"}, "PublicIpAddress": "203.0.113.5",
+                "PrivateIpAddress": "10.0.0.5", "PublicDnsName": "ec2.example",
+                "VpcId": "vpc-x", "SubnetId": "subnet-x"}]}]}
+
+    monkeypatch.setattr(boto3, "client", lambda *a, **k: _FakeEC2())
+
+    # Pre-set attributes to exactly what the fake returns so reconcile skips the DB persist
+    # branch (keeps this a pure event-loop test — no datastore needed).
+    resource = {"id": str(uuid.uuid4()), "cloud": "aws", "resource_type": "ec2",
+                "provider_id": "i-blocking", "region": "us-east-1", "status": "active",
+                "attributes": {"public_ip": "203.0.113.5", "private_ip": "10.0.0.5",
+                               "public_dns": "ec2.example", "state": "running",
+                               "vpc_id": "vpc-x", "subnet_id": "subnet-x"}}
+
+    ticks = 0
+
+    async def _ticker():
+        nonlocal ticks
+        for _ in range(30):
+            await asyncio.sleep(0.02)
+            ticks += 1
+
+    out, _ = await asyncio.gather(inventory.reconcile(resource, get_settings()), _ticker())
+    assert out["status"] == "active"
+    assert out["attributes"]["public_ip"] == "203.0.113.5"
+    # The ticker ran many times DURING the 0.4s blocking describe → the loop was never stalled.
+    assert ticks >= 10, f"event loop was blocked during reconcile (only {ticks} ticks)"
