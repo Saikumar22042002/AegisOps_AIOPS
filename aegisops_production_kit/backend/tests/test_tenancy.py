@@ -363,3 +363,109 @@ class TestTwoOrgIsolation:
         titles_b = [x.get("title", "") for x in rb.json()["results"]]
         assert not any("EKS" in t for t in titles_b), \
             "org B must never see org A's knowledge documents"
+
+
+class TestCredentialRevealS1:
+    """S1: reveal is initiator-or-approver + org-scoped + step-up re-auth + always-on audit.
+
+    verify_stepup_auth (real Keycloak password grant) and the Terraform read are stubbed so the
+    authorization / freshness-gating / one-shot / audit contract is exercised deterministically
+    without live Keycloak or Terraform state."""
+
+    def _mk_run(self, client, org_id: str, initiator_id: str) -> str:
+        async def _c():
+            from app.db.models import Run
+            from app.db.session import session_scope
+
+            async with session_scope() as s:
+                run = Run(org_id=uuid.UUID(org_id), status="completed", mode="apply", env="Staging",
+                          initiated_by=uuid.UUID(initiator_id),
+                          plan_json={"workspace": "demo-null", "state_workspace": None},
+                          outcome={"status": "applied", "sensitive_outputs": ["private_key_pem"]})
+                s.add(run)
+                await s.flush()
+                return str(run.id)
+        return client.portal.call(_c)
+
+    def _audit_count(self, client, run_id: str) -> int:
+        async def _c():
+            from sqlalchemy import func, select
+
+            from app.db.models import AuditLog
+            from app.db.session import session_scope
+
+            async with session_scope() as s:
+                return (await s.execute(
+                    select(func.count()).select_from(AuditLog)
+                    .where(AuditLog.action == "credential.reveal",
+                           AuditLog.target == f"run:{run_id}/private_key_pem")
+                )).scalar_one()
+        return client.portal.call(_c)
+
+    def _cleanup(self, client, run_id: str):
+        async def _c():
+            from sqlalchemy import delete
+
+            from app.db.models import AuditLog, Run
+            from app.db.session import session_scope
+
+            async with session_scope() as s:
+                await s.execute(delete(AuditLog).where(
+                    AuditLog.target == f"run:{run_id}/private_key_pem"))
+                await s.execute(delete(Run).where(Run.id == uuid.UUID(run_id)))
+        client.portal.call(_c)
+
+    def test_reveal_authz_stepup_oneshot_and_audit(self, two_orgs, as_member, client, monkeypatch):
+        from app.api import artifacts as art
+
+        # Fresh-auth proof is valid iff password == "goodpass"; Terraform read is stubbed.
+        async def _fake_stepup(user, password, settings):
+            return password == "goodpass"
+
+        async def _fake_output_raw(self, name):
+            return "-----BEGIN PRIVATE KEY-----\nSTUBBEDVALUE\n-----END PRIVATE KEY-----"
+
+        monkeypatch.setattr(art, "verify_stepup_auth", _fake_stepup)
+        from app.tools.terraform import TerraformRunner
+        monkeypatch.setattr(TerraformRunner, "output_raw", _fake_output_raw)
+
+        rid = self._mk_run(client, two_orgs["org_a"], two_orgs["user_a"])
+        try:
+            initiator = _member(two_orgs["org_a"], two_orgs["user_a"], ORG_A_SLUG, roles=["developer"])
+            approver = _member(two_orgs["org_a"], str(uuid.uuid4()), ORG_A_SLUG, roles=["cloud-architect"])
+            outsider = _member(two_orgs["org_a"], str(uuid.uuid4()), ORG_A_SLUG, roles=["developer"])
+            org_b = _member(two_orgs["org_b"], two_orgs["user_b"], ORG_B_SLUG, roles=["org-admin"])
+            body = {"output": "private_key_pem"}
+
+            attempts = 0
+
+            # Cross-org caller → 404 (no enumeration), still audited.
+            assert as_member(org_b).post(f"/runs/{rid}/credentials", json=body).status_code == 404
+            attempts += 1
+            # Non-initiator, non-approver → 404, audited.
+            assert as_member(outsider).post(f"/runs/{rid}/credentials", json=body).status_code == 404
+            attempts += 1
+            # Initiator without a fresh proof → 401, audited.
+            assert as_member(initiator).post(f"/runs/{rid}/credentials", json=body).status_code == 401
+            attempts += 1
+            # Initiator with a bad password → 401, audited.
+            assert as_member(initiator).post(f"/runs/{rid}/credentials",
+                                             json={**body, "password": "wrong"}).status_code == 401
+            attempts += 1
+            # Approver (not the initiator) with a fresh proof → value once.
+            r = as_member(approver).post(f"/runs/{rid}/credentials", json={**body, "password": "goodpass"})
+            assert r.status_code == 200 and "STUBBEDVALUE" in r.json()["value"]
+            attempts += 1
+            # Second reveal → 410, audited.
+            assert as_member(approver).post(f"/runs/{rid}/credentials",
+                                            json={**body, "password": "goodpass"}).status_code == 410
+            attempts += 1
+
+            assert self._audit_count(client, rid) == attempts, \
+                "every reveal attempt (success and denial) must write an audit row"
+        finally:
+            async def _clear():
+                from app.cache.redis import get_redis
+                await get_redis().delete(f"reveal:{rid}:private_key_pem")
+            client.portal.call(_clear)
+            self._cleanup(client, rid)

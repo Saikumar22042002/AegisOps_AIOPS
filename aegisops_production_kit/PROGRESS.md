@@ -614,6 +614,13 @@ explained instead of crashing).
         402 passed / 2 skipped; vitest 25 passed. Note: existing dev Keycloak containers must
         be recreated to import the new groups/mapper; invalid-Gemini-key environments now seed
         with NULL embeddings + loud warning (keyword recall degrade, per invariant 7).
+  - [x] **S1 credential reveal hardening** (2026-07-12): reveal now requires initiator-or-approver
+        + run org-scope (else 404, no enumeration) + a **mandatory step-up re-auth** (password
+        re-entry → fresh Keycloak grant, ≤120s, `REVEAL_STEPUP_MAX_AGE_SECONDS`) + an **audit row
+        on every attempt** (success and denial; value never logged). Frontend: a re-auth modal on
+        the Reveal button that surfaces a 401 in place. Redis NX one-shot preserved. Evidence:
+        `test_tenancy.py::TestCredentialRevealS1` (all six paths + audit-count == attempts); full
+        backend suite 407 passed / 2 skipped; vitest 25; tsc clean.
   - [x] **A5 initiator + 4-eyes** (2026-07-11): migration `0004_run_initiated_by` adds
         `runs.initiated_by` (FK users.id) + `runs.env`; `/chat` records both; `/approvals`
         refuses Production self-approval with a clear 403 (flag

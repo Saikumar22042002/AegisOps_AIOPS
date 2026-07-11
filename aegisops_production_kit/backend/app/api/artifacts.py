@@ -5,15 +5,19 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import select
 
+from ..db import repositories as repo
 from ..db.models import Approval, Message, Run, RunStep
 from ..db.session import session_scope
+from ..logging_conf import get_logger
 from ..schemas.auth import User
-from ..security.deps import authorize_run, get_current_user
+from ..security.deps import authorize_run, get_current_user, verify_stepup_auth
 from ..settings import Settings, get_settings
 from ..tools.prometheus import get_prometheus
 
+log = get_logger(__name__)
 router = APIRouter(tags=["artifacts"])
 
 
@@ -209,39 +213,96 @@ async def _claim_reveal(run_id: str, output: str) -> bool:
     return bool(await get_redis().set(f"reveal:{run_id}:{output}", "revealed", nx=True))
 
 
-@router.post("/runs/{run_id}/credentials")
-async def reveal_credential(run_id: str, body: dict, user: User = Depends(get_current_user),
-                            settings: Settings = Depends(get_settings)) -> dict:
-    """One-time reveal of a sensitive Terraform output (private key / generated password) for a
-    run this org executed (Phase 8 / N-02).
+async def _audit_reveal(user: User, run_id: str, output: str, decision: str, reason: str,
+                        org_id: str | None) -> None:
+    """S1: an audit row on EVERY reveal attempt — success and denial. The value is never
+    logged; only who, which run/output, the decision, and correlation ids."""
+    import uuid as _uuid
 
-    Guarantees: RBAC'd (authenticated user), whitelisted to the run's REAL sensitive outputs,
-    served exactly once (Redis NX claim), read via raw `terraform output -raw` from the run's
-    own state workspace, and never logged/persisted — the value exists only in this response.
+    try:
+        async with session_scope() as s:
+            await repo.AuditRepo.log(
+                s, org_id=_uuid.UUID(org_id) if org_id else None,
+                actor=user.username, action="credential.reveal", target=f"run:{run_id}/{output}",
+                detail={"decision": decision, "reason": reason},
+                correlation={"run_id": run_id, "user_id": user.user_id, "org_id": org_id},
+            )
+    except Exception as exc:  # noqa: BLE001 — audit must never mask the real outcome
+        log.warning("reveal.audit_write_failed", run_id=run_id, error=str(exc))
+
+
+class RevealRequest(BaseModel):
+    output: str
+    password: str | None = None  # step-up re-auth: password re-entry (never logged/persisted)
+
+
+@router.post("/runs/{run_id}/credentials")
+async def reveal_credential(run_id: str, body: RevealRequest, user: User = Depends(get_current_user),
+                            settings: Settings = Depends(get_settings)) -> dict:
+    """One-time reveal of a sensitive Terraform output (private key / generated password).
+
+    S1 guarantees (all mandatory): the caller must be the run's **initiator or an approver**
+    AND in the run's org (else 404, no enumeration); a **fresh step-up re-auth** proof
+    (password re-entry, ≤120s) is required (else 401); **every attempt — success or denial —
+    writes an audit row** (the value is never logged). Whitelisted to the run's real sensitive
+    outputs, served exactly once (Redis NX), read via raw `terraform output -raw`.
     """
     from ..tools.terraform import TerraformError, TerraformRunner
 
-    name = str(body.get("output") or "")
-    run, _msg, _apps, _steps = await _load(run_id, user)
-    outcome = run.outcome or {}
-    sensitive = outcome.get("sensitive_outputs") or []
+    name = body.output or ""
+
+    # 1. Authorization (org + initiator-or-approver). A cross-org/unknown run is a 404 to
+    #    avoid enumeration — but the attempt is still audited under the caller's own org.
+    async with session_scope() as s:
+        try:
+            run = await s.get(Run, uuid.UUID(run_id))
+        except ValueError:
+            run = None
+        cross_org = run is None or (user.org_id and str(run.org_id) != user.org_id)
+        run_org = None if run is None else str(run.org_id)
+        is_initiator = run is not None and run.initiated_by and user.user_id \
+            and str(run.initiated_by) == user.user_id
+        outcome = (run.outcome if run is not None else None) or {}
+        plan = (run.plan_json if run is not None else None) or {}
+        sensitive = outcome.get("sensitive_outputs") or []
+        workspace = plan.get("workspace")
+        state_workspace = plan.get("state_workspace")
+
+    if cross_org:
+        await _audit_reveal(user, run_id, name, "denied", "not_found_or_cross_org", user.org_id)
+        raise HTTPException(404, "run not found")
+    if not (user.can_approve or is_initiator):
+        await _audit_reveal(user, run_id, name, "denied", "not_initiator_or_approver", run_org)
+        raise HTTPException(404, "run not found")
+
+    # 2. Step-up re-auth (mandatory): a fresh proof the caller can authenticate right now.
+    if not await verify_stepup_auth(user, body.password or "", settings):
+        await _audit_reveal(user, run_id, name, "denied", "stepup_reauth_required", run_org)
+        raise HTTPException(401, "re-authenticate to reveal a credential")
+
+    # 3. The output must be a real sensitive output of this run.
     if name not in sensitive:
+        await _audit_reveal(user, run_id, name, "denied", "no_such_sensitive_output", run_org)
         raise HTTPException(404, "no such sensitive output on this run")
-    plan = run.plan_json or {}
-    workspace = plan.get("workspace")
     if not workspace:
+        await _audit_reveal(user, run_id, name, "denied", "no_workspace", run_org)
         raise HTTPException(409, "this run has no Terraform workspace to read from")
+
+    # 4. One-shot claim, then read the value.
     if not await _claim_reveal(run_id, name):
+        await _audit_reveal(user, run_id, name, "denied", "already_revealed", run_org)
         raise HTTPException(410, "this credential was already revealed once — for a new copy, "
                                  "rotate it (re-apply) or retrieve it out-of-band")
     try:
-        runner = TerraformRunner(workspace, settings, state_workspace=plan.get("state_workspace"))
+        runner = TerraformRunner(workspace, settings, state_workspace=state_workspace)
         value = await runner.output_raw(name)
     except TerraformError as e:
-        # Reading failed — release the claim so the user can retry.
         from ..cache.redis import get_redis
-        await get_redis().delete(f"reveal:{run_id}:{name}")
+        await get_redis().delete(f"reveal:{run_id}:{name}")  # release so the user can retry
+        await _audit_reveal(user, run_id, name, "error", "terraform_read_failed", run_org)
         raise HTTPException(502, f"could not read the credential from Terraform state: {e}") from e
+
+    await _audit_reveal(user, run_id, name, "revealed", "ok", run_org)
     return {"name": name, "value": value, "one_time": True,
             "note": "This value is shown exactly once and is not stored by AegisOps."}
 

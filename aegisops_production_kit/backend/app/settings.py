@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     aegisops_tenancy: Literal["strict", "legacy"] = "strict"
     # A5 4-eyes: when on, the initiator of a Production-environment run cannot approve it.
     aegisops_four_eyes_for_production: bool = True
+    # S1 credential reveal: the step-up re-auth proof (a fresh Keycloak authentication) must
+    # be no older than this many seconds. Password re-entry produces a proof dated "now".
+    reveal_stepup_max_age_seconds: int = 120
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     cors_origins: str = "http://localhost:3000"

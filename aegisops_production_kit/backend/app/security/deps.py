@@ -11,10 +11,12 @@ import time
 from fastapi import Cookie, Depends, HTTPException, status
 
 from ..integrations.keycloak import AuthError, get_oidc
-from ..logging_conf import bind_correlation
+from ..logging_conf import bind_correlation, get_logger
 from ..schemas.auth import User
 from ..settings import Settings, get_settings
 from . import rbac, sessions
+
+log = get_logger(__name__)
 
 COOKIE_NAME = "aegis_session"
 
@@ -154,3 +156,28 @@ def require_initiator(user: User = Depends(get_current_user)) -> User:
             detail="Read-only roles cannot initiate workflows.",
         )
     return user
+
+
+async def verify_stepup_auth(user: User, password: str, settings: Settings) -> bool:
+    """S1 step-up re-auth: prove the caller can authenticate *right now* (password re-entry).
+
+    Performs a fresh Keycloak password grant for the caller and validates the returned token
+    belongs to them and is dated within the freshness window. Returns True on a valid fresh
+    proof, False otherwise. Never raises — the caller decides the HTTP outcome so it can audit
+    the attempt either way. The password is never logged or persisted.
+    """
+    if not password:
+        return False
+    oidc = get_oidc(settings)
+    try:
+        tokens = await oidc.password_grant(user.username, password)
+        claims = await oidc.validate(tokens.access_token)
+    except AuthError:
+        return False
+    if user.sub and claims.get("sub") and claims["sub"] != user.sub:
+        return False  # the fresh proof must be the same principal as the session
+    # A password grant authenticates now; auth_time/iat prove freshness within the window.
+    proof_time = float(claims.get("auth_time") or claims.get("iat") or 0)
+    if proof_time <= 0 or (time.time() - proof_time) > settings.reveal_stepup_max_age_seconds:
+        return False
+    return True

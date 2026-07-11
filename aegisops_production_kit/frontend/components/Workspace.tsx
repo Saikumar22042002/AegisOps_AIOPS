@@ -2,10 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { ApiError, api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { BrandShield } from "../lib/icons";
 import { useUI } from "../lib/store";
 import type { ChatMessage, ParamRequest } from "../lib/types";
+import { Markdown } from "./Markdown";
 
 export function Workspace() {
   const artifactOpen = useUI((s) => s.artifactOpen);
@@ -157,10 +159,15 @@ function AiMessage({ m }: { m: ChatMessage }) {
               </div>
             )}
 
-            <div style={{ fontSize: 15, color: "var(--text-2)", lineHeight: 1.78 }}>
-              {m.text}
+            {/* Assistant text renders as full markdown (N-04) — never literal **markers**. */}
+            <div>
+              <Markdown text={m.text} />
               {m.streaming && <span style={{ display: "inline-block", width: 7, height: 16, background: "var(--accent-2)", marginLeft: 2, verticalAlign: -2, animation: "ao-blink 1s steps(1) infinite" }} />}
             </div>
+
+            {m.done && (m.sensitiveOutputs?.length ?? 0) > 0 && m.runId && (
+              <CredentialReveal runId={m.runId} outputs={m.sensitiveOutputs!} />
+            )}
 
             {m.error && (
               <div style={{ marginTop: 12, fontSize: 12.5, color: "var(--red-2)", background: "rgba(248,113,113,.08)", border: "1px solid rgba(248,113,113,.25)", borderRadius: 10, padding: "10px 13px" }}>{m.error}</div>
@@ -254,6 +261,111 @@ function AnalysisTab({ m }: { m: ChatMessage }) {
         </div>
       ))}
       {cards.length === 0 && refs.length === 0 && <div style={{ fontSize: 12.5, color: "var(--text-4)" }}>No analysis yet for this message.</div>}
+    </div>
+  );
+}
+
+function CredentialReveal({ runId, outputs }: { runId: string; outputs: string[] }) {
+  // One-time credential reveal (N-02 + S1): the server serves each value exactly once; the value
+  // lives only in this component's state — never persisted, never logged. Revealing requires a
+  // step-up re-auth (password re-entry) which the modal below collects.
+  const [state, setState] = useState<Record<string, { value?: string; error?: string; busy?: boolean }>>({});
+  const [stepUp, setStepUp] = useState<{ name: string; password: string; error?: string; busy?: boolean } | null>(null);
+
+  const submitReveal = async () => {
+    if (!stepUp) return;
+    const name = stepUp.name;
+    setStepUp((s) => (s ? { ...s, busy: true, error: undefined } : s));
+    try {
+      const r = await api.post<{ value: string }>(`/runs/${runId}/credentials`,
+        { output: name, password: stepUp.password });
+      setState((s) => ({ ...s, [name]: { value: r.value } }));
+      setStepUp(null);
+    } catch (e) {
+      const status = e instanceof ApiError ? e.status : 0;
+      if (status === 401) {
+        // Fresh-auth failed — keep the modal open with a clear message.
+        setStepUp((s) => (s ? { ...s, busy: false, password: "", error: "That didn't re-authenticate you. Re-enter your password to reveal this credential." } : s));
+        return;
+      }
+      // 404 / 410 / 5xx are terminal for this attempt — surface on the row, close the modal.
+      setState((s) => ({ ...s, [name]: { error: e instanceof Error ? e.message : "reveal failed" } }));
+      setStepUp(null);
+    }
+  };
+
+  const download = (name: string, value: string) => {
+    const blob = new Blob([value], { type: "application/x-pem-file" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name.includes("key") ? `${name}.pem` : `${name}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div style={{ marginTop: 14, border: "1px solid rgba(251,191,36,.25)", borderRadius: 12, background: "rgba(251,191,36,.04)", padding: "12px 15px" }}>
+      <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em", color: "var(--amber)", fontWeight: 600, marginBottom: 9 }}>
+        Credentials — one-time reveal
+      </div>
+      {outputs.map((name) => {
+        const st = state[name] ?? {};
+        return (
+          <div key={name} style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12.5, color: "var(--text-2)" }}>{name}</span>
+              {!st.value && (
+                <button onClick={() => setStepUp({ name, password: "" })} disabled={st.busy}
+                  style={{ padding: "5px 11px", borderRadius: 8, border: "1px solid var(--border-3)", background: "var(--surface-2)", color: "var(--text)", fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
+                  {st.busy ? "Revealing…" : "Reveal credential"}
+                </button>
+              )}
+              {st.value && (
+                <>
+                  <button onClick={() => void navigator.clipboard?.writeText(st.value!)}
+                    style={{ padding: "5px 11px", borderRadius: 8, border: "1px solid var(--border-3)", background: "var(--surface-2)", color: "var(--text)", fontSize: 12, cursor: "pointer" }}>Copy</button>
+                  <button onClick={() => download(name, st.value!)}
+                    style={{ padding: "5px 11px", borderRadius: 8, border: "1px solid var(--border-3)", background: "var(--surface-2)", color: "var(--text)", fontSize: 12, cursor: "pointer" }}>Download</button>
+                </>
+              )}
+            </div>
+            {st.value && (
+              <pre style={{ margin: 0, padding: "9px 11px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 9, overflowX: "auto", maxHeight: 140, fontSize: 11, fontFamily: "'IBM Plex Mono',monospace", color: "var(--text-3)" }}>{st.value}</pre>
+            )}
+            {st.error && <div style={{ fontSize: 11.5, color: "var(--amber)" }}>{st.error}</div>}
+          </div>
+        );
+      })}
+      <div style={{ fontSize: 11, color: "var(--text-4)" }}>
+        Shown once, never stored by AegisOps. Save it now — a second reveal is refused.
+      </div>
+      {stepUp && (
+        <div onClick={() => !stepUp.busy && setStepUp(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60 }}>
+          <div onClick={(e) => e.stopPropagation()}
+            style={{ width: 380, maxWidth: "90vw", background: "var(--surface)", border: "1px solid var(--border-2)", borderRadius: 14, padding: "20px 22px", boxShadow: "0 18px 50px rgba(0,0,0,.4)" }}>
+            <div style={{ fontSize: 14.5, fontWeight: 600, color: "var(--text)", marginBottom: 6 }}>Confirm it's you</div>
+            <div style={{ fontSize: 12.5, color: "var(--text-3)", lineHeight: 1.5, marginBottom: 14 }}>
+              Revealing <span style={{ fontFamily: "'IBM Plex Mono',monospace", color: "var(--text-2)" }}>{stepUp.name}</span> requires a fresh sign-in. Re-enter your password — this is logged.
+            </div>
+            <input type="password" autoFocus value={stepUp.password}
+              onChange={(e) => setStepUp((s) => (s ? { ...s, password: e.target.value } : s))}
+              onKeyDown={(e) => { if (e.key === "Enter" && stepUp.password && !stepUp.busy) void submitReveal(); }}
+              placeholder="Your password"
+              style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", borderRadius: 9, border: "1px solid var(--border-2)", background: "var(--surface-2)", color: "var(--text)", fontSize: 13.5, outline: "none" }} />
+            {stepUp.error && <div style={{ fontSize: 11.5, color: "var(--amber)", marginTop: 9 }}>{stepUp.error}</div>}
+            <div style={{ display: "flex", gap: 9, marginTop: 16, justifyContent: "flex-end" }}>
+              <button onClick={() => setStepUp(null)} disabled={stepUp.busy}
+                style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid var(--border-2)", background: "transparent", color: "var(--text-3)", fontSize: 12.5, cursor: "pointer" }}>Cancel</button>
+              <button onClick={() => void submitReveal()} disabled={!stepUp.password || stepUp.busy}
+                style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: stepUp.password && !stepUp.busy ? "var(--accent)" : "var(--border-2)", color: "#fff", fontSize: 12.5, fontWeight: 500, cursor: stepUp.password && !stepUp.busy ? "pointer" : "default" }}>
+                {stepUp.busy ? "Verifying…" : "Confirm & reveal"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
