@@ -614,6 +614,12 @@ explained instead of crashing).
         402 passed / 2 skipped; vitest 25 passed. Note: existing dev Keycloak containers must
         be recreated to import the new groups/mapper; invalid-Gemini-key environments now seed
         with NULL embeddings + loud warning (keyword recall degrade, per invariant 7).
+  - [x] **A5 initiator + 4-eyes** (2026-07-11): migration `0004_run_initiated_by` adds
+        `runs.initiated_by` (FK users.id) + `runs.env`; `/chat` records both; `/approvals`
+        refuses Production self-approval with a clear 403 (flag
+        `AEGISOPS_FOUR_EYES_FOR_PRODUCTION`, default on; legacy NULL-initiator runs skip).
+        Evidence: `test_tenancy.py::test_four_eyes_blocks_prod_self_approval`; full backend
+        suite 406 passed / 2 skipped.
   - [x] **S4 persist-time redaction backstop** (2026-07-11): `_persist_result` runs `redact()`
         on the answer and `redact_dict()` on the outcome before any DB write — a secret echoed
         by a future agent can no longer persist (P20). Evidence:

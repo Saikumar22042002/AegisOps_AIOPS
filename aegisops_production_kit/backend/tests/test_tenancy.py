@@ -321,6 +321,36 @@ class TestTwoOrgIsolation:
         assert c.get("/runs/not-a-uuid/timeline").status_code == 404
         assert c.get("/sessions/not-a-uuid/messages").status_code == 404
 
+    def test_four_eyes_blocks_prod_self_approval(self, two_orgs, as_member, client):
+        """A5: the initiator of a Production run cannot approve it; a different approver
+        passes the 4-eyes gate; non-Production runs are exempt. (Runs are created in a
+        non-awaiting status so the gate is exercised without driving the graph.)"""
+        async def _mk(env: str):
+            from app.db.models import Run
+            from app.db.session import session_scope
+
+            async with session_scope() as s:
+                run = Run(org_id=uuid.UUID(two_orgs["org_a"]), status="completed", mode="apply",
+                          env=env, initiated_by=uuid.UUID(two_orgs["user_a"]))
+                s.add(run)
+                await s.flush()
+                return str(run.id)
+
+        prod = client.portal.call(_mk, "Production")
+        staging = client.portal.call(_mk, "Staging")
+        two_orgs["run_ids"] += [prod, staging]
+
+        initiator = _member(two_orgs["org_a"], two_orgs["user_a"], ORG_A_SLUG)  # approver caps
+        other = _member(two_orgs["org_a"], str(uuid.uuid4()), ORG_A_SLUG)  # different approver
+
+        r = as_member(initiator).post(f"/approvals/{prod}", json={"decision": "approved"})
+        assert r.status_code == 403 and "four-eyes" in r.json()["detail"].lower(), \
+            "prod self-approval must be refused by the 4-eyes policy"
+        # A different approver passes 4-eyes (409 = past the gate: run isn't awaiting approval).
+        assert as_member(other).post(f"/approvals/{prod}", json={"decision": "approved"}).status_code == 409
+        # Non-production: the initiator may approve (subject to role policy) — gate exempt.
+        assert as_member(initiator).post(f"/approvals/{staging}", json={"decision": "approved"}).status_code == 409
+
     def test_knowledge_search_is_org_scoped(self, two_orgs, as_member):
         a = _member(two_orgs["org_a"], two_orgs["user_a"], ORG_A_SLUG)
         b = _member(two_orgs["org_b"], two_orgs["user_b"], ORG_B_SLUG)

@@ -138,7 +138,8 @@ async def chat(body: ChatRequest, request: Request, user: User = Depends(require
             session_id = str(sess.id)
         s.add(Message(org_id=org.id, session_id=uuid.UUID(session_id), role="user", content=body.message))
         run = Run(org_id=org.id, session_id=uuid.UUID(session_id), status="running",
-                  mode=settings.default_execution_mode)
+                  mode=settings.default_execution_mode,
+                  initiated_by=owner_id, env=body.context.env)  # A5: governance facts
         s.add(run)
         await s.flush()
         run_id = str(run.id)
@@ -203,6 +204,13 @@ async def resolve_approval(run_id: str, body: ApprovalRequest,
         # S0 org predicate: a run outside the approver's org does not exist for them.
         if not run or (user.org_id and str(run.org_id) != user.org_id):
             raise HTTPException(404, "run not found")
+        # A5 4-eyes: the initiator of a Production change cannot approve it themselves.
+        # Skipped for legacy runs with no recorded initiator (pre-A5 rows).
+        if (settings.aegisops_four_eyes_for_production and (run.env or "").lower() == "production"
+                and run.initiated_by and user.user_id and str(run.initiated_by) == user.user_id):
+            raise HTTPException(status.HTTP_403_FORBIDDEN,
+                                "Four-eyes policy: you initiated this Production change — "
+                                "a different approver must review it.")
         if run.status != "awaiting_approval":
             raise HTTPException(status.HTTP_409_CONFLICT, "run is not awaiting approval")
         org_id, session_id = str(run.org_id), str(run.session_id)

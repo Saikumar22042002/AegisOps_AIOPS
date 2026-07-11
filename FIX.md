@@ -125,7 +125,7 @@ One ranked list of every serious problem from `ANALYSIS.md` (P-numbers are stabl
 | A1+B7 | Idempotency wait-or-abort + `/approvals` endpoint guard + lifecycle primitive | `agents/cloudops.py`, `security/idempotency.py`, `api/chat.py` | concurrent double-approve → exactly one apply; in-progress never falls through | — | pending |
 | A2 | plan_guard re-asserted at the approval node | `agents/approval.py` | approval refuses mismatched plan even if plan node skipped the guard | ⑥ | pending |
 | A4 | Org-scoped duplicate-name check | `agents/cloudops.py:314` | dup check carries the real org | — | pending |
-| A5 | `runs.initiated_by` + policy-configurable 4-eyes (Production) | migration, `api/chat.py`, `agents/approval.py` | prod self-approve → 403 | ② | pending |
+| A5 | `runs.initiated_by` + policy-configurable 4-eyes (Production) | migration `0004_run_initiated_by` (+`runs.env`), `db/models.py`, `api/chat.py`, `settings.py` (`AEGISOPS_FOUR_EYES_FOR_PRODUCTION`, default on) | prod self-approve → 403 | ② | **done** — `test_tenancy.py::test_four_eyes_blocks_prod_self_approval` (prod self-approve → 403 four-eyes; different approver passes the gate; non-prod exempt); full suite 406 passed/2 skipped |
 | B5 | Terminal-state guarantee (finally + fault-injection test) | `api/chat.py:_drive` | fault in `_persist_result` → run `failed`, never stuck | — | pending |
 | B6 | Zero blocking I/O: `inventory.reconcile`, sync-SDK grep-audit, Gemini sync-resolve (P18) | `agents/inventory.py`, `integrations/gemini.py` | responsiveness test; clean grep audit | — | pending |
 | U4 | "Auto (ask me)" cloud default; selector-as-hint | `frontend/lib/store.ts`, `api/chat.py`, `agents/cloudops.py` | ambiguous VM request → clarifying question appears in UI | ④ | pending |

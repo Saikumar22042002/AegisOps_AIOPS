@@ -119,6 +119,11 @@ class Run(Base):
     id: Mapped[uuid.UUID] = _pk()
     org_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
     session_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True)
+    # A5: who started the run (users.id mirror row) + the environment it targets — both are
+    # governance facts: 4-eyes compares approver vs initiator for Production changes, and S1
+    # gates the credential reveal on initiator-or-approver.
+    initiated_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    env: Mapped[str | None] = mapped_column(String(20), nullable=True)  # Production | Staging | …
     intent: Mapped[str | None] = mapped_column(String(80), nullable=True)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     routing_reason: Mapped[str | None] = mapped_column(Text, nullable=True)

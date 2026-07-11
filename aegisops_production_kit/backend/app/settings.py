@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     # username is the fallback for seeded users). legacy: pre-S0 single-default-org
     # behavior — rollback path only.
     aegisops_tenancy: Literal["strict", "legacy"] = "strict"
+    # A5 4-eyes: when on, the initiator of a Production-environment run cannot approve it.
+    aegisops_four_eyes_for_production: bool = True
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     cors_origins: str = "http://localhost:3000"
