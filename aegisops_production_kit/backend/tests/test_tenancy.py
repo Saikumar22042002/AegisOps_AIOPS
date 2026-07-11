@@ -271,6 +271,40 @@ class TestTwoOrgIsolation:
         r = as_member(b).post(f"/approvals/{rid}", json={"decision": "approved"})
         assert r.status_code == 404, "a run outside the approver's org must not exist for them"
 
+    def test_double_approval_endpoint_guard(self, two_orgs, as_member, client):
+        """A1 endpoint guard: while one /approvals is being driven (the run stays
+        `awaiting_approval` in the DB until it finishes), a second /approvals for the same run
+        is refused with 409 — the NX in-flight lock closes the double-click window."""
+        async def _mk_awaiting():
+            from app.db.models import Run
+            from app.db.session import session_scope
+
+            async with session_scope() as s:
+                run = Run(org_id=uuid.UUID(two_orgs["org_a"]), status="awaiting_approval",
+                          mode="apply", env="Staging")
+                s.add(run)
+                await s.flush()
+                return str(run.id)
+
+        rid = client.portal.call(_mk_awaiting)
+        two_orgs["run_ids"].append(rid)
+
+        async def _set_lock():
+            from app.cache.redis import get_redis
+            await get_redis().set(f"approval:inflight:{rid}", "peer", nx=True, ex=900)
+
+        async def _clear_lock():
+            from app.cache.redis import get_redis
+            await get_redis().delete(f"approval:inflight:{rid}")
+
+        client.portal.call(_set_lock)
+        try:
+            approver = _member(two_orgs["org_a"], two_orgs["user_a"], ORG_A_SLUG)
+            r = as_member(approver).post(f"/approvals/{rid}", json={"decision": "approved"})
+            assert r.status_code == 409 and "already being processed" in r.json()["detail"].lower()
+        finally:
+            client.portal.call(_clear_lock)
+
     def test_overview_is_org_scoped(self, two_orgs, as_member):
         a = _member(two_orgs["org_a"], two_orgs["user_a"], ORG_A_SLUG)
         b = _member(two_orgs["org_b"], two_orgs["user_b"], ORG_B_SLUG)

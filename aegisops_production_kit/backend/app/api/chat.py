@@ -215,6 +215,17 @@ async def resolve_approval(run_id: str, body: ApprovalRequest,
             raise HTTPException(status.HTTP_409_CONFLICT, "run is not awaiting approval")
         org_id, session_id = str(run.org_id), str(run.session_id)
 
+    # A1 endpoint guard: reject a second /approvals for this run while a prior decision is
+    # still being driven (the run stays `awaiting_approval` in the DB until the drive ends,
+    # so the status check above cannot catch a concurrent double-click). An NX lock closes
+    # that window; idempotency wait-or-abort is the backstop inside the execute node.
+    from ..cache.redis import get_redis
+
+    inflight_key = f"approval:inflight:{run_id}"
+    if not await get_redis().set(inflight_key, user.username, nx=True, ex=900):
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "this run's approval is already being processed")
+
     channel = create_channel(run_id)  # fresh channel for the continuation stream
     resume_value = {"decision": body.decision, "user": user.username,
                     "role": user.display_roles[0] if user.display_roles else "", "rationale": body.rationale}
@@ -239,6 +250,7 @@ async def resolve_approval(run_id: str, body: ApprovalRequest,
                                                     else {"status": body.decision}),
             })
         finally:
+            await get_redis().delete(inflight_key)  # A1: release the endpoint guard
             await channel.close()
 
     asyncio.create_task(_drive())

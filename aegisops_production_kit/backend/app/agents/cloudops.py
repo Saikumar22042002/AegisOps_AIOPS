@@ -737,13 +737,25 @@ async def cloudops_execute(state: AgentState, config) -> dict:
                             code="template_error")
         return {"outcome": {"status": f"{mode}_failed", "error": "template not found for resolved cloud/resource"}}
     workspace = template.workspace
-    runner = TerraformRunner(workspace, settings)
+    # Execute in the SAME per-resource state workspace the plan was made in (Phase 8 / N-08);
+    # None = legacy resource in the module's default workspace.
+    runner = TerraformRunner(workspace, settings, state_workspace=state.get("state_workspace"))
 
     idem_key = idempotency.make_key("tf-exec", state["run_id"], mode)
     if not await idempotency.claim(idem_key):
-        done = await idempotency.get_result(idem_key)
+        # A1: a concurrent apply already holds the claim. NEVER fall through to a second
+        # apply on the same state. If it already finished, return its stored result; if it's
+        # still in flight, WAIT for the result up to a deadline, then ABORT (409-style) if it
+        # still hasn't landed — abort, never execute.
+        done = await idempotency.get_result(idem_key) or await idempotency.wait_for_result(idem_key)
         if done:
             return {"outcome": done["result"], "tool_results": [done["result"]]}
+        log.warning("cloudops.execute_already_in_flight", run_id=state["run_id"], mode=mode)
+        return {"outcome": {"status": f"{mode}_aborted",
+                            "error": "This change is already being applied by another request; "
+                                     "aborting to avoid a duplicate apply."},
+                "answer": "⚠️ This change is already being applied — I stopped here so nothing "
+                          "runs twice. Refresh to see the result of the in-flight apply."}
 
     plan = state.get("plan_json", {}).get("summary", {})
     n = plan.get("destroy", 0) if mode == "destroy" else plan.get("add", 0) + plan.get("change", 0)

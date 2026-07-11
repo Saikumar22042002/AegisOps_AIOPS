@@ -614,6 +614,14 @@ explained instead of crashing).
         402 passed / 2 skipped; vitest 25 passed. Note: existing dev Keycloak containers must
         be recreated to import the new groups/mapper; invalid-Gemini-key environments now seed
         with NULL embeddings + loud warning (keyword recall degrade, per invariant 7).
+  - [x] **A1+B7 idempotency wait-or-abort** (2026-07-12): the in-flight-claim fall-through that
+        could double-apply (P5) is closed — `cloudops_execute` now returns the stored result if the
+        peer finished, WAITS up to a deadline if it's still applying, and ABORTS (never applies) if
+        it still hasn't landed. New `idempotency.is_in_progress`/`wait_for_result` primitives (B7).
+        `/approvals` gains an NX in-flight lock so a concurrent double-click is refused with 409
+        before a second drive starts. Evidence: `test_idempotency.py` (+4, incl. a node test that
+        asserts `runner.apply` is unreachable while a claim is in flight) +
+        `test_tenancy.py::test_double_approval_endpoint_guard`; full backend suite 412 passed / 2 skipped.
   - [x] **S1 credential reveal hardening** (2026-07-12): reveal now requires initiator-or-approver
         + run org-scope (else 404, no enumeration) + a **mandatory step-up re-auth** (password
         re-entry → fresh Keycloak grant, ≤120s, `REVEAL_STEPUP_MAX_AGE_SECONDS`) + an **audit row
