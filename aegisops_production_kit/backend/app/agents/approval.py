@@ -61,7 +61,8 @@ async def approval(state: AgentState, config) -> dict:
     if isinstance(decision, dict):
         status = decision.get("decision", "rejected")
         approver = {"user": decision.get("user", "unknown"), "role": decision.get("role", "unknown"),
-                    "ts": decision.get("ts"), "rationale": decision.get("rationale")}
+                    "ts": decision.get("ts"), "rationale": decision.get("rationale"),
+                    "can_execute": bool(decision.get("can_execute"))}  # S5
     else:
         status, approver = str(decision), {}
 

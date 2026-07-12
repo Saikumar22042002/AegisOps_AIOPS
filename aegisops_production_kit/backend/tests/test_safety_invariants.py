@@ -281,3 +281,50 @@ class TestApprovalChokePointGuard:
     async def test_blocked_plan_routes_away_from_execute(self):
         from app.agents.approval import approval_decision
         assert approval_decision({"approval_status": "blocked"}) == "finalize"
+
+
+# ── S5: capability assertion at the execute node (defense-in-depth behind the approval gate) ──
+
+
+class TestExecuteCapabilityGuard:
+    def _cfg(self):
+        from app.agents.events import Emitter, RunChannel
+        return {"configurable": {"emitter": Emitter(RunChannel("s5-run"))}}
+
+    async def test_execute_refuses_when_approver_lacks_execute_capability(self, monkeypatch):
+        from app.agents import execute as ex
+
+        called = {"n": 0}
+
+        async def _sentinel(state, config):
+            called["n"] += 1
+            return {"outcome": {"status": "applied"}}
+
+        monkeypatch.setattr(ex, "cloudops_execute", _sentinel)
+        state = {"run_id": str(uuid.uuid4()), "domain": "cloudops", "approval_status": "approved",
+                 "approver": {"user": "sneaky", "can_execute": False}}
+        out = await ex.execute(state, self._cfg())
+        assert out["outcome"]["status"] == "blocked"
+        assert called["n"] == 0, "the domain executor must NOT run without execute capability"
+
+    async def test_execute_proceeds_with_execute_capability(self, monkeypatch):
+        from app.agents import execute as ex
+
+        called = {"n": 0}
+
+        async def _sentinel(state, config):
+            called["n"] += 1
+            return {"outcome": {"status": "applied"}}
+
+        monkeypatch.setattr(ex, "cloudops_execute", _sentinel)
+        state = {"run_id": str(uuid.uuid4()), "domain": "cloudops", "approval_status": "approved",
+                 "approver": {"user": "architect", "can_execute": True}}
+        out = await ex.execute(state, self._cfg())
+        assert called["n"] == 1 and out["outcome"]["status"] == "applied"
+
+    async def test_execute_noops_when_not_approved(self, monkeypatch):
+        from app.agents import execute as ex
+        monkeypatch.setattr(ex, "cloudops_execute",
+                            lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not run")))
+        out = await ex.execute({"domain": "cloudops", "approval_status": "rejected"}, self._cfg())
+        assert out == {}

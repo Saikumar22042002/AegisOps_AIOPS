@@ -614,6 +614,12 @@ explained instead of crashing).
         402 passed / 2 skipped; vitest 25 passed. Note: existing dev Keycloak containers must
         be recreated to import the new groups/mapper; invalid-Gemini-key environments now seed
         with NULL embeddings + loud warning (keyword recall degrade, per invariant 7).
+  - [x] **S5 execute-node capability assertion** (2026-07-12): the execute dispatcher fails closed
+        unless the run is approved AND the recorded approver holds execute capability — a
+        defense-in-depth check behind the approval gate. The approver's `can_execute` is carried
+        through the `/approvals` resume value into the checkpointed state. (Asserts the approver,
+        not the initiator: developers legitimately initiate without execute capability.) Evidence:
+        `test_safety_invariants.py::TestExecuteCapabilityGuard` (3); full backend suite 424 passed / 2 skipped.
   - [x] **B5 terminal-state guarantee** (2026-07-12): both `_drive` closures now have an `except`
         that force-marks the run `failed` (via a self-guarded `_force_terminal`) if anything escapes
         — including a throw inside `_persist_result` — so a run is never left stuck in `running`

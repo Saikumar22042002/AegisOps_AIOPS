@@ -250,7 +250,8 @@ async def resolve_approval(run_id: str, body: ApprovalRequest,
 
     channel = create_channel(run_id)  # fresh channel for the continuation stream
     resume_value = {"decision": body.decision, "user": user.username,
-                    "role": user.display_roles[0] if user.display_roles else "", "rationale": body.rationale}
+                    "role": user.display_roles[0] if user.display_roles else "", "rationale": body.rationale,
+                    "can_execute": user.can_execute}  # S5: carry the approver's execute capability
 
     async def _drive():
         from ..agents.events import Emitter
