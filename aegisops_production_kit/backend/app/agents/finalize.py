@@ -13,6 +13,8 @@ import structlog
 from ..graph_db.context_graph import ContextGraph
 from ..settings import get_settings
 from ..tools import aws as aws_tool
+from ..tools import azure as azure_tool
+from ..tools import gcp as gcp_tool
 from . import cards
 from .runtime import emitter_of
 from .state import AgentState
@@ -38,6 +40,24 @@ async def _reconcile_checks(state: AgentState, outputs: dict) -> list[dict]:
         taken = await aws_tool.get_aws(settings).bucket_taken(outputs["bucket_name"])
         checks.append({"name": "Bucket visible via S3 API", "passed": taken is True,
                        "detail": outputs["bucket_name"]})
+    # B4: cross-cloud reconciliation. The VM's stable name (module resource name == var.name) is
+    # matched against the read-only Compute listing for that cloud — a real live check, not just
+    # "outputs present". Both readers thread-offload their SDK calls; the whole reconcile is
+    # 30s-bounded by verify(), so a slow cloud warns rather than hangs.
+    vm_name = (state.get("parsed_inputs") or {}).get("name")
+    resource = (state.get("resource") or "").lower()
+    is_vm = resource in ("vm", "instance", "compute", "gce", "server")
+    if cloud == "azure" and is_vm and vm_name and azure_tool.get_azure(settings).enabled:
+        vms = await azure_tool.get_azure(settings).list_vms()
+        found = next((v for v in vms if v.get("name") == vm_name), None)
+        checks.append({"name": "VM visible via Azure Compute API", "passed": bool(found),
+                       "detail": (found or {}).get("location") or "not found"})
+    if cloud == "gcp" and is_vm and vm_name and gcp_tool.get_gcp(settings).enabled:
+        insts = await gcp_tool.get_gcp(settings).list_all_instances()
+        found = next((i for i in insts if i.get("name") == vm_name), None)
+        running = bool(found and str(found.get("status", "")).upper() in ("RUNNING", "PROVISIONING", "STAGING"))
+        checks.append({"name": "Instance visible via Compute API", "passed": running,
+                       "detail": (found or {}).get("status") or "not found"})
     return checks
 
 

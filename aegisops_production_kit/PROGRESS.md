@@ -837,6 +837,14 @@ two known realm issuer URLs (internal + browser-facing), nothing else.
       the full suite now completes cleanly **twice in a row** with the gate — run #1 **450 passed /
       2 skipped / PYTEST_EXIT=0**, run #2 **450 passed / 2 skipped / PYTEST_EXIT=0** (direct exit
       code, full output, no tail-masking).
+  - [x] **B4 verify cross-cloud + honest cards (C2)** (2026-07-12): `_reconcile_checks` now does a
+        real live check for Azure VMs (Azure Compute `list_vms`) and GCP VMs (`list_all_instances`),
+        matched by the resource's stable name — a missing/terminated resource is a real FAILED
+        check, never "outputs present" theater. Both readers thread-offload; the whole reconcile is
+        30s-bounded by `verify()`, so a slow cloud warns rather than hangs (N-01, per cloud). C2:
+        the success card's host/connection derive from generic outputs (public_ip/login_user) that
+        Azure/GCP VMs also emit. Evidence: `test_verify_cross_cloud.py` (5, incl. Azure slow-SDK →
+        bounded warn).
   - [x] **S0 multi-tenancy** (2026-07-11): principal→(org_id,user_id) via Keycloak org claim
         (group-membership mapper; realm defines northwind-financial + acme-industrial groups)
         with the `users` mirror (by keycloak_sub, username/email fallback for seeded rows)
