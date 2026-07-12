@@ -1298,6 +1298,16 @@ as done without the live run; the code paths behind each are covered by tests wi
       prod-vnet" → placed into the existing VNet from the world model (provenance on the card);
       (4) gated destroy.
       Expect: NAT + route tables visible in the portal; zero NSGs from this module.
+- [ ] **DLV-17 · MODSEED aws.nlb live lifecycle + create-first DAG (MS-3)** — Needs: valid
+      `GEMINI_API_KEY` + AWS creds; `AEGISOPS_EXEC_LOOP=on` for the DAG case.
+      Steps: (1) with one VPC in inventory: "create a load balancer web-lb in aws" → card
+      shows DEP provenance (subnets from the VPC's recorded outputs) + the env default →
+      approve → apply; (2) day-2: "what's the DNS name of web-lb" (recorded outputs incl.
+      attach_targets_note); (3) with NO VPC: same request → goal-DAG card [aws.vpc → aws.nlb],
+      ONE approval, both applied in order; (4) "destroy web-lb" → impact check + gated destroy;
+      then destroying the VPC first must WARN (the NLB depends on it).
+      Expect: cross-zone NLB + TCP TG in the console; egress-only SG; deletion_protection per
+      env.
 - [ ] **DLV-12 · VPC→EC2 goal-DAG e2e in the UI (DEP+U6 — Phase-3 exit-gate headline)** —
       Needs: valid `GEMINI_API_KEY` + AWS creds; `AEGISOPS_EXEC_LOOP=on`.
       Steps: (1) send **"Create an EC2 named web in a new vpc"**; (2) inspect the goal-DAG
@@ -1463,6 +1473,21 @@ this section mirrors phase-level status only.
         azure.vnet→resource_group DEP slot (same family as azure.vm). Evidence:
         `test_modseed_ms2_azure_vnet.py` (8) + MS-1 suite still green. Canary (B5): full suite
         + Playwright core-flow green. Live lifecycle = **DLV-16**.
+  - [x] **MODSEED MS-3 aws-nlb (`aws.nlb`)** (2026-07-12): network LB (cross-zone on) + TCP
+        target group (TCP health checks 30s/threshold 3/traffic-port) + TCP listener + an
+        auto EGRESS-ONLY security group when none given (zero ingress rules — the single
+        0.0.0.0/0 in the module is the outbound egress route). `deletion_protection` defaults
+        ON for env=Production via the NEW `templates.apply_env_defaults` hook — resolved after
+        validation, STATED on the card as an "Environment default" row, explicit choices win.
+        Placement is DEP-resolved: one existing aws.vpc → `vpc_id` + `subnets` filled from its
+        RECORDED `public_subnet_ids` (provenance on the card); two → offered; none →
+        create-first DAG `[aws.vpc → aws.nlb]` wired to real outputs for the executive loop.
+        `attach_targets_note` ships as a real output (an NLB without targets serves nothing —
+        recorded with the resource, honest day-2 answer). Policy (plan-JSON): network type,
+        cross-zone, TCP health shape, and **deletion-protection-as-approved** (a plan that
+        quietly drops it FAILS). Evidence: `test_modseed_ms3_aws_nlb.py` (11) incl. the
+        world-model DEPENDS_ON edge (impact_of names the NLB as the VPC's dependent). Canary
+        (B5) green. Live lifecycle = **DLV-17**.
 
 
 _Legend: [x] done · [~] partial/scaffolded · [ ] pending._

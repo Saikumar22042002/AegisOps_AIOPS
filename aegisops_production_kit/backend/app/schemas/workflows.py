@@ -135,6 +135,31 @@ class AWSRDSInputs(WorkflowInputs):
 EC2_OS_CHOICES = ("amazon-linux-2023", "ubuntu-22.04", "ubuntu-24.04", "windows-2022")
 
 
+class AWSNLBInputs(WorkflowInputs):
+    """MODSEED MS-3 - aws.nlb: network LB + TCP target group/listener. vpc_id/subnets are
+    DEP-resolved (existing VPC's recorded outputs, or a create-first DAG). deletion_protection
+    None = platform default (ON for env=Production, stated on the card)."""
+
+    name: str
+    region: str = "us-east-1"
+    vpc_id: str = ""
+    subnets: list[str] = Field(default_factory=list)
+    target_port: int = Field(default=80, ge=1, le=65535)
+    listener_port: int | None = Field(default=None, ge=1, le=65535)
+    internal: bool = False
+    deletion_protection: bool | None = None
+    security_group_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("listener_port", mode="before")
+    @classmethod
+    def _default_listener(cls, v, info):
+        return v  # resolved to target_port post-validation (model_validator below)
+
+    def model_post_init(self, __context) -> None:
+        if self.listener_port is None:
+            object.__setattr__(self, "listener_port", self.target_port)
+
+
 class AWSEC2Inputs(WorkflowInputs):
     name: str = "aegisops-vm"
     instance_type: str = "t3.micro"

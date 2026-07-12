@@ -140,6 +140,37 @@ def _ec2_policy(i: dict, resources=None) -> list[dict]:
     ]
 
 
+def _aws_nlb_policy(i: dict, resources=None) -> list[dict]:
+    """MODSEED MS-3: over the real plan - network type, cross-zone on, TCP health checks,
+    deletion-protection state matches the resolved input (Production defaults it ON)."""
+    lb = _after(resources, "aws_lb")
+    tg = _after(resources, "aws_lb_target_group")
+    checks: list[dict] = []
+    if lb is not None:
+        checks.append(_ck("Network load balancer", lb.get("load_balancer_type") == "network",
+                          str(lb.get("load_balancer_type"))))
+        checks.append(_ck("Cross-zone load balancing on",
+                          lb.get("enable_cross_zone_load_balancing") is True,
+                          "on" if lb.get("enable_cross_zone_load_balancing") else "OFF"))
+        want_dp = bool(i.get("deletion_protection"))
+        have_dp = bool(lb.get("enable_deletion_protection"))
+        checks.append(_ck("Deletion protection as approved", have_dp == want_dp,
+                          f"planned {'on' if have_dp else 'off'} (requested {'on' if want_dp else 'off'})"))
+    else:
+        checks.append(_todo("Network load balancer"))
+        checks.append(_todo("Cross-zone load balancing on"))
+        checks.append(_todo("Deletion protection as approved"))
+    if tg is not None:
+        hc = _block0(tg, "health_check")
+        checks.append(_ck("TCP health checks (30s, threshold 3)",
+                          hc.get("protocol") == "TCP" and hc.get("interval") == 30
+                          and hc.get("healthy_threshold") == 3,
+                          f"{hc.get('protocol')}/{hc.get('interval')}s/x{hc.get('healthy_threshold')}"))
+    else:
+        checks.append(_todo("TCP health checks (30s, threshold 3)"))
+    return checks
+
+
 def _azure_storage_policy(i: dict, resources=None) -> list[dict]:
     acct = _after(resources, "azurerm_storage_account")
     if acct is None:
@@ -273,6 +304,7 @@ TEMPLATES: list[WorkflowTemplate] = [
     WorkflowTemplate("aws.eks", "aws", "eks", "v3", "eks-provision", wf.AWSEKSInputs, "Provision a hardened EKS cluster reusing an existing VPC", _eks_policy),
     WorkflowTemplate("aws.rds", "aws", "rds", "v1", "aws-rds", wf.AWSRDSInputs, "Provision an encrypted RDS instance", _rds_policy),
     WorkflowTemplate("aws.ec2", "aws", "ec2", "v1", "aws-ec2", wf.AWSEC2Inputs, "Provision an EC2 instance (IMDSv2, encrypted)", _ec2_policy),
+    WorkflowTemplate("aws.nlb", "aws", "nlb", "v1", "aws-nlb", wf.AWSNLBInputs, "Provision a network load balancer (TCP target group + listener)", _aws_nlb_policy),
     WorkflowTemplate("azure.storage", "azure", "storage", "v1", "azure-storage", wf.AzureStorageInputs, "Provision an Azure Storage Account", _azure_storage_policy),
     WorkflowTemplate("azure.vnet", "azure", "vnet", "v1", "azure-vnet", wf.AzureVNetInputs, "Provision an Azure VNet (subnets, NAT gateway, route tables)", _azure_vnet_policy),
     WorkflowTemplate("azure.resource_group", "azure", "resource_group", "v1", "azure-resource-group", wf.AzureResourceGroupInputs, "Provision an Azure Resource Group", _azure_rg_policy),
@@ -295,7 +327,8 @@ _SYNONYMS: dict[str, dict[str, str]] = {
     "aws": {"vm": "ec2", "instance": "ec2", "server": "ec2", "compute": "ec2", "database": "rds",
             "db": "rds", "postgres": "rds", "postgresql": "rds", "mysql": "rds", "sql": "rds",
             "k8s": "eks", "kubernetes": "eks", "cluster": "eks", "bucket": "s3", "blob": "s3",
-            "object_storage": "s3", "network": "vpc"},
+            "object_storage": "s3", "network": "vpc",
+            "lb": "nlb", "load_balancer": "nlb", "loadbalancer": "nlb"},
     "azure": {"instance": "vm", "server": "vm", "compute": "vm", "ec2": "vm", "database": "postgres",
               "db": "postgres", "postgresql": "postgres", "sql": "postgres", "mysql": "postgres",
               "k8s": "aks", "kubernetes": "aks", "cluster": "aks", "blob": "storage", "bucket": "storage",
@@ -319,6 +352,19 @@ def register_promoted(template: WorkflowTemplate) -> None:
     if template.key in _BY_KEY:
         raise ValueError(f"'{template.key}' already exists in the built-in catalog")
     _PROMOTED[template.key] = template
+
+
+def apply_env_defaults(key: str, validated: dict, env: str | None) -> list[str]:
+    """MODSEED: environment-aware input defaults, resolved AFTER validation and STATED on the
+    approval card (never silent). Returns the note lines. Only fields the user left unset
+    (None) are touched - an explicit choice always wins."""
+    notes: list[str] = []
+    if key == "aws.nlb" and validated.get("deletion_protection") is None:
+        on = (env or "").lower() == "production"
+        validated["deletion_protection"] = on
+        notes.append(f"deletion_protection: defaulted {'ON' if on else 'off'} for env={env or 'n/a'}"
+                     + (" (Production default)" if on else ""))
+    return notes
 
 
 def by_key(key: str) -> WorkflowTemplate | None:

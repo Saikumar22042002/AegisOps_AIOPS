@@ -412,6 +412,10 @@ async def cloudops_plan(state: AgentState, config) -> dict:
                 "goal_dag": closure.dag, "cloud": cloud, "resource": resource,
                 "confidentiality": {"level": cc.level, "score": cc.score}}
     validated = closure.inputs
+    # MODSEED: environment-aware defaults (e.g. NLB deletion_protection ON for Production) —
+    # resolved after validation, stated on the card, never silent; explicit choices win.
+    env_notes = templates.apply_env_defaults(template.key, validated,
+                                             state.get("user", {}).get("env"))
     tf_vars = validated
 
     mode = "apply"
@@ -475,6 +479,7 @@ async def cloudops_plan(state: AgentState, config) -> dict:
     # DEP resolver's provenance ("using existing vpc … from the world model").
     defaults = _defaulted_dependencies(cloud, template.resource, validated, runner.planned_resources())
     defaults += [{"name": "Dependency resolution", "value": n, "note": ""} for n in closure.notes]
+    defaults += [{"name": "Environment default", "value": n, "note": ""} for n in env_notes]
     plan_json = {"summary": plan["summary"], "diff": plan["diff"], "workspace": template.workspace,
                  "policy_checks": policy_checks, "mode": mode, "state_workspace": tf_state_ws,
                  "defaults": defaults}
