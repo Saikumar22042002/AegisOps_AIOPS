@@ -22,6 +22,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from ..agents.events import DONE, RunChannel, create_channel, get_channel
 from ..agents.runner import run_graph
+from ..agents.supervisor import get_supervisor
 from ..db import repositories as repo
 from ..db.models import Message, Run, Session
 from ..db.session import session_scope
@@ -210,7 +211,7 @@ async def chat(body: ChatRequest, request: Request, user: User = Depends(require
         finally:
             await channel.close()
 
-    asyncio.create_task(_drive())
+    get_supervisor().run(run_id, _drive)  # B2: tracked task + heartbeat (was fire-and-forget)
     return EventSourceResponse(_sse(channel))
 
 
@@ -284,7 +285,7 @@ async def resolve_approval(run_id: str, body: ApprovalRequest,
             await get_redis().delete(inflight_key)  # A1: release the endpoint guard
             await channel.close()
 
-    asyncio.create_task(_drive())
+    get_supervisor().run(run_id, _drive)  # B2: tracked task + heartbeat (was fire-and-forget)
     return EventSourceResponse(_sse(channel))
 
 

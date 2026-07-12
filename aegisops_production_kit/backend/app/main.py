@@ -64,7 +64,13 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        # Graceful shutdown: close datastore clients and flush telemetry.
+        # Graceful shutdown. B2: drain in-flight runs FIRST (cancel + persist failed) while the
+        # datastores are still open, then close everything.
+        from .agents.supervisor import get_supervisor
+        try:
+            await get_supervisor().drain()
+        except Exception as exc:  # noqa: BLE001
+            log.error("shutdown.drain_failed", error=str(exc))
         await close_checkpointer()
         await redis_client.close_redis()
         await neo4j_client.close_neo4j()

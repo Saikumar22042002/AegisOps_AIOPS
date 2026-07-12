@@ -810,6 +810,12 @@ two known realm issuer URLs (internal + browser-facing), nothing else.
         worker-agnostic streaming/reconnect. The memory path is byte-identical (test_sse_contract
         unchanged). Evidence: `test_event_bus_redis.py` (5, incl. multi-worker publish-A/consume-B
         + TTL-on-terminal) + `test_sse_contract.py` (7) green.
+  - [x] **B2 RunSupervisor** (2026-07-12): both `_drive` sites now run via
+        `get_supervisor().run(run_id, drive)` — a tracked task + a per-run Redis heartbeat
+        (`run:<id>:hb`, TTL 45s / refresh 15s) instead of fire-and-forget `create_task`.
+        `is_live(run_id)` answers reconnect/liveness; an expired heartbeat marks a crashed worker's
+        run for the B3 reconciler; `main.py` lifespan calls `drain()` on shutdown to cancel
+        in-flight runs and persist them `failed`. Evidence: `test_supervisor.py` (2).
   - [x] **S0 multi-tenancy** (2026-07-11): principal→(org_id,user_id) via Keycloak org claim
         (group-membership mapper; realm defines northwind-financial + acme-industrial groups)
         with the `users` mirror (by keycloak_sub, username/email fallback for seeded rows)
