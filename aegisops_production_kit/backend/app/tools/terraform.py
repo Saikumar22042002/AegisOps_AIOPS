@@ -75,6 +75,10 @@ class TerraformRunner:
 
     def _env(self, include_ws: bool = True) -> dict[str, str]:
         env = {"TF_IN_AUTOMATION": "1", "TF_INPUT": "0", "TF_CLI_ARGS": "-no-color"}
+        # LAT: a shared provider plugin cache so `terraform init` reuses downloaded providers
+        # across modules/resources instead of re-fetching them every time.
+        if self.settings.tf_plugin_cache_dir:
+            env["TF_PLUGIN_CACHE_DIR"] = self.settings.tf_plugin_cache_dir
         if self.state_workspace and include_ws:
             env["TF_WORKSPACE"] = self.state_workspace
         s = self.settings
@@ -126,19 +130,42 @@ class TerraformRunner:
             args.append(f"-backend-config=dynamodb_table={s.tf_state_dynamodb_table}")
         return args
 
-    async def init(self, on_line: LineCallback | None = None) -> dict[str, Any]:
+    def _is_initialized(self) -> bool:
+        """Warm-init check (LAT): providers + backend are already set up for this module."""
+        return (os.path.isdir(os.path.join(self.workdir, ".terraform"))
+                and os.path.isfile(os.path.join(self.workdir, ".terraform.lock.hcl")))
+
+    async def init(self, on_line: LineCallback | None = None, force: bool = False) -> dict[str, Any]:
         # init runs WITHOUT the TF_WORKSPACE override: terraform refuses to init while the
         # selected workspace doesn't exist yet. The workspace is ensured right after, and every
         # subsequent command carries TF_WORKSPACE.
         async with self._span("init") as t:
-            init_args = [self.bin, "init", "-input=false", *self._backend_config_args()]
+            # LAT: skip the full re-init on a warm module (the ~19s dominant per-turn cost). Only
+            # when .terraform/ + lockfile are present; a stale/mismatched setup is covered by the
+            # `force` escape hatch (and AEGISOPS_TF_SKIP_INIT_WHEN_READY=false).
+            if (not force and self.settings.aegisops_tf_skip_init_when_ready
+                    and self._is_initialized()):
+                try:
+                    if self.state_workspace:
+                        await self.ensure_state_workspace()
+                    t.output = {"ok": True, "skipped_init": True}
+                    return {"ok": True, "skipped_init": True}
+                except TerraformError as e:
+                    # The module CLAIMED initialized (.terraform/ + lockfile) but isn't actually
+                    # usable — e.g. the shared provider cache was evicted, leaving dangling plugin
+                    # links. Fall back to a full init rather than fail the run (risk-doc: "fall
+                    # back to full init on any mismatch").
+                    log.warning("terraform.warm_init_fell_back", workspace=self.workspace,
+                                error=str(e)[:200])
+            init_args = [self.bin, "init", "-input=false", "-upgrade", *self._backend_config_args()] \
+                if force else [self.bin, "init", "-input=false", *self._backend_config_args()]
             res = await self._console(include_ws=False).run(init_args, on_line)
             if res.returncode != 0:
                 raise TerraformError("terraform init failed:\n" + "\n".join(res.stderr[-15:]))
             if self.state_workspace:
                 await self.ensure_state_workspace()
-            t.output = {"ok": True}
-        return {"ok": True}
+            t.output = {"ok": True, "skipped_init": False}
+        return {"ok": True, "skipped_init": False}
 
     async def ensure_state_workspace(self) -> None:
         """Create this runner's Terraform workspace if it doesn't exist yet (idempotent).

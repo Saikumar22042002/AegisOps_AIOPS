@@ -854,6 +854,21 @@ two known realm issuer URLs (internal + browser-facing), nothing else.
         `test_terraform_backend.py` (6). **PENDING (infra):** remote apply is untestable in this
         env — no S3 bucket / DynamoDB table, and the module backend blocks are `local` (switching
         to `s3` is the documented migration). Plumbing + flag are in; remote apply awaits a bucket.
+  - [x] **LAT latency pass** (2026-07-12): `init` skips the full `terraform init` when the module
+        is already initialized (`.terraform/` + lockfile), and `TF_PLUGIN_CACHE_DIR` (a `tfplugins`
+        named volume in compose) reuses downloaded providers across modules. **Measured init
+        before/after on demo-null: cold 3.97s → warm 0.002s (skipped) = −3.97s per warm turn.**
+        Real cloud providers are far larger (the prior audit measured ~19s cold init for EC2), so
+        the skip removes ~19s from a warm cloud turn; the plugin cache makes even the cold init
+        cheaper. Escape hatch: `AEGISOPS_TF_SKIP_INIT_WHEN_READY=false` / `init(force=True)`. The
+        warm-skip also sidesteps the residual-backend re-init prompt that fails a cold re-init.
+        **PENDING (creds):** the full warm-turn ≤15s target (init≈0 + cloud `plan` ~21s + LLM
+        classify/extract) needs a creds-enabled provisioning turn to confirm end-to-end — the init
+        component is measured; the cloud-`plan` + LLM components are not runnable here (invalid
+        Gemini key, no cloud grant). Evidence: `test_terraform_latency.py` (5). **Skip-safety:**
+        `TestStateIsolation` caught that a module can claim initialized (.terraform/ + lockfile)
+        yet be unusable (provider cache evicted → dangling plugin links); fixed so the warm path
+        falls back to a full init on any such mismatch rather than failing the run.
   - [x] **S0 multi-tenancy** (2026-07-11): principal→(org_id,user_id) via Keycloak org claim
         (group-membership mapper; realm defines northwind-financial + acme-industrial groups)
         with the `users` mirror (by keycloak_sub, username/email fallback for seeded rows)

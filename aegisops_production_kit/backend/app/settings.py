@@ -157,6 +157,12 @@ class Settings(BaseSettings):
 
     # ── Terraform / Ansible ──
     terraform_bin: str = "terraform"
+    # LAT: skip `terraform init` when the module is already initialized (.terraform/ + lockfile
+    # present) — the dominant per-turn cost (~19s cold). Escape hatch: set false to force full
+    # init on every run. A shared provider plugin cache (TF_PLUGIN_CACHE_DIR, a named volume in
+    # compose) makes even the cold init cheap by reusing downloaded providers across modules.
+    aegisops_tf_skip_init_when_ready: bool = True
+    tf_plugin_cache_dir: str = ""
     ansible_bin: str = "ansible-playbook"
     terraform_workspaces_dir: str = "./infra/terraform-workspaces"
     default_execution_mode: Literal["dry_run", "plan", "apply", "destroy"] = "plan"

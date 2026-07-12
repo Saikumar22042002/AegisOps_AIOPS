@@ -198,10 +198,13 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       PROMETHEUS_URL: http://prometheus:9090
       GRAFANA_URL: http://grafana:3000
+      # LAT: shared Terraform provider plugin cache on a named volume (reused across modules).
+      TF_PLUGIN_CACHE_DIR: /app/.tf-plugin-cache
     ports: ["8000:8000"]
     volumes:
       - "${KUBECONFIG_HOST:-./infra/kube/empty-kubeconfig}:/root/.kube/config:ro"
       - "tfstate:/app/.terraform-state"
+      - "tfplugins:/app/.tf-plugin-cache"
       - "./infra/terraform-workspaces:/app/infra/terraform-workspaces"
     depends_on:
       postgres: { condition: service_healthy }
@@ -237,3 +240,4 @@ volumes:
   promdata:
   grafanadata:
   tfstate:
+  tfplugins:
