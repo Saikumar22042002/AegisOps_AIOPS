@@ -58,8 +58,16 @@ def test_approvals_requires_auth(client: TestClient):
     assert client.post(f"/approvals/{_RUN}", json={"decision": "approved"}).status_code == 401
 
 
-def test_run_input_requires_auth(client: TestClient):
-    assert client.post(f"/runs/{_RUN}/input", json={"value": "x"}).status_code == 401
+def test_midrun_input_endpoint_removed(client: TestClient):
+    """U5: mid-run stdin input was an unwired stub (producer with no consumer, no UI). It was
+    removed, not wired — the route no longer exists (404, before any auth dependency)."""
+    assert client.post(f"/runs/{_RUN}/input", json={"value": "x"}).status_code == 404
+
+
+def test_command_console_has_no_stdin_injection():
+    """U5: the orphaned interactive-input surface (send_input) is gone from the console tool."""
+    from app.tools.console import CommandConsole
+    assert not hasattr(CommandConsole, "send_input")
 
 
 def test_approvals_forbidden_for_non_approver(as_user):

@@ -1,11 +1,11 @@
-"""Chat (SSE) + runs + approvals + interactive input.
+"""Chat (SSE) + runs + approvals.
 
 POST /chat            run the graph, streaming step/token/analysis/reference/confidentiality/
                       console/interrupt events; ends at `done` or at an approval `interrupt`.
 POST /approvals/{id}  RBAC-gated; resumes the checkpointed graph (approve→apply/destroy streamed,
                       reject→halt) as an SSE stream of the continuation.
 GET  /chat/stream/{id} reconnect/replay (Last-Event-ID) for an in-flight run.
-GET  /runs/{id}        full run state. POST /runs/{id}/input  answer an interactive prompt.
+GET  /runs/{id}        full run state.
 """
 
 from __future__ import annotations
@@ -370,15 +370,6 @@ async def get_run(run_id: str, user: User = Depends(get_current_user)) -> dict:
             "input_json": run.input_json, "outcome": run.outcome, "snow_id": run.snow_id,
             "context_id": run.context_id,
         }
-
-
-@router.post("/runs/{run_id}/input")
-async def run_input(run_id: str, body: dict, user: User = Depends(get_current_user)) -> dict:
-    """Answer an interactive console prompt (password/input). Value is masked, never logged."""
-    from ..cache.redis import get_redis
-
-    await get_redis().rpush(f"runinput:{run_id}", json.dumps({"value": body.get("value", "")}))
-    return {"status": "received"}
 
 
 # O3: exempt the SSE endpoints from the per-IP rate limit. We register the exemption by NAME

@@ -956,6 +956,15 @@ two known realm issuer URLs (internal + browser-facing), nothing else.
         crash-inject → recovered, idempotent, legacy no-payload left alone. The cloud-level orphan
         (apply done but the DB txn never ran) still needs a live TF backend to reconcile from
         state and is recorded pending (no creds); B3 already brings such a run to a terminal state.
+  - [x] **U5 mid-run input — removed (documented choice)** (2026-07-12): the mid-run stdin
+        feature was a stub end-to-end — `POST /runs/{id}/input` pushed to `runinput:{id}` which
+        **no consumer read**, `CommandConsole.send_input` had **no caller**, `stdin_data` was
+        **never passed**, and no frontend UI invoked it. Wiring it would mean a real interactive
+        tool path we don't have (terraform/ansible run non-interactively; the human-in-the-loop
+        is the approval gate, not stdin). Per the no-stubs rule, removed the endpoint, `send_input`,
+        and `stdin_data` (console now opens `stdin=DEVNULL`, which also prevents a command hanging
+        on an unexpected prompt). Zero references remain. Evidence: `test_rbac_endpoints.py` —
+        `/input` → 404, `CommandConsole` has no `send_input`.
   - [x] **S0 multi-tenancy** (2026-07-11): principal→(org_id,user_id) via Keycloak org claim
         (group-membership mapper; realm defines northwind-financial + acme-industrial groups)
         with the `users` mirror (by keycloak_sub, username/email fallback for seeded rows)

@@ -1,9 +1,10 @@
 """Streaming command console.
 
 Runs a command as an async subprocess, streaming stdout/stderr line-by-line (secret-masked)
-to a callback for SSE, and supports stdin injection for interactive prompts (password/input)
-which arrive over REST. The executor interface allows a Docker-exec / K8s-Job sandbox backend
-later; the default runs in the API image (which has terraform, ansible, and kubectl on PATH).
+to a callback for SSE. Commands are run non-interactively (terraform `-auto-approve`, ansible
+without prompts) — the human-in-the-loop is the approval gate, not stdin. The executor interface
+allows a Docker-exec / K8s-Job sandbox backend later; the default runs in the API image (which
+has terraform, ansible, and kubectl on PATH).
 """
 
 from __future__ import annotations
@@ -37,24 +38,19 @@ class CommandConsole:
         self.timeout = timeout
         self._proc: asyncio.subprocess.Process | None = None
 
-    async def run(self, args: list[str], on_line: LineCallback | None = None,
-                  stdin_data: str | None = None) -> CommandResult:
+    async def run(self, args: list[str], on_line: LineCallback | None = None) -> CommandResult:
         log.info("console.exec", argv=args[0], args_count=len(args), cwd=self.cwd)
         self._proc = await asyncio.create_subprocess_exec(
             *args,
             cwd=self.cwd,
             env=self.env,
-            stdin=asyncio.subprocess.PIPE,
+            stdin=asyncio.subprocess.DEVNULL,  # non-interactive: no stdin prompts are answered
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             # `terraform show -json` can emit a single line far larger than asyncio's default
             # 64 KB readline limit (big modules) — raise it to 32 MB.
             limit=32 * 1024 * 1024,
         )
-        if stdin_data and self._proc.stdin:
-            self._proc.stdin.write(stdin_data.encode())
-            await self._proc.stdin.drain()
-            self._proc.stdin.close()
 
         result = CommandResult(returncode=-1)
 
@@ -84,9 +80,3 @@ class CommandConsole:
                 await on_line("stderr", f"command timed out after {self.timeout}s")
         log.info("console.exec_done", argv=args[0], rc=result.returncode)
         return result
-
-    async def send_input(self, data: str) -> None:
-        """Inject data into the running process's stdin (interactive prompt answer)."""
-        if self._proc and self._proc.stdin and not self._proc.stdin.is_closing():
-            self._proc.stdin.write((data + "\n").encode())
-            await self._proc.stdin.drain()
