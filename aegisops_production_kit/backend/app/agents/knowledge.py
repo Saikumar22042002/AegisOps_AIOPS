@@ -43,6 +43,8 @@ async def knowledge(state: AgentState, config) -> dict:
     context_block = "\n\n".join(f"[{i + 1}] {r['title']}\n{r['chunk']}" for i, r in enumerate(refs))
     # M1/M2: Context Engine slice for knowledge follow-ups ("expand on that", "the 2nd doc").
     transcript = await memory.build_context(state.get("session_id", ""), purpose="knowledge",
+                                            org_id=state.get("org_id"),
+                                            user_id=state.get("user", {}).get("user_id"),
                                             current_message=state["message"], settings=settings)
     convo = f"Conversation so far:\n{transcript}\n\n" if transcript else ""
     prompt = f"{convo}Context passages:\n{context_block}\n\nQuestion: {state['message']}"

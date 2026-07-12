@@ -55,11 +55,22 @@ async def _extract_ports(settings, message: str) -> list[int]:
     return sorted(set(ports))
 
 
-async def _extract_inputs(settings, template, message: str) -> dict:
-    """Extract this module's parameter values from NL via Gemini, merged with free-form parsing."""
+async def _extract_inputs(settings, template, message: str, *, org_id: str | None = None,
+                          user_id: str | None = None) -> dict:
+    """Extract this module's parameter values from NL via Gemini, merged with free-form parsing.
+
+    M4: "my usual region" resolves DETERMINISTICALLY from the user's standing memory — no LLM
+    required — and an explicit region in the message still wins."""
     from ..schemas.workflows import parse_freeform
 
     inputs = parse_freeform(message)
+    if org_id and re.search(r"\busual\s+(?:region|location)\b", message or "", re.IGNORECASE):
+        from . import user_memory
+        usual = await user_memory.lookup(org_id, user_id, "usual_region")
+        if usual:
+            field = "location" if template.cloud == "azure" else "region"
+            inputs.setdefault(field, usual)
+            log.info("cloudops.usual_region_honored", region=usual, field=field)
     gemini = get_gemini(settings)
     if gemini.enabled:
         fields = params.extraction_fields(template.key) or ", ".join(template.schema.model_fields.keys())
@@ -248,7 +259,9 @@ async def cloudops_plan(state: AgentState, config) -> dict:
                 "snow_id": state.get("snow_id"), "context_id": context_id}
 
     prior: dict = pending_rec.get("collected", {})
-    extracted = await _extract_inputs(settings, template, state["message"])
+    extracted = await _extract_inputs(settings, template, state["message"],
+                                      org_id=state.get("org_id"),
+                                      user_id=state.get("user", {}).get("user_id"))
     collected = {**prior, **{k: v for k, v in extracted.items() if v not in (None, "", [])}}
     # GCP resources default the project to the configured one (never asked).
     if cloud == "gcp" and not collected.get("project"):

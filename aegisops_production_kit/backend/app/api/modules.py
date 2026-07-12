@@ -300,6 +300,56 @@ async def review_proposal(proposal_id: str, body: ReviewRequest,
         raise HTTPException(400, str(exc)) from None
 
 
+# ── M4: per-user/org standing memory (user-editable) ───────────────────────────────────────
+
+from ..agents import user_memory  # noqa: E402
+
+
+class MemoryRequest(BaseModel):
+    content: str
+    org_wide: bool = False
+
+
+@router.get("/memory")
+async def list_user_memory(user: AuthUser = Depends(get_current_user)) -> dict:
+    async with session_scope() as s:
+        org = await repo.org_for(s, user)
+        org_id = str(org.id)
+    return {"memories": await user_memory.list_memories(org_id, user.user_id)}
+
+
+@router.put("/memory/{key}")
+async def put_user_memory(key: str, body: MemoryRequest,
+                          user: AuthUser = Depends(get_current_user)) -> dict:
+    """Set one standing fact (e.g. `usual_region` = `ap-south-1`). `org_wide` rows require an
+    approver role — a member edits only their own memory."""
+    async with session_scope() as s:
+        org = await repo.org_for(s, user)
+        org_id = str(org.id)
+    if body.org_wide and not user.can_approve:
+        raise HTTPException(403, "org-wide standing memory requires an approver role")
+    try:
+        await user_memory.set_memory(org_id, None if body.org_wide else user.user_id,
+                                     key, body.content)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+    return {"status": "saved", "key": key, "scope": "org" if body.org_wide else "user"}
+
+
+@router.delete("/memory/{key}")
+async def delete_user_memory(key: str, org_wide: bool = False,
+                             user: AuthUser = Depends(get_current_user)) -> dict:
+    async with session_scope() as s:
+        org = await repo.org_for(s, user)
+        org_id = str(org.id)
+    if org_wide and not user.can_approve:
+        raise HTTPException(403, "org-wide standing memory requires an approver role")
+    deleted = await user_memory.delete_memory(org_id, None if org_wide else user.user_id, key)
+    if not deleted:
+        raise HTTPException(404, "no such memory")
+    return {"status": "deleted", "key": key}
+
+
 async def _authorize_proposal(proposal_id: str, user: AuthUser) -> None:
     """S0: a proposal outside the caller's org does not exist for them (uniform 404)."""
     async with session_scope() as s:

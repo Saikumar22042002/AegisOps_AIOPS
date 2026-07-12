@@ -12,6 +12,71 @@ interface ModuleData {
 }
 interface IntegrationRow { name: string; cat: string; mark: string; color: string; status: string; statusColor: string }
 
+type MemoryRow = { key: string; content: string; scope: "user" | "org" };
+
+// M4: user-editable standing memory ("usual_region: ap-south-1") — survives sessions and is
+// threaded into every LLM call; "my usual region" also resolves deterministically.
+function MemoryPanel() {
+  const [rows, setRows] = useState<MemoryRow[]>([]);
+  const [k, setK] = useState("");
+  const [v, setV] = useState("");
+  const [err, setErr] = useState("");
+
+  const load = () =>
+    api.get<{ memories: MemoryRow[] }>("/memory").then((d) => setRows(d.memories)).catch(() => {});
+  useEffect(() => { load(); }, []);
+
+  const save = async () => {
+    setErr("");
+    try {
+      await api.put(`/memory/${encodeURIComponent(k.trim())}`, { content: v.trim(), org_wide: false });
+      setK(""); setV(""); load();
+    } catch (e: any) { setErr(String(e?.message ?? e)); }
+  };
+  const remove = async (key: string) => {
+    setErr("");
+    try { await api.del(`/memory/${encodeURIComponent(key)}`); load(); }
+    catch (e: any) { setErr(String(e?.message ?? e)); }
+  };
+
+  return (
+    <div style={{ marginTop: 26 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+        <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text)" }}>Standing memory</span>
+        <span style={{ fontSize: 11, color: "var(--text-4)" }}>
+          user-editable · survives sessions · e.g. key <code>usual_region</code> → “my usual region” is honored
+        </span>
+      </div>
+      {err && <div style={{ fontSize: 12, color: "var(--red-2)", marginBottom: 10 }}>{err}</div>}
+      <div style={{ border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden", background: "var(--surface)" }}>
+        {rows.map((m) => (
+          <div key={`${m.scope}:${m.key}`} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 16px", borderBottom: "1px solid var(--surface-2)" }}>
+            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12.5, color: "var(--accent-3)", minWidth: 130 }}>{m.key}</span>
+            <span style={{ fontSize: 12.5, color: "var(--text-2)", flex: 1 }}>{m.content}</span>
+            <span style={{ fontSize: 10.5, color: "var(--text-4)" }}>{m.scope}</span>
+            {m.scope === "user" && (
+              <button onClick={() => remove(m.key)} className="ao-h-b3" title="Forget"
+                style={{ padding: "3px 9px", borderRadius: 6, border: "1px solid var(--border-2)", background: "transparent", color: "var(--text-4)", fontSize: 11, cursor: "pointer" }}>
+                forget
+              </button>
+            )}
+          </div>
+        ))}
+        <div style={{ display: "flex", gap: 8, padding: "11px 16px" }}>
+          <input value={k} onChange={(e) => setK(e.target.value)} placeholder="key (e.g. usual_region)"
+            style={{ width: 200, padding: "7px 10px", borderRadius: 8, border: "1px solid var(--border-2)", background: "var(--surface-2)", color: "var(--text)", fontSize: 12.5, fontFamily: "'IBM Plex Mono',monospace" }} />
+          <input value={v} onChange={(e) => setV(e.target.value)} placeholder="value (e.g. ap-south-1)"
+            style={{ flex: 1, padding: "7px 10px", borderRadius: 8, border: "1px solid var(--border-2)", background: "var(--surface-2)", color: "var(--text)", fontSize: 12.5 }} />
+          <button onClick={save} disabled={!k.trim() || !v.trim()} className="ao-h-b3"
+            style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid rgba(129,140,248,.3)", background: "rgba(99,102,241,.1)", color: "var(--accent-fg)", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+            Remember
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 type ProposalRow = {
   id: string; key: string; status: string; description?: string | null;
   fmt_ok?: boolean | null; validate_ok?: boolean | null; scan?: string | null;
@@ -159,6 +224,7 @@ export function ModuleView() {
                     </div>
                   ))}
                 </div>
+                <MemoryPanel />
               </div>
             )}
           </>

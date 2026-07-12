@@ -262,6 +262,20 @@ class Resource(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class UserMemory(Base):
+    """M4: user-editable standing context that survives sessions ("my usual region is
+    ap-south-1"). Org-scoped; user_id NULL = org-wide. One row per (org, user, key)."""
+
+    __tablename__ = "user_memories"
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    key: Mapped[str] = mapped_column(String(80), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class ModuleProposal(Base):
     """MPP: a drafted Terraform module moving through draft → checks → proposed →
     promoted|rejected. Only PROMOTED rows join the approved library; a draft is inert data —

@@ -260,14 +260,21 @@ _PURPOSE_BUDGET = {"router": 1600, "cloudops": 3000, "devops": 3000, "sre": 3000
 
 
 async def build_context(session_id: str, *, purpose: str = "general", budget_tokens: int | None = None,
-                        current_message: str | None = None, settings=None) -> str:
-    """M1/M3 — the session context slice for a purpose, threaded into EVERY LLM call.
+                        current_message: str | None = None, settings=None,
+                        org_id: str | None = None, user_id: str | None = None) -> str:
+    """M1/M3/M4 — the session context slice for a purpose, threaded into EVERY LLM call.
 
-    Always returns: (a) a RELEVANT-EARLIER-TURNS slot — the exact earlier turn when the current
-    message asks for one by position (M2 positional recall, verbatim), plus top-k semantic/keyword
-    hits for fuzzy references; and (b) the transcript (recent verbatim + older-user digest / rolling
-    summary), fitted to the purpose's budget. Never returns a lie about "no history"."""
+    Always returns: (a) the user's STANDING MEMORY block when org/user ids are supplied (M4 —
+    session-independent, user-editable facts like "usual_region: ap-south-1"); (b) a
+    RELEVANT-EARLIER-TURNS slot — the exact earlier turn when the current message asks for one
+    by position (M2 positional recall, verbatim), plus top-k semantic/keyword hits for fuzzy
+    references; and (c) the transcript (recent verbatim + older-user digest / rolling summary),
+    fitted to the purpose's budget. Never returns a lie about "no history"."""
     max_chars = (budget_tokens * 4) if budget_tokens else _PURPOSE_BUDGET.get(purpose, 3000)
+    standing = ""
+    if org_id:
+        from . import user_memory
+        standing = await user_memory.render_block(org_id, user_id)
     slot: list[str] = []
     if current_message:
         rec = detect_recall(current_message)
@@ -283,6 +290,8 @@ async def build_context(session_id: str, *, purpose: str = "general", budget_tok
                 slot.append(f"[Related earlier {hit['role']} turn] {text[:600]}")
     base = await build_transcript(session_id, max_chars=max_chars, exclude_last_user=current_message)
     parts: list[str] = []
+    if standing:
+        parts.append(standing)
     if slot:
         parts.append("Relevant earlier turns:\n" + "\n\n".join(slot))
     if base:

@@ -1390,5 +1390,17 @@ this section mirrors phase-level status only.
         page (checks + status + Promote/Reject for approvers). Evidence:
         `test_module_pipeline.py` (9, real terraform runs). Live scan (checkov/tfsec install)
         = **DLV-13**.
+  - [x] **M4 per-user/org persistent memory** (2026-07-12): new `agents/user_memory.py` +
+        migration `0008_user_memory`. User-editable standing facts ("usual_region:
+        ap-south-1") that survive sessions — org-scoped under S0, with org-wide rows (NULL
+        user) visible to every member and the personal row winning on key collision.
+        `build_context` now LEADS with the bounded (≤600 chars) standing block whenever
+        org/user ids are supplied (router/general/knowledge pass them), so a brand-new
+        session's very first LLM call already carries it; and the acceptance case is honored
+        DETERMINISTICALLY too — `_extract_inputs` resolves "in my usual region" from the
+        memory store with no LLM (explicit `region=` still wins; Azure templates map to
+        `location`). API: `GET/PUT/DELETE /memory` (org-wide writes require an approver);
+        frontend: "Standing memory" panel on Administration (list / Remember / forget).
+        Evidence: `test_user_memory.py` (6) + all 14 memory regressions green.
 
 _Legend: [x] done · [~] partial/scaffolded · [ ] pending._

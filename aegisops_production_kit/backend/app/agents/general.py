@@ -59,6 +59,8 @@ async def general(state: AgentState, config) -> dict:
     # M1/M2: the full Context Engine slice — transcript + a verbatim positional-recall slot
     # ("what was my 20th question?") + semantic/keyword retrieval of relevant earlier turns.
     transcript = await memory.build_context(state.get("session_id", ""), purpose="general",
+                                            org_id=state.get("org_id"),
+                                            user_id=state.get("user", {}).get("user_id"),
                                             current_message=state["message"], settings=get_settings())
     prompt = (f"Conversation so far in this session:\n{transcript}\n\n"
               f"User's current message: {state['message']}") if transcript else state["message"]

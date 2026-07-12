@@ -98,7 +98,8 @@ async def router(state: AgentState, config) -> dict:
     # M3: the router gets a purpose-shaped context slice (summary + recent + retrieval), not just
     # the last 8 turns — so a reference to something said 30 turns ago still resolves.
     ctx = await memory.build_context(session_id or "", purpose="router", current_message=message,
-                                     settings=get_settings())
+                                     settings=get_settings(), org_id=state.get("org_id"),
+                                     user_id=state.get("user", {}).get("user_id"))
     classify_input = (f"Recent conversation (context for resolving references — classify ONLY "
                       f"the current message):\n{ctx}\n\nCurrent message: {message}") if ctx else message
     try:
