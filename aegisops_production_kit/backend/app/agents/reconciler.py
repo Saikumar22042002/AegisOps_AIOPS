@@ -24,6 +24,7 @@ from sqlalchemy import select
 
 from ..db.models import Run
 from ..db.session import session_scope
+from . import inventory
 from .supervisor import RunSupervisor, get_supervisor, hb_key
 
 log = structlog.get_logger(__name__)
@@ -71,6 +72,30 @@ class Reconciler:
                 log.info("reconciler.marked_failed", run_id=run_id)
         return summary
 
+    async def sweep_orphans(self) -> dict[str, int]:
+        """D2 orphan sweep: recover 'invisible orphans' — runs that applied real infrastructure
+        but whose inventory row is missing (an interrupted write). The row is rebuilt from the
+        recovery payload the run's outcome carries — no cloud read. Bounded + idempotent: a run
+        whose row already exists (the normal case) is a cheap no-op. All recoveries commit in one
+        transaction."""
+        summary = {"checked": 0, "recovered": 0}
+        async with session_scope() as s:
+            runs = (await s.execute(
+                select(Run).where(Run.outcome["status"].astext == "applied")
+                .order_by(Run.created_at.desc()).limit(500)
+            )).scalars().all()
+            for run in runs:
+                summary["checked"] += 1
+                try:
+                    if await inventory.recover_missing(s, run):
+                        summary["recovered"] += 1
+                        log.info("reconciler.orphan_recovered", run_id=str(run.id))
+                except Exception as e:  # noqa: BLE001 — one bad run must not stop the sweep
+                    log.warning("reconciler.orphan_recover_failed", run_id=str(run.id), error=str(e))
+        if summary["recovered"]:
+            log.info("reconciler.orphans_recovered", **summary)
+        return summary
+
     async def _is_resumable(self, run_id: str) -> bool:
         try:
             from .graph import get_graph
@@ -110,6 +135,7 @@ class Reconciler:
             while True:
                 try:
                     await self.sweep()
+                    await self.sweep_orphans()  # D2: rebuild any invisible inventory orphan
                 except Exception as e:  # noqa: BLE001 — a sweep failure must not kill the loop
                     log.error("reconciler.sweep_failed", error=str(e))
                 await asyncio.sleep(interval)

@@ -11,9 +11,12 @@ from __future__ import annotations
 
 import json
 import re
+import uuid
 
 import structlog
 
+from ..db.models import Run
+from ..db.session import session_scope
 from ..graph_db.context_graph import ContextGraph
 from ..integrations.gemini import get_gemini
 from ..security import idempotency
@@ -1021,14 +1024,34 @@ async def cloudops_execute(state: AgentState, config) -> dict:
 
     await idempotency.store_result(idem_key, result)
     await _cg(cg.update_step(order=3, status="done", result={"mode": mode}))
-    outcome = {"status": "applied" if mode == "apply" else "destroyed", **result}
-    # Inventory (Phase 4): record the resource on apply; mark it destroyed on teardown.
-    try:
-        if mode == "destroy":
-            name = inventory.name_from_inputs(state.get("parsed_inputs") or {}, template.resource)
-            await inventory.mark_destroyed(state["org_id"], template.workspace, name=name)
-        else:
-            await inventory.record_from_apply(state, template, result.get("outputs", {}))
-    except Exception as e:  # noqa: BLE001 - inventory bookkeeping must never fail a real apply
-        log.warning("cloudops.inventory_failed", error=str(e))
+    # D2: the apply already mutated real infrastructure — that cannot be rolled back. So the
+    # inventory row and the run outcome are written in ONE transaction, and the outcome carries a
+    # self-contained recovery payload (`_inventory`). Result: normally both land together; and
+    # even if this write is interrupted, the outcome returned below is persisted by the outer
+    # driver WITH the payload, so the orphan sweeper can rebuild a missing inventory row from the
+    # run alone. A real applied resource is never invisible.
+    if mode == "destroy":
+        outcome = {"status": "destroyed", **result}
+        name = inventory.name_from_inputs(state.get("parsed_inputs") or {}, template.resource)
+        try:
+            async with session_scope() as s:
+                await inventory.mark_destroyed_txn(s, state["org_id"], template.workspace, name)
+                run = await s.get(Run, uuid.UUID(state["run_id"]))
+                if run:
+                    run.outcome = outcome
+        except Exception as e:  # noqa: BLE001 - bookkeeping must never fail a real destroy
+            log.warning("cloudops.inventory_failed", error=str(e))
+        await inventory.mark_destroyed_graph_only(name)
+    else:
+        payload = inventory.inventory_payload(state, template, result.get("outputs", {}))
+        outcome = {"status": "applied", **result, "_inventory": payload}
+        try:
+            async with session_scope() as s:
+                await inventory.upsert_resource(s, state["org_id"], payload)
+                run = await s.get(Run, uuid.UUID(state["run_id"]))
+                if run:
+                    run.outcome = outcome
+        except Exception as e:  # noqa: BLE001 - inventory bookkeeping must never fail a real apply
+            log.warning("cloudops.inventory_failed", error=str(e))
+        await inventory.record_graph(state, template, result.get("outputs", {}))
     return {"outcome": outcome, "tool_results": [result]}

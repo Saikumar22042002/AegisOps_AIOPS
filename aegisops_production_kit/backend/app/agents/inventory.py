@@ -99,59 +99,127 @@ def _dump(r: Resource) -> dict:
             "created_at": r.created_at.isoformat() if r.created_at else None}
 
 
-async def record_from_apply(state: dict, template, outputs: dict) -> None:
-    """Upsert an inventory row after a successful apply (keyed by org+workspace+name)."""
+def inventory_payload(state: dict, template, outputs: dict) -> dict:
+    """The self-contained data needed to (re)create an inventory row for an applied resource.
+
+    D2: this payload is embedded in the run's outcome (`outcome["_inventory"]`) so a missing
+    inventory row can be rebuilt purely from the run — no cloud read — by the orphan sweeper.
+    A real applied resource is therefore never invisible, even if the row write was interrupted."""
     inputs = state.get("parsed_inputs") or {}
-    name = name_from_inputs(inputs, template.resource)
-    org_id = state["org_id"]
-    region = inputs.get("region") or inputs.get("location") or state.get("user", {}).get("region")
-    try:
-        async with session_scope() as s:
-            row = (await s.execute(select(Resource).where(
-                Resource.org_id == uuid.UUID(org_id), Resource.workspace == template.workspace,
-                Resource.name == name, Resource.status == "active"))).scalar_one_or_none()
-            if row is None:
-                row = Resource(org_id=uuid.UUID(org_id), name=name, cloud=template.cloud,
-                               resource_type=template.resource, workspace=template.workspace)
-                s.add(row)
-            row.session_id = uuid.UUID(state["session_id"]) if state.get("session_id") else None
-            row.run_id = uuid.UUID(state["run_id"]) if state.get("run_id") else None
-            row.region = region
-            row.provider_id = _provider_id(outputs)
-            row.attributes = outputs
-            row.inputs = inputs
-            row.state_workspace = state.get("state_workspace") or row.state_workspace
-            row.status = "active"
-        log.info("inventory.recorded", name=name, provider_id=_provider_id(outputs), workspace=template.workspace)
-    except Exception as e:  # noqa: BLE001 - inventory write must never fail a real apply
-        log.warning("inventory.record_failed", error=str(e))
-    # Also record in the context graph: resource ↔ run ↔ session relationships (both stores).
+    return {
+        "name": name_from_inputs(inputs, template.resource),
+        "cloud": template.cloud,
+        "resource_type": template.resource,
+        "workspace": template.workspace,
+        "state_workspace": state.get("state_workspace"),
+        "region": inputs.get("region") or inputs.get("location") or state.get("user", {}).get("region"),
+        "provider_id": _provider_id(outputs),
+        "attributes": outputs,
+        "inputs": inputs,
+        "session_id": state.get("session_id"),
+        "run_id": state.get("run_id"),
+    }
+
+
+async def upsert_resource(s, org_id: str, payload: dict) -> None:
+    """Upsert one inventory row from a payload WITHIN an existing session/transaction (no commit).
+
+    Keyed by org+workspace+name so a re-apply or a sweeper recovery updates the same row rather
+    than duplicating it. Caller owns the transaction — used both by `record_from_apply` (its own
+    txn) and by `cloudops_execute` (atomically with the run outcome)."""
+    name, workspace = payload["name"], payload["workspace"]
+    row = (await s.execute(select(Resource).where(
+        Resource.org_id == uuid.UUID(org_id), Resource.workspace == workspace,
+        Resource.name == name, Resource.status == "active"))).scalar_one_or_none()
+    if row is None:
+        row = Resource(org_id=uuid.UUID(org_id), name=name, cloud=payload["cloud"],
+                       resource_type=payload["resource_type"], workspace=workspace)
+        s.add(row)
+    row.session_id = uuid.UUID(payload["session_id"]) if payload.get("session_id") else None
+    row.run_id = uuid.UUID(payload["run_id"]) if payload.get("run_id") else None
+    row.region = payload.get("region")
+    row.provider_id = payload.get("provider_id")
+    row.attributes = payload.get("attributes")
+    row.inputs = payload.get("inputs")
+    row.state_workspace = payload.get("state_workspace") or row.state_workspace
+    row.status = "active"
+
+
+async def record_graph(state: dict, template, outputs: dict) -> None:
+    """Mirror the resource into the context graph (best-effort — never fails a real apply)."""
     try:
         from ..graph_db.context_graph import ContextGraph
+        inputs = state.get("parsed_inputs") or {}
+        name = name_from_inputs(inputs, template.resource)
+        region = inputs.get("region") or inputs.get("location") or state.get("user", {}).get("region")
         ctx = state.get("context_id") or state.get("run_id")
-        await ContextGraph(ctx, org_id).add_resource(
-            name=name, cloud=template.cloud, resource_type=template.resource, provider_id=_provider_id(outputs),
-            region=region, run_id=state.get("run_id"), session_id=state.get("session_id"), attributes=outputs)
+        await ContextGraph(ctx, state["org_id"]).add_resource(
+            name=name, cloud=template.cloud, resource_type=template.resource,
+            provider_id=_provider_id(outputs), region=region, run_id=state.get("run_id"),
+            session_id=state.get("session_id"), attributes=outputs)
     except Exception as e:  # noqa: BLE001 - graph write is best-effort, never fails the apply
         log.warning("inventory.graph_record_failed", error=str(e))
 
 
-async def mark_destroyed(org_id: str, workspace: str, name: str | None = None) -> None:
+async def record_from_apply(state: dict, template, outputs: dict) -> None:
+    """Upsert an inventory row after a successful apply (keyed by org+workspace+name)."""
+    payload = inventory_payload(state, template, outputs)
     try:
         async with session_scope() as s:
-            q = select(Resource).where(Resource.org_id == uuid.UUID(org_id),
-                                       Resource.workspace == workspace, Resource.status == "active")
-            if name:
-                q = q.where(Resource.name == name)
-            for row in (await s.execute(q)).scalars():
-                row.status = "destroyed"
-    except Exception as e:  # noqa: BLE001
-        log.warning("inventory.mark_destroyed_failed", error=str(e))
-    try:  # mirror in the context graph
+            await upsert_resource(s, state["org_id"], payload)
+        log.info("inventory.recorded", name=payload["name"], provider_id=payload.get("provider_id"),
+                 workspace=template.workspace)
+    except Exception as e:  # noqa: BLE001 - inventory write must never fail a real apply
+        log.warning("inventory.record_failed", error=str(e))
+    await record_graph(state, template, outputs)
+
+
+async def recover_missing(s, run) -> bool:
+    """Sweeper recovery: rebuild a missing inventory row for an applied run from the recovery
+    payload its outcome carries. Returns True when a row was created. WITHIN the caller's txn.
+
+    No-op (returns False) when the run has no `_inventory` payload (legacy run — nothing to
+    rebuild from a DB read alone) or when an active row for it already exists (not an orphan)."""
+    outcome = run.outcome or {}
+    payload = outcome.get("_inventory")
+    if not payload or not payload.get("name") or not payload.get("workspace"):
+        return False
+    existing = (await s.execute(select(Resource).where(
+        Resource.org_id == run.org_id, Resource.workspace == payload["workspace"],
+        Resource.name == payload["name"], Resource.status == "active"))).scalar_one_or_none()
+    if existing is not None:
+        return False  # already visible — not an orphan
+    await upsert_resource(s, str(run.org_id), payload)
+    return True
+
+
+async def mark_destroyed_txn(s, org_id: str, workspace: str, name: str | None = None) -> None:
+    """Mark matching active rows destroyed WITHIN the caller's transaction (no commit)."""
+    q = select(Resource).where(Resource.org_id == uuid.UUID(org_id),
+                               Resource.workspace == workspace, Resource.status == "active")
+    if name:
+        q = q.where(Resource.name == name)
+    for row in (await s.execute(q)).scalars():
+        row.status = "destroyed"
+
+
+async def mark_destroyed_graph_only(name: str | None = None) -> None:
+    """Mirror a teardown into the context graph (best-effort — never fails a real destroy)."""
+    try:
         from ..graph_db.context_graph import mark_resource_destroyed_graph
         await mark_resource_destroyed_graph(name=name)
     except Exception as e:  # noqa: BLE001
         log.warning("inventory.graph_mark_destroyed_failed", error=str(e))
+
+
+async def mark_destroyed(org_id: str, workspace: str, name: str | None = None) -> None:
+    """Standalone teardown bookkeeping (own txn + graph mirror)."""
+    try:
+        async with session_scope() as s:
+            await mark_destroyed_txn(s, org_id, workspace, name)
+    except Exception as e:  # noqa: BLE001
+        log.warning("inventory.mark_destroyed_failed", error=str(e))
+    await mark_destroyed_graph_only(name)
 
 
 async def provenance(*, provider_id: str | None = None, name: str | None = None) -> dict | None:

@@ -944,6 +944,18 @@ two known realm issuer URLs (internal + browser-facing), nothing else.
         per-minute budget would throttle normal streaming. The limiter moved to a new
         `ratelimit.py` so `main.py` and `api/chat.py` share one instance without an import cycle.
         Evidence: `test_metrics_hygiene.py` (6) incl. a live-DB step-duration sample.
+  - [x] **D2 same-txn inventory write + orphan sweeper** (2026-07-12): a successful apply mutates
+        real infrastructure that can't be rolled back, so the inventory `Resource` row and the
+        run's `outcome` are now written in ONE transaction in `cloudops_execute`, and the outcome
+        carries a self-contained `_inventory` recovery payload. If the row write is interrupted,
+        the outcome (persisted by the outer driver) still carries the payload, so the new
+        reconciler `sweep_orphans()` rebuilds a missing row **from the run alone — no cloud read**.
+        New inventory seam: `inventory_payload` (pure), `upsert_resource`/`mark_destroyed_txn`
+        (session-scoped, no own txn), `recover_missing` (sweeper recovery, idempotent),
+        `record_graph` (graph mirror split out). Evidence: `test_orphan_inventory.py` (4) —
+        crash-inject → recovered, idempotent, legacy no-payload left alone. The cloud-level orphan
+        (apply done but the DB txn never ran) still needs a live TF backend to reconcile from
+        state and is recorded pending (no creds); B3 already brings such a run to a terminal state.
   - [x] **S0 multi-tenancy** (2026-07-11): principal→(org_id,user_id) via Keycloak org claim
         (group-membership mapper; realm defines northwind-financial + acme-industrial groups)
         with the `users` mirror (by keycloak_sub, username/email fallback for seeded rows)
