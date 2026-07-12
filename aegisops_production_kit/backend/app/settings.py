@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     # under pytest (set in the api-test service) so no background loop auto-starts in a
     # TestClient lifespan — tests that exercise the reconciler drive its `sweep()` explicitly.
     aegisops_reconciler: Literal["on", "off"] = "on"
+    # D3: the drift/orphan reconciliation sweep (world model). Runs inside the reconciler loop;
+    # `off` by default so tests (and installs without cloud read creds) drive `drift.sweep()`
+    # explicitly. Turn on where live cloud reads are configured.
+    aegisops_drift: Literal["on", "off"] = "off"
     # A5 4-eyes: when on, the initiator of a Production-environment run cannot approve it.
     aegisops_four_eyes_for_production: bool = True
     # S1 credential reveal: the step-up re-auth proof (a fresh Keycloak authentication) must

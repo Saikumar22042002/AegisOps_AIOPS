@@ -146,7 +146,8 @@ async def upsert_resource(s, org_id: str, payload: dict) -> None:
 
 
 async def record_graph(state: dict, template, outputs: dict) -> None:
-    """Mirror the resource into the context graph (best-effort — never fails a real apply)."""
+    """Mirror the resource into the context graph + the org-scoped world model (D3) —
+    best-effort, never fails a real apply."""
     try:
         from ..graph_db.context_graph import ContextGraph
         inputs = state.get("parsed_inputs") or {}
@@ -159,6 +160,13 @@ async def record_graph(state: dict, template, outputs: dict) -> None:
             session_id=state.get("session_id"), attributes=outputs)
     except Exception as e:  # noqa: BLE001 - graph write is best-effort, never fails the apply
         log.warning("inventory.graph_record_failed", error=str(e))
+    try:
+        # D3: enrich the same Resource node with org scope + TF state refs and record the
+        # DEPENDS_ON edges extracted from the REAL inputs/outputs (what impact_of answers from).
+        from ..graph_db import world_model
+        await world_model.upsert_resource(state["org_id"], inventory_payload(state, template, outputs))
+    except Exception as e:  # noqa: BLE001
+        log.warning("inventory.world_model_record_failed", error=str(e))
 
 
 async def record_from_apply(state: dict, template, outputs: dict) -> None:
@@ -203,13 +211,20 @@ async def mark_destroyed_txn(s, org_id: str, workspace: str, name: str | None = 
         row.status = "destroyed"
 
 
-async def mark_destroyed_graph_only(name: str | None = None) -> None:
-    """Mirror a teardown into the context graph (best-effort — never fails a real destroy)."""
+async def mark_destroyed_graph_only(name: str | None = None, org_id: str | None = None) -> None:
+    """Mirror a teardown into the context graph + world model (best-effort — never fails a
+    real destroy)."""
     try:
         from ..graph_db.context_graph import mark_resource_destroyed_graph
         await mark_resource_destroyed_graph(name=name)
     except Exception as e:  # noqa: BLE001
         log.warning("inventory.graph_mark_destroyed_failed", error=str(e))
+    if org_id:
+        try:
+            from ..graph_db import world_model
+            await world_model.mark_destroyed(org_id, name=name)
+        except Exception as e:  # noqa: BLE001
+            log.warning("inventory.world_model_mark_destroyed_failed", error=str(e))
 
 
 async def mark_destroyed(org_id: str, workspace: str, name: str | None = None) -> None:
@@ -219,7 +234,7 @@ async def mark_destroyed(org_id: str, workspace: str, name: str | None = None) -
             await mark_destroyed_txn(s, org_id, workspace, name)
     except Exception as e:  # noqa: BLE001
         log.warning("inventory.mark_destroyed_failed", error=str(e))
-    await mark_destroyed_graph_only(name)
+    await mark_destroyed_graph_only(name, org_id=org_id)
 
 
 async def provenance(*, provider_id: str | None = None, name: str | None = None) -> dict | None:

@@ -165,10 +165,15 @@ class Reconciler:
             return  # idempotent: never accumulate sweep loops if start() is called twice
 
         async def _loop() -> None:
+            from ..settings import get_settings
+
             while True:
                 try:
                     await self.sweep()
                     await self.sweep_orphans()  # D2: rebuild any invisible inventory orphan
+                    if get_settings().aegisops_drift == "on":
+                        from . import drift  # D3: cloud drift/orphan reconciliation
+                        await drift.sweep()
                 except Exception as e:  # noqa: BLE001 — a sweep failure must not kill the loop
                     log.error("reconciler.sweep_failed", error=str(e))
                 await asyncio.sleep(interval)

@@ -81,6 +81,56 @@ async def live_redis():
 
 
 @pytest.fixture
+async def live_neo4j():
+    """A Neo4j driver bound to this test's event loop (async drivers are loop-bound)."""
+    if not _live_enabled():
+        pytest.skip("integration test: set AEGISOPS_TEST_LIVE_DATASTORES=1 (run via `make test`)")
+    from app.graph_db import neo4j as n4
+    from app.settings import get_settings
+
+    if n4._driver is not None:
+        try:
+            await n4._driver.close()
+        except Exception:  # noqa: BLE001
+            pass
+        n4._driver = None
+    driver = n4.init_neo4j(get_settings())
+    try:
+        await driver.verify_connectivity()
+    except Exception:  # noqa: BLE001
+        n4._driver = None
+        pytest.skip("Neo4j not reachable")
+    yield driver
+    try:
+        await driver.close()
+    except Exception:  # noqa: BLE001
+        pass
+    n4._driver = None
+
+
+@pytest.fixture
+async def throwaway_org(live_db) -> str:
+    """A brand-new organization row, deleted afterwards — for tests that must not touch the
+    seeded org's real inventory/notifications (e.g. drift sweeps)."""
+    import uuid as _uuid
+
+    from sqlalchemy import delete
+
+    from app.db.models import Organization
+    from app.db.session import session_scope
+
+    slug = f"itest-{_uuid.uuid4().hex[:10]}"
+    async with session_scope() as s:
+        org = Organization(name=f"itest {slug}", slug=slug)
+        s.add(org)
+        await s.flush()
+        oid = str(org.id)
+    yield oid
+    async with session_scope() as s:
+        await s.execute(delete(Organization).where(Organization.id == _uuid.UUID(oid)))
+
+
+@pytest.fixture
 async def org_id(live_db) -> str:
     """The seeded primary organization id (integration; requires `make seed` has run)."""
     from sqlalchemy import select

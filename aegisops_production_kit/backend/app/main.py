@@ -46,6 +46,13 @@ async def lifespan(app: FastAPI):
     db.init_engine(settings)
     redis_client.init_redis(settings)
     neo4j_client.init_neo4j(settings)
+    # D3: world-model schema constraints (idempotent; best-effort — Neo4j down degrades the
+    # graph features, never blocks startup).
+    try:
+        from .graph_db import world_model
+        await world_model.ensure_schema()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("startup.world_model_schema_failed", error=str(exc))
     # LangGraph durable checkpointer + compiled multi-agent graph. If the DB is unreachable
     # the API still starts (degraded) and /readyz reports it; chat then errors loudly rather
     # than silently faking data.

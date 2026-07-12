@@ -1259,6 +1259,22 @@ as done without the live run; the code paths behind each are covered by tests wi
       Steps: apply done but worker killed BEFORE the same-txn persist (kill during the final
       seconds of apply); after recovery, reconcile inventory from the Terraform state.
       Expect: the resource is discoverable and never silently invisible.
+- [ ] **DLV-10 · Live drift / deleted-outside / orphan sweep (D3)** — Needs: AWS creds (EC2
+      read) — or extend readers to the creds at hand; `AEGISOPS_DRIFT=on` on api/api-b.
+      Steps: (1) provision an EC2 via the gated flow; (2) **manually change its security group
+      in the AWS console** → within one sweep (≤60s) the bell shows "Drift detected: <name>"
+      naming the changed field; (3) terminate the instance in the console → "Deleted outside
+      AegisOps" (red); (4) launch an instance tagged `ManagedBy=aegisops` by hand →
+      "Orphaned resource: i-…"; (5) confirm dedup: no repeat notifications on later sweeps.
+      Expect: three finding kinds in the bell, org-scoped, deduplicated; world-model nodes
+      annotated (`drift=true` + detail).
+- [ ] **DLV-11 · World-model destroy warning in the UI (D3)** — Needs: valid `GEMINI_API_KEY`
+      (+ any cloud creds, e.g. GCP).
+      Steps: (1) provision a parent (VPC or resource group) and a dependent (EC2/storage)
+      through the gated flow; (2) ask to **destroy the parent**; (3) inspect the approval card.
+      Expect: policy check **"No dependent resources (world model)" FAILED** naming the
+      dependent + the "⚠ Dependent resources" reasoning card + console warning; reject leaves
+      everything untouched.
 
 **STOPPED at the Phase-2 exit gate — awaiting owner sign-off before any Phase-3 work.**
 _(Sign-off received 2026-07-12; Phase 3 started — see section S below.)_
@@ -1275,5 +1291,26 @@ this section mirrors phase-level status only.
       DEFERRED LIVE VERIFICATION list above with exact replay steps — never a faked live
       result. **STOP when all items are code-complete + suite green**, presenting the DLV list
       as one ordered end-to-end acceptance script.
+  - [x] **D3 World Model + Reconciliation Engine** (2026-07-12): new `graph_db/world_model.py`
+        — org-scoped `Resource` nodes (same merge key the context graph uses, enriched with
+        org/TF-state refs) + `DEPENDS_ON` edges extracted by a PURE lookup over the resource's
+        real inputs/outputs (`vpc_id`/`subnet_id(s)`/`security_group_ids`/`resource_group`/… —
+        an edge can never be hallucinated; external parents become honest `status='external'`
+        stubs). `impact_of(org, id|name)` answers "what depends on this?" — wired into the
+        destroy card as a real policy check via `_world_model_impact_check`: FAILED + named
+        dependents when they exist, passed only when consulted-and-clear, **pending (not a
+        silent pass) when the graph is unreachable**, plus a "⚠ Dependent resources" reasoning
+        card + console warning. Ingestion: `inventory.record_graph` upserts the world model on
+        every apply; teardown marks it destroyed. New `agents/drift.py` reconciliation engine:
+        per-(cloud,type) read-only reader seam (real cred-gated `Ec2Reader` ships; fakes in
+        tests), curated-field `detect_drift` comparator, and a sweep producing org-scoped bell
+        notifications for **drift** (amber) / **deleted-outside** (red) / **orphan** (P14 spend
+        leak: `ManagedBy=aegisops` with no inventory row) — deduplicated 24h via Redis
+        fingerprints, world-model nodes annotated best-effort (a down graph never drops
+        findings or aborts the sweep). Runs inside the reconciler loop behind `AEGISOPS_DRIFT`
+        (default off; tests drive `sweep()` explicitly, org-scoped to a throwaway org so the
+        shared dev inventory is never polluted). Schema constraint ensured at startup.
+        Evidence: `test_world_model.py` (9) + `test_drift.py` (8). Live sweeps + the UI destroy
+        warning are **DLV-10/DLV-11**.
 
 _Legend: [x] done · [~] partial/scaffolded · [ ] pending._

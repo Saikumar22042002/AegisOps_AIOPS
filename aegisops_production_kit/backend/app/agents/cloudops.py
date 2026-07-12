@@ -699,6 +699,30 @@ async def _read_resource(state: AgentState, config, target: str) -> dict:
             "confidentiality": {"level": cc.level, "score": cc.score}}
 
 
+async def _world_model_impact_check(org_id: str, *, provider_id: str | None,
+                                    name: str | None) -> tuple[dict, list[dict]]:
+    """(policy-check row, dependents) for the destroy card — D3 impact gate.
+
+    passed=True only when the world model was actually consulted and found no active dependent;
+    dependents → passed=False with a named detail; an unreachable graph → evaluated=False
+    (pending), never a silent pass."""
+    from ..graph_db import world_model
+    try:
+        dependents = await world_model.impact_of(org_id, provider_id=provider_id, name=name)
+    except Exception as e:  # noqa: BLE001 — the graph being down must not fake a pass
+        log.warning("cloudops.impact_check_unavailable", error=str(e))
+        return ({"name": "No dependent resources (world model)", "passed": None,
+                 "evaluated": False, "detail": "world model unreachable — not evaluated"}, [])
+    if dependents:
+        detail = ", ".join(f"{d['name'] or d['provider_id']} ({d['type'] or d['kind']})"
+                           for d in dependents[:6])
+        return ({"name": "No dependent resources (world model)", "passed": False,
+                 "evaluated": True,
+                 "detail": f"{len(dependents)} active dependent(s): {detail}"}, dependents)
+    return ({"name": "No dependent resources (world model)", "passed": True,
+             "evaluated": True, "detail": "no active dependents"}, [])
+
+
 async def _destroy_resource(state: AgentState, config, target: str | None) -> dict:
     """Day-2 DESTROY (Phase 8 / N-08): resolve the target from the INVENTORY, confirm it via
     the approval gate, and tear down that resource's OWN Terraform state workspace.
@@ -802,16 +826,31 @@ async def _destroy_resource(state: AgentState, config, target: str | None) -> di
                           "is already empty (it may have been destroyed outside AegisOps). I've left "
                           "everything untouched; say “is it created?” to reconcile its status.")
 
+    # D3: world-model impact gate — "what depends on this?" answered from the real dependency
+    # edges before the human decides. Dependents make the check FAIL on the card (the human can
+    # still approve — but never unwarned). Best-effort: an unreachable graph yields an honest
+    # not-evaluated check, never a silent pass.
+    impact_check, dependents = await _world_model_impact_check(
+        org_id, provider_id=res.get("provider_id"), name=res["name"])
     plan_json = {"summary": plan["summary"], "diff": plan["diff"],
                  "workspace": res["workspace"] or template.workspace,
                  "state_workspace": res.get("state_workspace"),
-                 "policy_checks": [], "mode": "destroy"}
+                 "policy_checks": [impact_check], "mode": "destroy"}
     cc = classify(f"destroy {res['name']}")
     await emitter.confidentiality(cc.level, cc.score)
     reasoning = [{"title": "Teardown target", "conf": "",
                   "body": f"{res['name']} · {res['cloud']} {res['resource_type']} · "
                           f"{res.get('provider_id') or 'no provider id'} — resolved from the inventory; "
                           f"plan destroys {plan['summary']['destroy']} resource(s), creates none."}]
+    if dependents:
+        dep_list = ", ".join(f"{d['name'] or d['provider_id']} ({d['type'] or d['kind']})"
+                             for d in dependents[:6])
+        reasoning.append({"title": "⚠ Dependent resources (world model)", "conf": "",
+                          "body": f"Destroying {res['name']} impacts {len(dependents)} active "
+                                  f"resource(s) that depend on it: {dep_list}. They may break "
+                                  "or be orphaned."})
+        await emitter.console("stderr",
+                              f"world-model impact: {len(dependents)} active dependent(s) — {dep_list}")
     await emitter.analysis(summary=f"Planned the teardown of {res['name']}; awaiting approval.", cards=reasoning)
     interrupt_payload = {"kind": "approval", "runId": state["run_id"], "workflow": template.key,
                          "plan": plan_json, "diff": plan["diff"], "policyChecks": [],
@@ -1041,7 +1080,7 @@ async def cloudops_execute(state: AgentState, config) -> dict:
                     run.outcome = outcome
         except Exception as e:  # noqa: BLE001 - bookkeeping must never fail a real destroy
             log.warning("cloudops.inventory_failed", error=str(e))
-        await inventory.mark_destroyed_graph_only(name)
+        await inventory.mark_destroyed_graph_only(name, org_id=state["org_id"])
     else:
         payload = inventory.inventory_payload(state, template, result.get("outputs", {}))
         outcome = {"status": "applied", **result, "_inventory": payload}
