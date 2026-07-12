@@ -965,6 +965,17 @@ two known realm issuer URLs (internal + browser-facing), nothing else.
         and `stdin_data` (console now opens `stdin=DEVNULL`, which also prevents a command hanging
         on an unexpected prompt). Zero references remain. Evidence: `test_rbac_endpoints.py` —
         `/input` → 404, `CommandConsole` has no `send_input`.
+  - [x] **U8 SSE contract regression on the Redis bus** (2026-07-12): proved the Redis Streams
+        bus (B1) preserves the SSE contract exactly, so the frontend reducer needs no change to
+        run on it. New parity test drives the **full** event vocabulary
+        (run/step/token/analysis/params/confidentiality/console/interrupt/error/done) through both
+        the in-memory `RunChannel` and the `RedisChannel` and asserts **byte-identical JSON
+        frames** (JSON is what the client receives in both modes; the memory path is normalized
+        through JSON for an apples-to-apples compare). The reducer + parser are untouched —
+        frontend **vitest 28 green**; Playwright **`core-flow` 5/5 green** against the running
+        stack, including "sending a message streams a live run into the per-message timeline".
+        The live multi-worker-on-Redis-bus streaming + worker-kill recovery is reserved for the
+        Phase-2 exit-gate demonstration (as specified).
   - [x] **S0 multi-tenancy** (2026-07-11): principal→(org_id,user_id) via Keycloak org claim
         (group-membership mapper; realm defines northwind-financial + acme-industrial groups)
         with the `users` mirror (by keycloak_sub, username/email fallback for seeded rows)

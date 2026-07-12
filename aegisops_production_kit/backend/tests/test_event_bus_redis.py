@@ -8,11 +8,12 @@ the same run (worker B). Each test uses a unique run id and trims its stream on 
 
 from __future__ import annotations
 
+import json
 import uuid
 
 import pytest
 
-from app.agents.events import DONE, Emitter, RedisChannel
+from app.agents.events import DONE, Emitter, RedisChannel, RunChannel
 
 
 async def _drain(channel, replay="0", limit=50):
@@ -106,6 +107,48 @@ async def test_redis_bus_multi_worker_publish_A_consume_B(live_redis):
         out = await _drain(worker_b)
         assert [o["event"] for o in out] == ["run", "step", "token", "done"]
         assert out[-1]["data"]["messageId"] == "m"
+    finally:
+        await _cleanup(run_id)
+
+
+async def _emit_full_vocabulary(em: Emitter, run_id: str) -> None:
+    """The complete SSE event vocabulary the frontend reducer consumes."""
+    await em.run({"runId": run_id, "sessionId": "s-1"})
+    await em.step(2, "Ran terraform plan")
+    await em.token("hello")
+    await em.analysis(summary="done", cards=[{"title": "t", "body": "b"}])
+    await em.params({"template": "aws.ec2", "items": []})
+    await em.confidentiality("High", 0.9)
+    await em.console("stdout", "Plan: 1 to add")
+    await em.interrupt({"kind": "approval", "runId": run_id})
+    await em.error("boom", code="terraform_error", retriable=True)
+    await em.done({"messageId": "m-1", "runId": run_id})
+    await em.ch.close()
+
+
+async def test_redis_bus_matches_memory_contract_full_vocabulary(live_redis):
+    """U8: the Redis bus preserves the SSE contract exactly, so the frontend reducer needs NO
+    change to run on it. The identical Emitter script through the in-memory RunChannel and the
+    RedisChannel must deliver JSON-identical frames — the frames are what the reducer keys off,
+    and JSON is what the client receives in both modes (the Redis path round-trips through JSON,
+    so we normalize the memory path the same way for an apples-to-apples comparison)."""
+    run_id = f"itest-bus-{uuid.uuid4()}"
+
+    mem = RunChannel(run_id)
+    await _emit_full_vocabulary(Emitter(mem), run_id)
+    mem_frames = [(e["event"], json.loads(json.dumps(e["data"]))) for e in mem.history]
+
+    redis_ch = RedisChannel(run_id)
+    try:
+        await _emit_full_vocabulary(Emitter(RedisChannel(run_id)), run_id)
+        out = await _drain(redis_ch)
+        redis_frames = [(o["event"], o["data"]) for o in out]
+
+        assert [n for n, _ in redis_frames] == [
+            "run", "step", "token", "analysis", "params",
+            "confidentiality", "console", "interrupt", "error", "done"]
+        # Byte-for-byte identical frame contract across transports → reducer unchanged.
+        assert redis_frames == mem_frames
     finally:
         await _cleanup(run_id)
 
