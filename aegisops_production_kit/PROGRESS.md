@@ -869,6 +869,19 @@ two known realm issuer URLs (internal + browser-facing), nothing else.
         `TestStateIsolation` caught that a module can claim initialized (.terraform/ + lockfile)
         yet be unusable (provider cache evicted → dangling plugin links); fixed so the warm path
         falls back to a full init on any such mismatch rather than failing the run.
+  - [x] **M1/M2/M3 Context Engine core** (2026-07-12): `memory.build_context(session, purpose=,
+        budget=, current_message=)` threaded into the router (M3, replacing the fixed last-8
+        window), general, and knowledge — returns a relevant-earlier-turns slot + the transcript.
+        **M2 positional recall**: `get_turn(session, N, role)` returns the Nth turn verbatim;
+        `detect_recall` parses "what was my 20th question?" etc.; the general agent answers exact
+        positional recall **deterministically from the store — no LLM guess** (works even if the
+        LLM is down, can't hallucinate a different turn). **M2 semantic recall**: `retrieve()` uses
+        pgvector over per-message embeddings (migration `0006`, `messages.embedding` + HNSW),
+        embed-on-write in `api/chat.py` (best-effort; NULL without a Gemini key → pg_trgm keyword
+        fallback). Headline test green: 100-message session → turn 20 returned verbatim. Evidence:
+        `test_memory.py` (+6). **PENDING (Gemini key):** the full turn-20-recall UI demo needs a
+        valid Gemini key (the router + general LLM calls) — the recall logic itself is deterministic
+        and proven; the exact-recall answer is even LLM-free once routed.
   - [x] **S0 multi-tenancy** (2026-07-11): principal→(org_id,user_id) via Keycloak org claim
         (group-membership mapper; realm defines northwind-financial + acme-industrial groups)
         with the `users` mirror (by keycloak_sub, username/email fallback for seeded rows)

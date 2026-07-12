@@ -126,7 +126,12 @@ async def _persist_result(run_id: str, session_id: str, org_id: str, state: dict
         )
         s.add(msg)
         await s.flush()
-        return str(msg.id)
+        msg_id = str(msg.id)
+    # M2: embed the assistant message for semantic recall (best-effort, background; NULL without
+    # a Gemini key → keyword-recall fallback). Fired after commit so it re-fetches a persisted row.
+    from ..agents import memory as _memory
+    asyncio.create_task(_memory.embed_message(msg_id, answer, get_settings()))
+    return msg_id
 
 
 @router.post("/chat")
@@ -153,13 +158,19 @@ async def chat(body: ChatRequest, request: Request, user: User = Depends(require
             s.add(sess)
             await s.flush()
             session_id = str(sess.id)
-        s.add(Message(org_id=org.id, session_id=uuid.UUID(session_id), role="user", content=body.message))
+        user_msg = Message(org_id=org.id, session_id=uuid.UUID(session_id), role="user",
+                           content=body.message)
+        s.add(user_msg)
         run = Run(org_id=org.id, session_id=uuid.UUID(session_id), status="running",
                   mode=settings.default_execution_mode,
                   initiated_by=owner_id, env=body.context.env)  # A5: governance facts
         s.add(run)
         await s.flush()
         run_id = str(run.id)
+        user_msg_id = str(user_msg.id)
+    # M2: embed the user message for semantic recall (best-effort, background).
+    from ..agents import memory as _memory
+    asyncio.create_task(_memory.embed_message(user_msg_id, body.message, settings))
 
     bind_correlation(run_id=run_id, session_id=session_id)
     channel = create_channel(run_id)

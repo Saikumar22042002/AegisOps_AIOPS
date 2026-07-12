@@ -117,3 +117,81 @@ async def test_general_agent_prompt_includes_history(convo, monkeypatch):
     blob = (seen.get("system") or "") + (seen.get("prompt") or "")
     for q in (_Q1, _Q2, _Q3):
         assert q in blob, f"general agent never saw prior turn: {q!r}"
+
+
+# ═══ M1/M2/M3 — Context Engine: positional + semantic recall, build_context ═══════════════════
+# Headline (fix-doc M2): in a 100-message thread, "what was my 20th question?" returns turn 20
+# verbatim. Positional recall is deterministic (no embeddings); semantic degrades to keyword.
+
+async def _make_100_turn_session(org_id: str) -> str:
+    turns = []
+    for i in range(1, 51):
+        turns.append(("user", f"Question number {i}: how do I configure widget {i}?"))
+        turns.append(("assistant", f"Answer to number {i}."))
+    return await _make_session(org_id, turns)
+
+
+@pytest.fixture
+async def big_convo(org_id):
+    sid = await _make_100_turn_session(org_id)
+    yield sid
+    from sqlalchemy import delete
+    async with session_scope() as s:
+        await s.execute(delete(Message).where(Message.session_id == uuid.UUID(sid)))
+        await s.execute(delete(Session).where(Session.id == uuid.UUID(sid)))
+
+
+async def test_get_turn_returns_the_20th_question_verbatim(big_convo):
+    from app.agents import memory
+    turn = await memory.get_turn(big_convo, 20, role="user")
+    assert turn is not None
+    assert turn["content"] == "Question number 20: how do I configure widget 20?"
+    assert turn["role"] == "user" and turn["ordinal"] == 20
+
+
+def test_detect_recall_parses_positional_queries():
+    from app.agents import memory
+    assert memory.detect_recall("what was my 20th question?") == (20, "user")
+    assert memory.detect_recall("show me the 3rd message") == (3, "user")
+    assert memory.detect_recall("the first question") == (1, "user")
+    assert memory.detect_recall("provision an EC2 instance") is None  # not a recall
+
+
+async def test_build_context_includes_the_20th_turn_verbatim(big_convo):
+    from app.agents import memory
+    ctx = await memory.build_context(big_convo, purpose="general",
+                                     current_message="what was my 20th question?")
+    assert "Question number 20: how do I configure widget 20?" in ctx, \
+        "the recall query must surface turn 20's full text (M2 positional recall)"
+
+
+async def test_semantic_recall_finds_a_turn_by_content_keyword_fallback(big_convo):
+    # No Gemini key here → retrieve() uses pg_trgm keyword similarity. A distinctive query should
+    # surface the matching earlier turn.
+    from app.agents import memory
+    hits = await memory.retrieve(big_convo, "configure widget 37", k=3)
+    assert any("widget 37" in h["content"] for h in hits), \
+        "keyword retrieval must find the relevant earlier turn by content"
+
+
+async def test_build_context_never_claims_no_history(big_convo):
+    from app.agents import memory
+    ctx = await memory.build_context(big_convo, purpose="router",
+                                     current_message="do that again")
+    assert ctx.strip(), "context must be non-empty for a populated session"
+
+
+async def test_general_answers_positional_recall_without_the_llm(big_convo, monkeypatch):
+    """M2: an exact positional-recall query is answered verbatim from the store — the LLM is
+    NOT invoked (deterministic, un-hallucinatable), so it works even when the LLM is down."""
+    from app.agents import general as gen
+    from app.agents.events import Emitter, RunChannel
+
+    async def _boom(*a, **k):
+        raise AssertionError("exact recall must not call the LLM")
+
+    monkeypatch.setattr(gen.llm, "stream_answer", _boom)
+    state = {"run_id": "r", "org_id": "o", "session_id": big_convo,
+             "message": "what was my 20th question?"}
+    out = await gen.general(state, {"configurable": {"emitter": Emitter(RunChannel("r"))}})
+    assert "Question number 20: how do I configure widget 20?" in out["answer"]

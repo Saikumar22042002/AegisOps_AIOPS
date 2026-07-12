@@ -41,9 +41,9 @@ async def knowledge(state: AgentState, config) -> dict:
 
     await emitter.step(5, "Composed response")
     context_block = "\n\n".join(f"[{i + 1}] {r['title']}\n{r['chunk']}" for i, r in enumerate(refs))
-    # Session memory (Phase 8 / N-03): follow-ups like "expand on that" need the real thread.
-    transcript = await memory.build_transcript(state.get("session_id", ""), max_chars=4000,
-                                               exclude_last_user=state["message"])
+    # M1/M2: Context Engine slice for knowledge follow-ups ("expand on that", "the 2nd doc").
+    transcript = await memory.build_context(state.get("session_id", ""), purpose="knowledge",
+                                            current_message=state["message"], settings=settings)
     convo = f"Conversation so far:\n{transcript}\n\n" if transcript else ""
     prompt = f"{convo}Context passages:\n{context_block}\n\nQuestion: {state['message']}"
 

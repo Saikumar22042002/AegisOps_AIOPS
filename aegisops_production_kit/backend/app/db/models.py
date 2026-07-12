@@ -97,6 +97,9 @@ class Message(Base):
     snow_id: Mapped[str | None] = mapped_column(String(60), nullable=True)
     run_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("runs.id", ondelete="SET NULL"), nullable=True)
     analysis: Mapped[dict | None] = mapped_column(JSONB, nullable=True)  # reasoning summary + references
+    # M2: per-message embedding for semantic conversational recall (pgvector). Nullable — a
+    # no-Gemini setup leaves it NULL and recall degrades to pg_trgm keyword search.
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBED_DIM), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     session: Mapped[Session] = relationship(back_populates="messages")

@@ -95,7 +95,10 @@ async def router(state: AgentState, config) -> dict:
     system = _SYSTEM.format(catalog=json.dumps(templates.catalog(), indent=0))
     # Session memory (Phase 8 / N-03): recent turns let the classifier resolve references
     # ("do that again", "the previous one", "same but in gcp") against what was actually said.
-    ctx = await memory.classification_context(session_id or "")
+    # M3: the router gets a purpose-shaped context slice (summary + recent + retrieval), not just
+    # the last 8 turns — so a reference to something said 30 turns ago still resolves.
+    ctx = await memory.build_context(session_id or "", purpose="router", current_message=message,
+                                     settings=get_settings())
     classify_input = (f"Recent conversation (context for resolving references — classify ONLY "
                       f"the current message):\n{ctx}\n\nCurrent message: {message}") if ctx else message
     try:

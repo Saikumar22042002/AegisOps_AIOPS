@@ -42,10 +42,24 @@ async def general(state: AgentState, config) -> dict:
         await emitter.confidentiality(c.level, c.score)
         return {"answer": msg, "confidentiality": {"level": c.level, "score": c.score}}
 
-    # Conversational memory (Phase 8 / N-03): thread the real session transcript into the
-    # call. Without this, every turn was answered blind — "my context window is blank".
-    transcript = await memory.build_transcript(state.get("session_id", ""),
-                                               exclude_last_user=state["message"])
+    # M2: exact positional recall is answered DETERMINISTICALLY from the store — no LLM guess,
+    # no truncation. "What was my 20th question?" returns turn 20 verbatim even if the LLM is
+    # down, and can never hallucinate a different turn.
+    rec = memory.detect_recall(state["message"])
+    if rec:
+        turn = await memory.get_turn(state.get("session_id", ""), rec[0], role=rec[1])
+        if turn:
+            answer = (f"Your {memory._ordinal_label(turn['ordinal'])} {rec[1]} in this "
+                      f"conversation was:\n\n> {turn['content']}")
+            await emitter.token(answer)
+            c = classify(answer)
+            await emitter.confidentiality(c.level, c.score)
+            return {"answer": answer, "confidentiality": {"level": c.level, "score": c.score}}
+
+    # M1/M2: the full Context Engine slice — transcript + a verbatim positional-recall slot
+    # ("what was my 20th question?") + semantic/keyword retrieval of relevant earlier turns.
+    transcript = await memory.build_context(state.get("session_id", ""), purpose="general",
+                                            current_message=state["message"], settings=get_settings())
     prompt = (f"Conversation so far in this session:\n{transcript}\n\n"
               f"User's current message: {state['message']}") if transcript else state["message"]
 
