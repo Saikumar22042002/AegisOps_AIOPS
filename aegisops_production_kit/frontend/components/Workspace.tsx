@@ -70,6 +70,7 @@ function AiMessage({ m }: { m: ChatMessage }) {
   const [tab, setTab] = useState<"conversation" | "analysis">("conversation");
   const approval = useUI((s) => s.approval);
   const approveRun = useUI((s) => s.approveRun);
+  const sendText = useUI((s) => s.sendText);
   const openArtifact = useUI((s) => s.openArtifact);
   const selectMessage = useUI((s) => s.selectMessage);
   const selected = useUI((s) => s.selectedMessageId === m.id);
@@ -170,7 +171,19 @@ function AiMessage({ m }: { m: ChatMessage }) {
             )}
 
             {m.error && (
-              <div style={{ marginTop: 12, fontSize: 12.5, color: "var(--red-2)", background: "rgba(248,113,113,.08)", border: "1px solid rgba(248,113,113,.25)", borderRadius: 10, padding: "10px 13px" }}>{m.error}</div>
+              <div style={{ marginTop: 12, fontSize: 12.5, color: "var(--red-2)", background: "rgba(248,113,113,.08)", border: "1px solid rgba(248,113,113,.25)", borderRadius: 10, padding: "10px 13px" }}>
+                {m.error}
+                {/* U7: one-click retry-with-fix — re-sends the corrected message as a real new turn. */}
+                {m.retry?.retry_message && (
+                  <div style={{ marginTop: 9 }}>
+                    <button onClick={(e) => { e.stopPropagation(); void sendText(m.retry!.retry_message); }} className="ao-h-b3"
+                      title={m.retry.retry_message}
+                      style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(129,140,248,.35)", background: "rgba(99,102,241,.12)", color: "var(--accent-fg)", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                      {m.retry.label ?? "Retry with fix"}
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
 
             {m.paramRequest && (m.paramRequest.items?.length ?? 0) > 0 && <ParamRequestCard req={m.paramRequest} />}

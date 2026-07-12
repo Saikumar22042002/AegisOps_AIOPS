@@ -432,7 +432,12 @@ async def cloudops_plan(state: AgentState, config) -> dict:
         # the raw trace stays in the Logs tab; the conversation gets cause + next step.
         failure = provider_errors.classify_provider_error(str(e))
         friendly = provider_errors.failure_message(failure, str(e), mode="plan")
-        await emitter.error(f"terraform plan failed: {e}", code="terraform_error", retriable=True)
+        # U7: one-click retry-with-fix — a genuine new turn with only the fix applied.
+        retry = provider_errors.suggest_retry(failure, state.get("message", ""), cloud=cloud,
+                                              current_region=validated.get("region")
+                                              or validated.get("location") or region)
+        await emitter.error(f"terraform plan failed: {e}", code="terraform_error",
+                            retriable=True, retry=retry)
         await emitter.token(friendly)
         cc = classify(friendly)
         await emitter.confidentiality(cc.level, cc.score)
@@ -441,7 +446,8 @@ async def cloudops_plan(state: AgentState, config) -> dict:
         return {"needs_change": False, "approval_status": "not_required", "answer": friendly,
                 "confidentiality": {"level": cc.level, "score": cc.score},
                 "outcome": {"status": "plan_failed", "error": str(e)[:500],
-                            "failure": failure.__dict__ if failure else None}}
+                            "failure": failure.__dict__ if failure else None,
+                            "retry": retry}}
     await timing.end_step(run_id, "planner", status="done", result=plan["summary"])
 
     # Action-vs-operation HARD GUARD (Phase 8 / N-08): the plan about to reach the approval
@@ -809,6 +815,16 @@ async def _destroy_resource(state: AgentState, config, target: str | None) -> di
                           "want it destroyed, say so explicitly (e.g. “destroy the VM sai-test”).")
 
     ref = (target or "").strip()
+    # U7: "__last_applied__" — the undo fast-path's target. Resolve to the most recent ACTIVE
+    # resource THIS conversation applied; nothing applied here → refuse honestly.
+    if ref == "__last_applied__":
+        last = await inventory.last_applied(org_id, state.get("session_id"))
+        if not last:
+            return await _say("There's nothing to undo — this conversation hasn't applied any "
+                              "infrastructure that is still active. Name a resource explicitly "
+                              "if you want something torn down.")
+        ref = last["name"]
+        await emitter.console("stdout", f"undo → last applied in this conversation: {ref}")
     await emitter.step(2, f"Resolving “{ref or state.get('resource') or 'resource'}” for destruction")
     matches, kind = await inventory.resolve(org_id, ref or (state.get("resource") or ""))
     if kind == "all":
@@ -1109,13 +1125,20 @@ async def cloudops_execute(state: AgentState, config) -> dict:
                             f"(`{'`, `'.join(leftover[:6])}`) — a retry will reconcile them, or ask "
                             "me to destroy this workspace to clean up."
                             if leftover else "no partial resources were left behind."))
-        await emitter.error(f"terraform {mode} failed: {e}", code="terraform_error", retriable=True)
+        # U7: one-click retry-with-fix (a genuine new turn through the whole gated flow).
+        retry = provider_errors.suggest_retry(
+            failure, state.get("message", ""), cloud=state.get("cloud"),
+            current_region=(state.get("parsed_inputs") or {}).get("region")
+            or (state.get("parsed_inputs") or {}).get("location"))
+        await emitter.error(f"terraform {mode} failed: {e}", code="terraform_error",
+                            retriable=True, retry=retry)
         await emitter.token(friendly)
         cc = classify(friendly)
         await emitter.confidentiality(cc.level, cc.score)
         await _cg(cg.update_step(order=3, status="failed", error=str(e)))
         return {"outcome": {"status": f"{mode}_failed", "error": str(e)[:500],
-                            "failure": failure.__dict__ if failure else None},
+                            "failure": failure.__dict__ if failure else None,
+                            "retry": retry},
                 "answer": friendly,
                 "confidentiality": {"level": cc.level, "score": cc.score}}
 

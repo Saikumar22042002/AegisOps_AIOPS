@@ -93,6 +93,7 @@ def _provider_id(outputs: dict) -> str | None:
 
 def _dump(r: Resource) -> dict:
     return {"id": str(r.id), "name": r.name, "cloud": r.cloud, "region": r.region,
+            "session_id": str(r.session_id) if r.session_id else None,
             "resource_type": r.resource_type, "provider_id": r.provider_id, "workspace": r.workspace,
             "state_workspace": r.state_workspace,
             "status": r.status, "attributes": r.attributes or {}, "inputs": r.inputs or {},
@@ -255,6 +256,25 @@ async def list_active(org_id: str, clouds: list[str] | None = None) -> list[dict
         if clouds:
             q = q.where(Resource.cloud.in_([c.lower() for c in clouds]))
         return [_dump(r) for r in (await s.execute(q)).scalars()]
+
+
+async def last_applied(org_id: str, session_id: str | None) -> dict | None:
+    """U7: the most recent ACTIVE resource applied in THIS conversation — the undo target.
+    Session-scoped on purpose: "undo that" means what we just did here, never another
+    session's work. None when this session applied nothing (the caller refuses honestly)."""
+    if not session_id:
+        return None
+    try:
+        sid = uuid.UUID(str(session_id))
+    except ValueError:
+        return None
+    async with session_scope() as s:
+        row = (await s.execute(
+            select(Resource).where(Resource.org_id == uuid.UUID(org_id),
+                                   Resource.session_id == sid,
+                                   Resource.status == "active")
+            .order_by(Resource.created_at.desc()).limit(1))).scalar_one_or_none()
+        return _dump(row) if row else None
 
 
 async def resolve(org_id: str, ref: str | None) -> tuple[list[dict], str]:

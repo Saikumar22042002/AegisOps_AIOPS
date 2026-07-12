@@ -55,9 +55,22 @@ _READ_VERB_START = re.compile(
 # Explicit destructive verbs — REQUIRED (anywhere in the message) for a destroy action.
 _DESTRUCTIVE = re.compile(
     r"\b(?:destroy|delete|remove|terminate|tear\s*down|teardown|deprovision|decommission|"
-    r"wipe|drop|kill)\b",
+    r"wipe|drop|kill|undo|revert)\b",
     re.IGNORECASE,
 )
+
+# U7: "undo that" / "revert the last apply" — a gated destroy of the LAST resource applied in
+# this conversation. Requires an anchor word so ordinary sentences never trigger it.
+_UNDO = re.compile(
+    r"\b(?:undo|revert)\b.{0,40}\b(?:that|it|this|last|previous|apply|applied|change|deployment)\b"
+    r"|^\s*(?:undo|revert)\s*[.!]?\s*$",
+    re.IGNORECASE,
+)
+
+
+def is_undo(message: str) -> bool:
+    """U7: does this message ask to undo/revert the last applied change?"""
+    return bool(_UNDO.search(message or ""))
 
 # Imperative action verbs that START a new actionable request mid-collection.
 _ACTION_VERB_START = re.compile(

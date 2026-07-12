@@ -320,7 +320,10 @@ export const useUI = create<UIState>((set, get) => ({
                           activeArtifact: "terraform", selectedMessageId: aiId, artifactNonce: s.artifactNonce + 1 }));
             break;
           case "error":
-            patchMsg(set, aiId, { error: String(ev.data.message), streaming: false });
+            // U7: `retry` carries a one-click retry-with-fix ({label, retry_message}) — the
+            // button re-sends the corrected message as a genuine new turn.
+            patchMsg(set, aiId, { error: String(ev.data.message), streaming: false,
+                                  retry: (ev.data as any).retry ?? undefined });
             set({ runError: String(ev.data.message) });
             break;
           case "done": {

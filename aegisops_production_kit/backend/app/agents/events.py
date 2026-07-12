@@ -201,8 +201,14 @@ class Emitter:
     async def interrupt(self, data: dict) -> None:
         await self.ch.emit("interrupt", data)
 
-    async def error(self, message: str, code: str = "error", retriable: bool = False) -> None:
-        await self.ch.emit("error", {"message": message, "code": code, "retriable": retriable})
+    async def error(self, message: str, code: str = "error", retriable: bool = False,
+                    retry: dict | None = None) -> None:
+        # U7: `retry` carries a one-click retry-with-fix suggestion ({label, retry_message, ...})
+        # the client renders as a button; the retry is a genuine new user turn.
+        payload = {"message": message, "code": code, "retriable": retriable}
+        if retry:
+            payload["retry"] = retry
+        await self.ch.emit("error", payload)
 
     async def done(self, data: dict) -> None:
         await self.ch.emit("done", data)

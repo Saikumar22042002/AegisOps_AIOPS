@@ -123,6 +123,39 @@ def classify_provider_error(text: str) -> ProviderFailure | None:
     return None
 
 
+# U7: one-click retry-with-fix. Curated per-cloud alternates for the bad-region case — the
+# suggestion is a REAL, currently-served region, and the retry message is the user's own
+# message with only the region swapped (a genuine new turn through the whole gated flow).
+_ALT_REGIONS = {
+    "aws": ["us-east-1", "us-west-2", "eu-west-1", "ap-south-1"],
+    "gcp": ["us-central1", "europe-west1", "asia-south1"],
+    "azure": ["eastus", "westeurope", "centralindia"],
+}
+
+
+def suggest_retry(f: ProviderFailure | None, message: str, *, cloud: str | None = None,
+                  current_region: str | None = None) -> dict | None:
+    """A one-click retry suggestion for a classified failure, or None when no honest fix
+    exists. The retry is always a NEW user turn (plan -> policy -> approval all re-run)."""
+    if f is None or not message:
+        return None
+    if f.kind == "bad_region":
+        alts = _ALT_REGIONS.get((cloud or "aws").lower(), _ALT_REGIONS["aws"])
+        to = next((r for r in alts if r != (current_region or "")), alts[0])
+        if re.search(r"\b(region|location)\s*[=:]\s*\S+", message, re.IGNORECASE):
+            retry_message = re.sub(r"\b(region|location)(\s*[=:]\s*)\S+",
+                                   lambda m: f"{m.group(1)}{m.group(2)}{to}",
+                                   message, flags=re.IGNORECASE)
+        else:
+            retry_message = f"{message.rstrip('. ')}, region={to}"
+        return {"kind": "bad_region", "field": "region", "from": current_region, "to": to,
+                "label": f"Retry with region {to}", "retry_message": retry_message}
+    if f.kind == "credentials_expired":
+        return {"kind": "credentials_expired", "label": "Retry (after refreshing credentials)",
+                "retry_message": message}
+    return None
+
+
 def failure_message(f: ProviderFailure | None, raw_error: str, mode: str = "apply") -> str:
     """Compose the plain-English conversation message for a failed plan/apply/destroy."""
     if f is None:

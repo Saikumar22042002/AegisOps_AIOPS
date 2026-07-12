@@ -99,6 +99,8 @@ export interface ChatMessage {
   interrupt?: Record<string, unknown> | null;
   consoleLines?: { stream: string; line: string }[];
   error?: string | null;
+  // U7: one-click retry-with-fix carried on the error event ({label, retry_message, ...}).
+  retry?: { label: string; retry_message: string; kind?: string } | null;
   done?: boolean;
   // Names of sensitive Terraform outputs revealable ONCE via POST /runs/{id}/credentials (N-02).
   sensitiveOutputs?: string[];

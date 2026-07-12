@@ -1402,5 +1402,21 @@ this section mirrors phase-level status only.
         `location`). API: `GET/PUT/DELETE /memory` (org-wide writes require an approver);
         frontend: "Standing memory" panel on Administration (list / Remember / forget).
         Evidence: `test_user_memory.py` (6) + all 14 memory regressions green.
+  - [x] **U7 retry-with-fix + undo last apply** (2026-07-12): `provider_errors.suggest_retry`
+        turns a classified failure into a one-click retry — the user's OWN message with only
+        the fix applied (bad region → swapped in place, per-cloud alternates, never the failed
+        region again; credentials-expired → same-message retry; anything without an honest fix
+        → NO suggestion). The suggestion rides the `error` SSE event (`Emitter.error(retry=)`)
+        from both cloudops failure paths; the frontend renders a "Retry with fix" button that
+        re-sends it as a genuine new turn (full plan → policy → approval re-run). "Undo that"
+        is a deterministic router fast-path (pre-LLM): cloudops destroy of `__last_applied__`,
+        resolved by `inventory.last_applied` — SESSION-scoped, newest-first, destroyed rows
+        skipped, honest refusal when this conversation applied nothing — then the normal gated
+        destroy (approval card + D3 impact check + destroy-only plan guard); undo/revert now
+        count as explicitly destructive. Defect caught en route: a literal backspace (0x08)
+        had been written into the region-swap regex (invisible in code review) — found by the
+        smoke test, fixed byte-level. Evidence: `test_retry_undo.py` (12). Live one-click
+        retry + undo through the UI ride the existing DLV cloud items.
+
 
 _Legend: [x] done · [~] partial/scaffolded · [ ] pending._

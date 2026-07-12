@@ -86,6 +86,16 @@ async def router(state: AgentState, config) -> dict:
                         "action": pending.get("action", "create"),
                         "snow_id": pending.get("snow_id"), "context_id": pending.get("context_id")}
 
+    # U7: "undo that" is deterministic — a gated destroy of the LAST resource this
+    # conversation applied. No LLM involved; the destroy path still runs the full approval
+    # gate, impact check, and destroy-only plan guard.
+    if intent_guard.is_undo(message):
+        await emitter.step(1, "Undo → gated destroy of the last apply")
+        return {"domain": "cloudops", "intent": "undo_last_apply", "intent_confidence": 1.0,
+                "routing_reason": "Deterministic: undo/revert → destroy the last applied "
+                                  "resource in this conversation (approval-gated).",
+                "action": "destroy", "target": "__last_applied__"}
+
     gemini = get_gemini(settings)
     if not gemini.enabled:
         log.warning("router.llm_unavailable")
