@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     # redis: Redis Streams (`run:<id>:events`) — worker-agnostic streaming + reconnect-anywhere,
     # required for horizontal scale. The Emitter/SSE frame contract is identical in both modes.
     aegisops_event_bus: Literal["memory", "redis"] = "memory"
+    # B3: the periodic stranded-run reconciler background loop. `on` in real deployments; `off`
+    # under pytest (set in the api-test service) so no background loop auto-starts in a
+    # TestClient lifespan — tests that exercise the reconciler drive its `sweep()` explicitly.
+    aegisops_reconciler: Literal["on", "off"] = "on"
     # A5 4-eyes: when on, the initiator of a Production-environment run cannot approve it.
     aegisops_four_eyes_for_production: bool = True
     # S1 credential reveal: the step-up re-auth proof (a fresh Keycloak authentication) must

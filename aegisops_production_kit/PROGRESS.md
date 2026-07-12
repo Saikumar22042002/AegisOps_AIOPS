@@ -816,6 +816,27 @@ two known realm issuer URLs (internal + browser-facing), nothing else.
         `is_live(run_id)` answers reconnect/liveness; an expired heartbeat marks a crashed worker's
         run for the B3 reconciler; `main.py` lifespan calls `drain()` on shutdown to cancel
         in-flight runs and persist them `failed`. Evidence: `test_supervisor.py` (2).
+  - [x] **B3 stranded-run reconciler** (2026-07-12): periodic sweep (started in the lifespan) over
+        `runs.status IN (running, applying)`; a run that is neither locally-live nor
+        heartbeat-alive is stranded → resumed from the LangGraph checkpoint if `aget_state().next`
+        is set (re-driven via the supervisor, so A1 idempotency guards it), else marked failed
+        honestly ("recovered after an interruption — nothing changed beyond the Logs").
+        `awaiting_approval` runs are left for the human. Evidence: `test_reconciler.py` (5), incl.
+        the kill-mid-apply case (recovered to terminal once, in-flight claim untouched — no re-apply).
+    - **Hang investigation + defect fix (before committing B3).** The first "full suite after B3"
+      run hung (0 bytes of pytest output, container up 29 min). Root cause from the evidence:
+      **0 bytes = pytest never printed a single dot**, so the stall was BEFORE pytest — the
+      `pip install` step in the api-test command (a PyPI/network stall), not test code; an
+      identical-code re-run progressed to completion. SEPARATELY, a genuine defect was found and
+      fixed regardless of the hang: **B3's reconciler auto-started a periodic sweep loop in EVERY
+      `TestClient` lifespan** (the `client` fixture), and a pre-gate suite run (reconciler on)
+      stalled near 100% — consistent with leaked/accumulated sweep loops pressuring teardown / the
+      DB pool. Fix: gate the reconciler behind `AEGISOPS_RECONCILER=on|off` (set `off` in the
+      api-test service, so no background loop starts under pytest — tests drive `sweep()`
+      explicitly), and make `Reconciler.start()` idempotent (never accumulate loops). Verification:
+      the full suite now completes cleanly **twice in a row** with the gate — run #1 **450 passed /
+      2 skipped / PYTEST_EXIT=0**, run #2 **450 passed / 2 skipped / PYTEST_EXIT=0** (direct exit
+      code, full output, no tail-masking).
   - [x] **S0 multi-tenancy** (2026-07-11): principal→(org_id,user_id) via Keycloak org claim
         (group-membership mapper; realm defines northwind-financial + acme-industrial groups)
         with the `users` mirror (by keycloak_sub, username/email fallback for seeded rows)

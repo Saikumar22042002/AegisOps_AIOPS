@@ -60,14 +60,26 @@ async def lifespan(app: FastAPI):
     # O2: verify the Langfuse keys belong to the expected project (loud warning otherwise).
     from .integrations.langfuse_client import assert_project
     await assert_project(settings)
+    # B3: periodic stranded-run reconciler (recovers runs abandoned by a crashed worker).
+    # Gated so no background loop auto-starts in a test lifespan (AEGISOPS_RECONCILER=off).
+    if settings.aegisops_reconciler == "on":
+        from .agents.reconciler import get_reconciler
+        try:
+            await get_reconciler().start()
+        except Exception as exc:  # noqa: BLE001
+            log.error("startup.reconciler_failed", error=str(exc))
+    else:
+        log.info("reconciler.disabled")
     log.info("app.startup", version=__version__, env=settings.app_env)
     try:
         yield
     finally:
-        # Graceful shutdown. B2: drain in-flight runs FIRST (cancel + persist failed) while the
-        # datastores are still open, then close everything.
+        # Graceful shutdown. B3: stop the reconciler, then B2: drain in-flight runs (cancel +
+        # persist failed) while the datastores are still open, then close everything.
+        from .agents.reconciler import get_reconciler
         from .agents.supervisor import get_supervisor
         try:
+            await get_reconciler().stop()
             await get_supervisor().drain()
         except Exception as exc:  # noqa: BLE001
             log.error("shutdown.drain_failed", error=str(exc))

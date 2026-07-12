@@ -41,6 +41,9 @@ services:
       PROMETHEUS_URL: http://prometheus:9090
       # Integration tests use these running datastores directly (no testcontainers/DinD).
       AEGISOPS_TEST_LIVE_DATASTORES: "1"
+      # B3: no periodic reconciler loop auto-starts in the test TestClient lifespan — tests that
+      # exercise the reconciler call sweep() explicitly on their own Reconciler instance.
+      AEGISOPS_RECONCILER: "off"
     volumes:
       - "./backend:/app"
       - "./infra/secrets:/secrets:ro"
