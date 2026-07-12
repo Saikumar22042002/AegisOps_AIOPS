@@ -141,6 +141,7 @@ One ranked list of every serious problem from `ANALYSIS.md` (P-numbers are stabl
 
 | ID | Item | Files touched | Acceptance test | UI | Status |
 |----|------|--------------|-----------------|----|--------|
+| E2E | **(owner-ordered, first)** Playwright e2e for §5 flows 1–3 + re-run existing browser suite | `frontend/e2e/tenancy_roles_reveal.spec.ts` (new) | flows 1 (tenancy visible), 2 (read-only composer), 3 (reveal step-up modal) | ①②③ | **done** — `tenancy_roles_reveal.spec.ts` (6): org-A sees Northwind; org-B sees Acme only, never Northwind; read-only shows the notice + no composer; initiator sees composer; reveal → step-up modal → wrong password stays with re-auth message → correct shows the value once. **Full browser suite green: 22 passed / 2 skipped (by-design mobile) / exit 0**; 1 live-LLM streamed-run test is flaky-but-passes here (invalid Gemini key → slow backend retries; clean with a real key). Frontend served by host `next dev` (live code; the compose image was stale) |
 | B1 | Redis Streams event bus; `Emitter` unchanged; `AEGISOPS_EVENT_BUS=memory\|redis` | `agents/events.py`, `api/chat.py:_sse` | SSE contract on Redis; multi-worker publish/consume; TTL on terminal | ⑫ | pending |
 | B2 | RunSupervisor: tracked tasks + heartbeat + graceful drain | new `agents/supervisor.py`, `main.py` | heartbeat expiry observable; honest shutdown persistence | — | pending |
 | B3 | Stranded-run reconciler | new `agents/reconciler.py`, `main.py` | kill-mid-apply → terminal exactly once | — | pending |

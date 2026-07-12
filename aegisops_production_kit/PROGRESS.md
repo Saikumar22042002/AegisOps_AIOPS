@@ -783,7 +783,25 @@ two known realm issuer URLs (internal + browser-facing), nothing else.
     Phase-1 flows** (two-org login isolation, read-only composer, reveal step-up modal) is not yet
     written — the existing 9 e2e cover the core streamed-run flow; the new flows are proven at the
     API/integration/unit level and via the live walkthrough, but the §5 Playwright coverage for
-    flows 1–3 remains to add.
+    flows 1–3 remains to add. **→ CLOSED as the first Phase-2 item (see below).**
+
+## R. Phase 2 — Production harness + Context Engine (started 2026-07-12)
+
+- [~] **Phase 2 in progress.** Checklist order per FIX.md §8; one item at a time, acceptance test,
+      suite green, commit. Exit gate: worker-kill mid-apply recovers exactly once; multi-worker
+      streaming; **turn-20-of-100 recall in the UI**; real failed policy check; real Traces tab;
+      honest model menu; **warm-turn latency ≤15s measured before/after (LAT)**.
+  - [x] **E2E (owner-ordered, before B1)** — Playwright e2e for §5 flows 1–3 + full browser
+        suite re-run (2026-07-12): new `frontend/e2e/tenancy_roles_reveal.spec.ts` (6 tests):
+        flow 1 org-A sees Northwind / org-B sees Acme only (never Northwind); flow 2 read-only
+        shows the notice + no composer, initiator sees the composer; flow 3 Reveal → step-up
+        modal → wrong password stays with a re-auth message → correct password shows the value
+        once (SSE + credential responses mocked so the real modal runs without cloud creds; the
+        backend reveal contract is covered by `test_tenancy.py::TestCredentialRevealS1`).
+        **Full browser suite: 22 passed / 2 skipped (by-design mobile) / exit 0.** One live-LLM
+        streamed-run test is flaky-but-passes in this env (invalid Gemini key → slow backend
+        retries occasionally exceed the 30s UI wait; clean with a real key). Frontend served by
+        host `next dev` for live code (the compose frontend image was 9h stale).
   - [x] **S0 multi-tenancy** (2026-07-11): principal→(org_id,user_id) via Keycloak org claim
         (group-membership mapper; realm defines northwind-financial + acme-industrial groups)
         with the `users` mirror (by keycloak_sub, username/email fallback for seeded rows)
