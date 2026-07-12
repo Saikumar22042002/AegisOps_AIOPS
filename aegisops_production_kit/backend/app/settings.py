@@ -78,6 +78,10 @@ class Settings(BaseSettings):
     langfuse_host: str = "http://localhost:3001"
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
+    # O2: the project the keys MUST belong to. On startup we verify the configured keys resolve
+    # to this project and log a loud warning otherwise — so the "0 traces / wrong project"
+    # regression (keys belonging to a different project in the same instance) can't recur silently.
+    langfuse_expected_project: str = "aegisops"
 
     # ── OpenTelemetry / Prometheus / Grafana ──
     otel_exporter_otlp_endpoint: str = "http://localhost:4317"

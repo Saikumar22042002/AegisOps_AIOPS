@@ -57,6 +57,9 @@ async def lifespan(app: FastAPI):
         init_graph(checkpointer)
     except Exception as exc:  # noqa: BLE001
         log.error("startup.graph_init_failed", error=str(exc))
+    # O2: verify the Langfuse keys belong to the expected project (loud warning otherwise).
+    from .integrations.langfuse_client import assert_project
+    await assert_project(settings)
     log.info("app.startup", version=__version__, env=settings.app_env)
     try:
         yield
