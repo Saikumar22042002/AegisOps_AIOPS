@@ -755,9 +755,35 @@ two known realm issuer URLs (internal + browser-facing), nothing else.
       `docs/fix/04…`; `docs/fix/05…` reconciled to the authoritative architecture;
       `docs/fix/07_roadmap.md` re-emitted as Phases 1–3 with per-item acceptance tests;
       execution checklist appended to `FIX.md §8`. **Awaiting owner review before Stage B.**
-- [~] **Phase 1 — Trustworthy** (S0 S1 S2 S3 S4 S5 · A1+B7 A2 A4 A5 · B5 B6 · U4 · honesty
-      labels · O2 C1 D1 D4). Exit gate: two orgs isolated in API+UI; no self-approve in prod;
-      exactly one apply under concurrent approve; reveal gated+audited; no dishonest surface.
+- [x] **Phase 1 — Trustworthy** — ALL 18 items implemented, tested, committed one-per-commit
+      (S0 S1 S2 S3 S4 S5 · A1+B7 A2 A4 A5 · B5 B6 · U4 · honesty labels · O2 C1 D1 D4).
+      **Awaiting owner sign-off at the exit gate before Phase 2.**
+  - **Exit-gate evidence (2026-07-12):**
+    - Full regression green: **backend pytest 438 passed / 2 skipped**, **frontend vitest 28
+      passed**, **tsc clean**. (+63 backend tests over the pre-Phase-1 375.)
+    - **Two orgs isolated in API + UI** — live walkthrough vs the running API + real Keycloak
+      (realm recreated to import the org groups/mapper + org-B users): maya (northwind-financial)
+      and bob.chen (acme-industrial) resolve to distinct org_ids from the Keycloak `org` claim;
+      bob cannot see/rename/read/continue org-A's session (list excludes it; PATCH/GET/`/chat`
+      → 404); `/overview` is per-org. `test_tenancy.py` (11) covers this at the API level.
+    - **Read-only cannot initiate** — audit.viewer `POST /chat` → 403 live; composer shows a
+      read-only notice. `test_rbac_endpoints.py::test_chat_requires_initiator`.
+    - **Initiator cannot self-approve a prod run** — `test_tenancy.py::test_four_eyes_blocks_prod_self_approval` (403).
+    - **Concurrent double-approve → exactly one apply** — `test_idempotency.py` (node aborts,
+      apply() proven unreachable) + `test_tenancy.py::test_double_approval_endpoint_guard` (409).
+    - **Reveal gated + audited** — no fresh step-up proof → 401; cross-org/non-owner → 404;
+      value once then 410; **every attempt writes an audit row (value never logged)** — verified
+      live in `audit_log`. `test_tenancy.py::TestCredentialRevealS1`.
+    - **No dishonest surface** — policy "not evaluated", SRE "proposed, not executed", Traces
+      deep-link (no fake spans). `test_honesty_labels.py`, `test_templates.py`.
+  - **Two honest caveats for the owner (see below):** (1) the branch carries a large pre-existing
+    CloudOps-V1 WIP baseline that these commits build on — some depend on untracked files
+    (`plan_guard.py`, `memory.py`, `cards.py`, migration `0003`); a baseline commit of that WIP is
+    needed for the Phase-1 commits to stand alone. (2) Browser **Playwright e2e for the NEW
+    Phase-1 flows** (two-org login isolation, read-only composer, reveal step-up modal) is not yet
+    written — the existing 9 e2e cover the core streamed-run flow; the new flows are proven at the
+    API/integration/unit level and via the live walkthrough, but the §5 Playwright coverage for
+    flows 1–3 remains to add.
   - [x] **S0 multi-tenancy** (2026-07-11): principal→(org_id,user_id) via Keycloak org claim
         (group-membership mapper; realm defines northwind-financial + acme-industrial groups)
         with the `users` mirror (by keycloak_sub, username/email fallback for seeded rows)
