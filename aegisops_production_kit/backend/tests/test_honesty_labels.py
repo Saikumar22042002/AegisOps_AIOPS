@@ -91,8 +91,10 @@ class TestTracesHonesty:
         viewer = AuthUser(sub="t", username="viewer", org_id=org_id)
         try:
             data = await traces(rid, user=viewer)
-            assert data["spans"] == [], "no fabricated spans — the real tree is O1 (Phase 2)"
-            assert data["coming_soon"] is True
+            # O1: a run with no recorded steps still never fabricates spans — it falls back to
+            # the honest note + Langfuse deep-link (and coming_soon is now retired).
+            assert data["spans"] == [], "no steps recorded → no fabricated spans"
+            assert data["coming_soon"] is False
             assert data["trace_id"] == rid           # trace_id == run_id
             assert "langfuse" in (data.get("message") or "").lower()
             # a deep-link is offered when a Langfuse host is configured

@@ -923,6 +923,15 @@ two known realm issuer URLs (internal + browser-facing), nothing else.
         The frontend menu, which advertised Claude/GPT-4o/Azure/Llama we can't run, is trimmed
         to the 3 real Gemini ids and sends the raw id; store default is now a served id.
         Evidence: `test_llm_provider.py` (9); vitest 28; tsc clean.
+  - [x] **O1 real Traces tab** (2026-07-12): the Traces artifact was a Phase-1 honesty stub
+        (no spans, "coming soon", Langfuse deep-link only). It's now a real tree built from the
+        run's `run_steps`: a run-root span over ordered child spans, each showing the step's
+        actual elapsed time (`_fmt_dur`) — no fabricated `—`. In-flight steps (and a running
+        run's root) show `···` rather than a made-up number; failed steps are red and carry the
+        truncated error; tool/human/retry are annotated. The full nested trace (tokens/cost)
+        still deep-links to Langfuse, now shown alongside the tree; a run with no recorded steps
+        falls back to the honest note + link. `coming_soon` retired. Evidence:
+        `test_traces_tree.py` (4, pure builder — no DB) + updated traces honesty test; vitest 28.
   - [x] **S0 multi-tenancy** (2026-07-11): principal→(org_id,user_id) via Keycloak org claim
         (group-membership mapper; realm defines northwind-financial + acme-industrial groups)
         with the `users` mirror (by keycloak_sub, username/email fallback for seeded rows)

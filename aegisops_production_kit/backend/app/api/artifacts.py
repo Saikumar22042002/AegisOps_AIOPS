@@ -193,24 +193,74 @@ async def metrics(run_id: str, user: User = Depends(get_current_user), settings:
     return {"cards": cards, "source": "prometheus"}
 
 
+_SPAN_DOT = {"done": "var(--green)", "running": "var(--accent-2)", "failed": "var(--red)",
+             "cancelled": "var(--amber)", "pending": "var(--text-4)"}
+
+
+def _trace_spans(run, steps: list) -> tuple[list[dict], str | None]:
+    """The in-app span tree, derived from the run's REAL run_steps (O1).
+
+    A two-level tree — the run root, then each recorded step as a child — because run_steps are a
+    flat, ordered log (LangGraph nodes), not a nested trace. Every duration is the step's real
+    elapsed time; a step with no end time yet (still running) shows its live status, never a
+    fabricated number. The full nested trace with tokens/cost lives in Langfuse (deep-linked)."""
+    starts = [st.started_at for st in steps if st.started_at]
+    ends = [st.ended_at for st in steps if st.ended_at]
+    total_sec = (max(ends) - min(starts)).total_seconds() if starts and ends else None
+    total = _fmt_dur(total_sec) if total_sec is not None else None
+
+    root_status = "failed" if run.status == "failed" else (
+        "running" if run.status in {"running", "applying", "awaiting_approval"} else "done")
+    # A still-running run has no honest total yet — show in-flight, not the partial elapsed.
+    root_dur = "···" if root_status == "running" else (total or "—")
+    spans: list[dict] = [{
+        "name": f"{run.domain} run" if run.domain else "run",
+        "dur": root_dur,
+        "dot": _SPAN_DOT.get(root_status, "var(--text-4)"),
+        "indent": 0, "status": root_status, "depth": 0,
+    }]
+    for st in steps:
+        label = st.name
+        if st.tool:
+            label = f"{label} · {st.tool}"
+        if st.human_vs_auto == "human":
+            label = f"{label} (human)"
+        if st.retries:
+            label = f"{label} · retry {st.retries}"
+        if st.started_at and st.ended_at:
+            dur = _fmt_dur((st.ended_at - st.started_at).total_seconds()) or "—"
+        elif st.started_at and st.status in {"running", "pending"}:
+            dur = "···"  # in flight — honestly unfinished, not a made-up duration
+        else:
+            dur = "—"
+        spans.append({
+            "name": label, "dur": dur,
+            "dot": _SPAN_DOT.get(st.status, "var(--text-4)"),
+            "indent": 14, "status": st.status, "depth": 1,
+            "tool": st.tool, "error": (st.error or None) and str(st.error)[:200],
+        })
+    return spans, total
+
+
 @router.get("/runs/{run_id}/traces")
 async def traces(run_id: str, user: User = Depends(get_current_user)) -> dict:
-    """P9 honesty (Phase 1): the real Langfuse span tree exists (trace_id == run_id), but the
-    in-app trace view is not built yet — it lands in Phase 2 (O1, derived from run_steps). Rather
-    than render fake spans with `—` durations, return NO spans, an honest note, and a deep-link to
-    open the real trace in Langfuse. The real in-app tree replaces this in O1."""
-    run, _msg, _, _ = await _load(run_id, user)
+    """O1: the real in-app trace tree, built from run_steps (real durations, no fabricated
+    spans), plus a deep-link to the full nested trace (tokens/cost) in Langfuse. When a run has
+    no recorded steps, say so plainly and fall back to the Langfuse link — never invent spans."""
+    run, _msg, _, steps = await _load(run_id, user)
     settings = get_settings()
     trace_id = run.trace_id or run_id
     host = (settings.langfuse_host or "").rstrip("/")
+    # Only the run-root remains when there are no timed steps → treat as "no spans" for the UI.
+    spans, total = _trace_spans(run, steps) if steps else ([], None)
     return {
-        "spans": [],  # no fabricated spans — the real tree is O1 (Phase 2)
+        "spans": spans,
+        "total": total,
         "trace_id": trace_id,
         "context_id": run.context_id or run_id,
-        "coming_soon": True,
-        "message": "In-app trace view is coming in the Traces upgrade. The full span tree "
-                   "(durations, tokens, cost) already exists in Langfuse — the trace id is the "
-                   "run id. Open it in Langfuse below.",
+        "coming_soon": False,
+        "message": ("No steps were recorded for this run. The full trace (durations, tokens, "
+                    "cost) is in Langfuse — open it below." if not spans else None),
         "deep_link": f"{host}/project/aegisops/traces/{trace_id}" if host else None,
         "langfuse_host": host or None,
     }

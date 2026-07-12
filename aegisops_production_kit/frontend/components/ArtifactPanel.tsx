@@ -282,39 +282,45 @@ function Metrics({ data }: { data: any }) {
 
 function Traces({ data }: { data: any }) {
   const spans = data.spans ?? [];
+  const openInLangfuse = data.deep_link ? (
+    <a href={data.deep_link} target="_blank" rel="noreferrer"
+       style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 13px", borderRadius: 8, border: "1px solid var(--border-3)", background: "var(--surface)", color: "var(--text)", fontSize: 12.5, fontWeight: 500, textDecoration: "none" }}>
+      Open in Langfuse
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M7 17 17 7M9 7h8v8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+    </a>
+  ) : null;
   return (
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
         <span style={eyebrow}>Langfuse trace</span>
+        {data.total ? <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: "var(--text-4)" }}>{data.total}</span> : null}
         <span style={{ marginLeft: "auto", fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: "var(--text-4)" }}>{String(data.trace_id ?? "").slice(0, 12)}</span>
       </div>
-      {/* P9 honesty: no fabricated spans. When the in-app tree isn't built yet, say so plainly
-          and deep-link to the real trace in Langfuse (the full O1 tree replaces this). */}
+      {/* O1: the in-app tree is derived from the run's real run_steps (real durations). The full
+          nested trace with tokens/cost lives in Langfuse — always deep-linked. When a run has no
+          recorded steps we say so plainly rather than invent spans (P9 honesty preserved). */}
       {spans.length === 0 ? (
         <div style={{ border: "1px solid var(--border-2)", borderRadius: 12, background: "var(--surface-2)", padding: "16px 18px" }}>
           <div style={{ fontSize: 13, color: "var(--text-3)", lineHeight: 1.55 }}>
-            {data.message ?? "In-app trace view is coming. The full span tree is available in Langfuse."}
+            {data.message ?? "No steps were recorded for this run. The full trace is available in Langfuse."}
           </div>
-          {data.deep_link ? (
-            <a href={data.deep_link} target="_blank" rel="noreferrer"
-               style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 12, padding: "7px 13px", borderRadius: 8, border: "1px solid var(--border-3)", background: "var(--surface)", color: "var(--text)", fontSize: 12.5, fontWeight: 500, textDecoration: "none" }}>
-              Open in Langfuse
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M7 17 17 7M9 7h8v8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
-            </a>
-          ) : (
+          {openInLangfuse ? <div style={{ marginTop: 12 }}>{openInLangfuse}</div> : (
             <div style={{ fontSize: 11.5, color: "var(--text-4)", marginTop: 10 }}>
               Set <code>LANGFUSE_HOST</code> to enable the deep-link. Trace id: <span style={{ fontFamily: "'IBM Plex Mono',monospace" }}>{data.trace_id}</span>
             </div>
           )}
         </div>
       ) : (
-        spans.map((sp: any, i: number) => (
-          <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: "1px solid var(--border)" }}>
-            <span style={{ width: 7, height: 7, borderRadius: 99, background: sp.dot, marginLeft: sp.indent }} />
-            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, color: "var(--text-2)", flex: 1 }}>{sp.name}</span>
-            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: "var(--text-4)" }}>{sp.dur}</span>
-          </div>
-        ))
+        <>
+          {spans.map((sp: any, i: number) => (
+            <div key={i} title={sp.error ?? undefined} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: "1px solid var(--border)" }}>
+              <span style={{ width: 7, height: 7, borderRadius: 99, background: sp.dot, marginLeft: sp.indent }} />
+              <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, color: sp.status === "failed" ? "var(--red)" : "var(--text-2)", flex: 1 }}>{sp.name}</span>
+              <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: "var(--text-4)" }}>{sp.dur}</span>
+            </div>
+          ))}
+          {openInLangfuse ? <div style={{ marginTop: 14 }}>{openInLangfuse}</div> : null}
+        </>
       )}
     </>
   );
