@@ -336,7 +336,7 @@ async def cloudops_plan(state: AgentState, config) -> dict:
     mode = "apply"
     await emitter.step(4, f"Ran terraform plan · state {tf_state_ws}")
     await timing.start_step(run_id, "planner", tool="terraform")
-    runner = TerraformRunner(workspace, settings, state_workspace=tf_state_ws)
+    runner = TerraformRunner(workspace, settings, state_workspace=tf_state_ws, run_id=run_id)
 
     async def on_line(stream: str, line: str) -> None:
         await emitter.console(stream, line)
@@ -734,7 +734,7 @@ async def _destroy_resource(state: AgentState, config, target: str | None) -> di
     await timing.end_step(run_id, "cloudops_agent", status="done")
     await timing.start_step(run_id, "planner", tool="terraform")
     runner = TerraformRunner(res["workspace"] or template.workspace, settings,
-                             state_workspace=res.get("state_workspace"))
+                             state_workspace=res.get("state_workspace"), run_id=run_id)
     base = dict(res.get("inputs") or {})
     try:
         tf_vars = template.schema(**base).model_dump()
@@ -847,7 +847,7 @@ async def _modify_resource(state: AgentState, config, target: str | None) -> dic
     await timing.start_step(run_id, "planner", tool="terraform")
     # Modify runs against the resource's OWN state workspace (Phase 8 / N-08).
     runner = TerraformRunner(res["workspace"] or template.workspace, settings,
-                             state_workspace=res.get("state_workspace"))
+                             state_workspace=res.get("state_workspace"), run_id=run_id)
 
     async def on_line(stream: str, line: str) -> None:
         await emitter.console(stream, line)
@@ -927,9 +927,10 @@ async def cloudops_execute(state: AgentState, config) -> dict:
                             code="template_error")
         return {"outcome": {"status": f"{mode}_failed", "error": "template not found for resolved cloud/resource"}}
     workspace = template.workspace
-    # Execute in the SAME per-resource state workspace the plan was made in (Phase 8 / N-08);
-    # None = legacy resource in the module's default workspace.
-    runner = TerraformRunner(workspace, settings, state_workspace=state.get("state_workspace"))
+    # Execute in the SAME per-resource state workspace the plan was made in (Phase 8 / N-08),
+    # and with the SAME run_id so the saved plan-file path matches the one plan wrote (A3).
+    runner = TerraformRunner(workspace, settings, state_workspace=state.get("state_workspace"),
+                             run_id=state.get("run_id"))
 
     idem_key = idempotency.make_key("tf-exec", state["run_id"], mode)
     if not await idempotency.claim(idem_key):

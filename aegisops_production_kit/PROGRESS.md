@@ -845,6 +845,15 @@ two known realm issuer URLs (internal + browser-facing), nothing else.
         the success card's host/connection derive from generic outputs (public_ip/login_user) that
         Azure/GCP VMs also emit. Evidence: `test_verify_cross_cloud.py` (5, incl. Azure slow-SDK →
         bounded warn).
+  - [x] **A3 unique plan-file per run + remote-backend plumbing** (2026-07-12): every runner now
+        takes a `run_id`, so the saved plan-file is `aegisops-<workspace>-<run_id>.tfplan` — two
+        operations (even two creates of one resource, or two concurrent runs in a module dir) never
+        share/overwrite a plan file; plan and apply reuse the same path via the same run_id. `init`
+        supplies an S3+DynamoDB `-backend-config` (state key namespaced per module+workspace,
+        DynamoDB lock) when `AEGISOPS_TF_BACKEND=remote`; local stays the dev default. Evidence:
+        `test_terraform_backend.py` (6). **PENDING (infra):** remote apply is untestable in this
+        env — no S3 bucket / DynamoDB table, and the module backend blocks are `local` (switching
+        to `s3` is the documented migration). Plumbing + flag are in; remote apply awaits a bucket.
   - [x] **S0 multi-tenancy** (2026-07-11): principal→(org_id,user_id) via Keycloak org claim
         (group-membership mapper; realm defines northwind-financial + acme-industrial groups)
         with the `users` mirror (by keycloak_sub, username/email fallback for seeded rows)

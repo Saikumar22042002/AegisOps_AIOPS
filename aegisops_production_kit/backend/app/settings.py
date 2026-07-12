@@ -114,6 +114,11 @@ class Settings(BaseSettings):
     tf_state_bucket: str = ""
     tf_state_dynamodb_table: str = ""
     tf_state_region: str = "us-east-1"
+    tf_state_key_prefix: str = "aegisops"
+    # A3: TF backend. local (dev default) keeps per-module local state; remote supplies an
+    # S3+DynamoDB backend via `-backend-config` at init (requires the module backend block to be
+    # `s3` — a documented migration). Non-dev deployments set this to `remote`.
+    aegisops_tf_backend: Literal["local", "remote"] = "local"
 
     # ── Azure ──
     azure_subscription_id: str = ""
