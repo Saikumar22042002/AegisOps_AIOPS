@@ -9,13 +9,15 @@ and shares the repo link in chat.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import structlog
 
 from ..graph_db.context_graph import ContextGraph
 from ..integrations.gemini import get_gemini
 from ..security.confidentiality import classify
 from ..settings import get_settings
-from ..tools.github import get_github
+from ..tools.github import GitHubError, get_github
 from ..tools.kubernetes import get_kubernetes
 from . import llm
 from .runtime import emitter_of
@@ -166,8 +168,35 @@ async def devops_execute(state: AgentState, config) -> dict:
         await stage("ENSURE_WORKING_COPY", working_copy())
         await stage("ENSURE_CHANGES_PUSHED", gh.upsert_file(
             repo, "AEGISOPS.md", f"Managed by AegisOps · env={env}", "docs: AegisOps marker", branch))
-        await stage("ENSURE_CI_RUN", gh.dispatch_workflow(repo, "ci.yml", ref=branch))
-        ci = await stage("ENSURE_IMAGE_EXISTS", gh.latest_run_status(repo, "ci.yml"))
+
+        # P16: dispatch the workflow, IDENTIFY the run it created (dispatch returns no id), then
+        # POLL that run to completion — the CI result is real, not the latest-run guess.
+        since = datetime.now(timezone.utc)
+
+        async def run_ci():
+            await gh.dispatch_workflow(repo, "ci.yml", ref=branch)
+            dispatched = await gh.find_dispatched_run(repo, "ci.yml", branch, since)
+            if dispatched:
+                await emitter.console("stdout",
+                                      f"[ENSURE_CI_RUN] tracking run {dispatched['id']} → {dispatched.get('url')}")
+            return dispatched
+        dispatched = await stage("ENSURE_CI_RUN", run_ci())
+        run_id = (dispatched or {}).get("id")
+
+        async def verify_image():
+            if not run_id:
+                # The dispatch was accepted but the run has not surfaced on the API yet — say so
+                # honestly rather than claim a build we can't observe.
+                return {"status": "dispatched", "conclusion": None,
+                        "note": "CI run not yet visible from the GitHub API"}
+
+            async def _progress(info):
+                await emitter.console("stdout", f"[ENSURE_IMAGE_EXISTS] CI run {run_id}: {info.get('status')}")
+            final = await gh.poll_run_to_completion(repo, run_id, on_poll=_progress)
+            if final.get("status") == "completed" and final.get("conclusion") != "success":
+                raise GitHubError(f"CI run {run_id} concluded '{final.get('conclusion')}' — image not built")
+            return final
+        ci = await stage("ENSURE_IMAGE_EXISTS", verify_image())
         results["ci"] = ci
 
         if k8s.enabled and p.get("image"):

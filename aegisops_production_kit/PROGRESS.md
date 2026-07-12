@@ -976,6 +976,17 @@ two known realm issuer URLs (internal + browser-facing), nothing else.
         stack, including "sending a message streams a live run into the per-message timeline".
         The live multi-worker-on-Redis-bus streaming + worker-kill recovery is reserved for the
         Phase-2 exit-gate demonstration (as specified).
+  - [x] **P16 DevOps CI poll-to-completion** (2026-07-12): the pipeline dispatched the CI
+        workflow and then read the *latest* run status once — which could be a stale prior run or
+        the just-dispatched run still queued, and `workflow_dispatch` returns no run id to track.
+        Now the agent IDENTIFIES the run it created (`find_dispatched_run`: newest
+        `workflow_dispatch` run on the branch created ≥ dispatch time, tz-normalized) and POLLS
+        **that run id** to completion (`poll_run_to_completion`, bounded by a timeout, streaming
+        per-poll progress to the console). The real conclusion drives the outcome: `failure` fails
+        the pipeline; a run not yet visible is reported as "dispatched" (not faked); a timeout
+        leaves the status non-completed rather than inventing success. Removed the now-unused
+        `latest_run_status`. Evidence: `test_devops_ci_poll.py` (5). A live poll against real
+        GitHub Actions needs a `GITHUB_TOKEN` (not configured) — recorded pending.
   - [x] **S0 multi-tenancy** (2026-07-11): principal→(org_id,user_id) via Keycloak org claim
         (group-membership mapper; realm defines northwind-financial + acme-industrial groups)
         with the `users` mirror (by keycloak_sub, username/email fallback for seeded rows)
