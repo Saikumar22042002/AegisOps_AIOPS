@@ -317,6 +317,31 @@ def _gcp_vpc_policy(i: dict, resources=None) -> list[dict]:
     return checks
 
 
+def _gcp_kms_policy(i: dict, resources=None) -> list[dict]:
+    """MODSEED MS-6: over the real plan - rotation configured, SOFTWARE protection,
+    ENCRYPT_DECRYPT purpose."""
+    key = _after(resources, "google_kms_crypto_key")
+    checks: list[dict] = []
+    if key is not None:
+        rp = str(key.get("rotation_period") or "")
+        try:
+            rot_ok = rp.endswith("s") and int(rp[:-1]) >= 86400
+        except ValueError:
+            rot_ok = False
+        checks.append(_ck("Automatic rotation configured", rot_ok, rp or "none"))
+        vt = _block0(key, "version_template")
+        checks.append(_ck("SOFTWARE protection level", vt.get("protection_level") == "SOFTWARE",
+                          str(vt.get("protection_level"))))
+        checks.append(_ck("ENCRYPT_DECRYPT purpose", key.get("purpose") == "ENCRYPT_DECRYPT",
+                          str(key.get("purpose"))))
+    else:
+        checks.append(_ck("Automatic rotation configured", int(i.get("rotation_days", 90)) >= 1,
+                          f"{i.get('rotation_days', 90)} days requested"))
+        checks.append(_todo("SOFTWARE protection level"))
+        checks.append(_todo("ENCRYPT_DECRYPT purpose"))
+    return checks
+
+
 def _gcp_gce_policy(i: dict, resources=None) -> list[dict]:
     return [
         _todo("SSH key auth (no password)"),
@@ -362,6 +387,8 @@ TEMPLATES: list[WorkflowTemplate] = [
     WorkflowTemplate("azure.aks", "azure", "aks", "v1", "azure-aks", wf.AzureAKSInputs, "Provision an Azure Kubernetes Service (AKS) cluster", _azure_aks_policy),
     WorkflowTemplate("gcp.gcs", "gcp", "gcs", "v1", "gcp-gcs", wf.GCPGCSInputs, "Provision a GCS bucket (uniform access, versioned)", _gcs_policy),
     WorkflowTemplate("gcp.vpc", "gcp", "vpc", "v1", "gcp-vpc", wf.GCPVPCInputs, "Provision a custom-mode GCP VPC (subnets + secondary ranges, NAT, internal firewall)", _gcp_vpc_policy),
+    WorkflowTemplate("gcp.kms", "gcp", "kms", "v1", "gcp-kms", wf.GCPKMSInputs, "Provision a KMS key ring + crypto keys (90-day rotation)", _gcp_kms_policy,
+                     destroy_note="GCP key rings are NOT deletable - destroying this removes the crypto-key versions and IAM bindings only; the ring (and key names within it) remain reserved in the project permanently."),
     WorkflowTemplate("gcp.vm", "gcp", "vm", "v1", "gcp-gce", wf.GCPComputeInputs, "Provision a GCP Compute Engine VM (generated SSH key)", _gcp_gce_policy),
     WorkflowTemplate("gcp.gke", "gcp", "gke", "v1", "gcp-gke", wf.GCPGKEInputs, "Provision a GKE cluster", _gcp_gke_policy),
     WorkflowTemplate("gcp.cloudsql", "gcp", "cloudsql", "v1", "gcp-cloudsql", wf.GCPCloudSQLInputs, "Provision a Cloud SQL for PostgreSQL instance", _gcp_cloudsql_policy),
@@ -388,7 +415,8 @@ _SYNONYMS: dict[str, dict[str, str]] = {
             "network": "vpc",
             "database": "cloudsql", "db": "cloudsql", "postgres": "cloudsql", "postgresql": "cloudsql",
             "sql": "cloudsql", "mysql": "cloudsql", "k8s": "gke", "kubernetes": "gke", "cluster": "gke",
-            "bucket": "gcs", "blob": "gcs", "object_storage": "gcs"},
+            "bucket": "gcs", "blob": "gcs", "object_storage": "gcs",
+            "keyring": "kms", "key": "kms", "encryption_key": "kms", "secrets": "kms"},
 }
 
 

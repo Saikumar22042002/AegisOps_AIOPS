@@ -181,6 +181,11 @@ PARAMS: dict[str, list[ParamSpec]] = {
         ParamSpec("location", "Region", default="eastus"),
         ParamSpec("resource_group", "Resource group", help="defaults to '<name>-rg' (auto-created)"),
     ],
+    "gcp.kms": [
+        ParamSpec("name", "Key ring name", required=True, help="permanent in GCP; default key '<name>-key'"),
+        ParamSpec("region", "Location", default="us-central1"),
+        ParamSpec("rotation_days", "Rotation (days)", kind="int", default=90),
+    ],
     "gcp.vpc": [
         ParamSpec("name", "Network name", required=True, help="e.g. prod-network"),
         ParamSpec("region", "Region", default="us-central1"),

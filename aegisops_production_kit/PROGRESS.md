@@ -1322,6 +1322,16 @@ as done without the live run; the code paths behind each are covered by tests wi
       (3) gated destroy → card states soft-delete/purge semantics → verify the vault is
       soft-deleted (recoverable), not purged.
       Expect: AzureServices bypass + current-SP policy visible in the portal.
+- [ ] **DLV-20 · MODSEED gcp.kms live lifecycle (MS-6)** — Needs: valid `GEMINI_API_KEY`
+      + the working GCP SA (`infra/secrets/gcp-sa.json`, Cloud KMS API enabled).
+      Steps: (1) "create a kms keyring named app-ring in gcp" → approve (rotation/SOFTWARE/
+      ENCRYPT_DECRYPT checks PASS) → apply; (2) day-2: "what's the rotation on app-ring"
+      (answers 90 days from recorded outputs); (3) "destroy app-ring" → the card's Deletion
+      semantics states rings are NOT deletable (versions/IAM only) → approve → verify in the
+      console the ring still exists but its crypto-key versions are destroyed/disabled.
+      Expect: `app-ring-key` created inside the ring with 90-day rotation; re-creating a ring
+      with the same name in the same location fails (name permanently reserved) — the honest
+      consequence the destroy card warned about.
 - [ ] **DLV-12 · VPC→EC2 goal-DAG e2e in the UI (DEP+U6 — Phase-3 exit-gate headline)** —
       Needs: valid `GEMINI_API_KEY` + AWS creds; `AEGISOPS_EXEC_LOOP=on`.
       Steps: (1) send **"Create an EC2 named web in a new vpc"**; (2) inspect the goal-DAG
@@ -1526,6 +1536,20 @@ this section mirrors phase-level status only.
         purge-protection-as-approved, AzureServices bypass — all failing on violating plans.
         Evidence: `test_modseed_ms5_azure_keyvault.py` (10). Canary (B5) green. Live =
         **DLV-19**.
+  - [x] **MODSEED MS-6 gcp-kms (`gcp.kms`)** (2026-07-12): key ring + crypto key(s) —
+        for_each over `keys` (default one `<name>-key`), 90-day rotation derived
+        `"${var.rotation_days * 86400}s"` (bounded 1–365 in schema, ≥1 in the module),
+        ENCRYPT_DECRYPT + GOOGLE_SYMMETRIC_ENCRYPTION + SOFTWARE protection, IAM via
+        setproduct(keys × encrypter_decrypters) → cryptoKeyEncrypterDecrypter. **Keys, never
+        secrets** — no google_secret_manager / secret_data (asserted). Synonyms
+        keyring/key/encryption_key/secrets→kms (gcp), coexisting with aws `key`→aws.kms.
+        **destroy_note (MS-4 seam): GCP key rings are NOT deletable** — destroy removes
+        crypto-key versions and IAM bindings only; the ring name stays reserved in the
+        project permanently — asserted through the real destroy-plan card path. Policy
+        (plan-JSON): rotation configured, SOFTWARE protection, ENCRYPT_DECRYPT purpose — all
+        failing on an ASYMMETRIC_SIGN/HSM/no-rotation plan. Params ask only `name` (project
+        auto-filled). Evidence: `test_modseed_ms6_gcp_kms.py` (9). Canary (B5) green. Live =
+        **DLV-20**. **This completes MODSEED modules 1–6 — STOPPED for the evidence table.**
 
 
 _Legend: [x] done · [~] partial/scaffolded · [ ] pending._

@@ -251,6 +251,18 @@ class GCPGCSInputs(WorkflowInputs):
     storage_class: str = "STANDARD"
 
 
+class GCPKMSInputs(WorkflowInputs):
+    """MODSEED MS-6 - gcp.kms: key ring + crypto keys. Ring names are PERMANENT in GCP -
+    destroy removes key versions/IAM only (stated on the destroy card)."""
+
+    name: str
+    project: str = ""
+    region: str = "us-central1"
+    keys: list[str] = Field(default_factory=list)
+    rotation_days: int = Field(default=90, ge=1, le=365)
+    encrypter_decrypters: list[str] = Field(default_factory=list)
+
+
 class GCPVPCInputs(WorkflowInputs):
     """MODSEED MS-1 - gcp.vpc: custom-mode network + subnets (+pods/services secondary
     ranges) + NAT. Only `name` is decision-critical; the project is auto-filled."""
