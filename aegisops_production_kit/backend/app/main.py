@@ -64,6 +64,12 @@ async def lifespan(app: FastAPI):
     # O2: verify the Langfuse keys belong to the expected project (loud warning otherwise).
     from .integrations.langfuse_client import assert_project
     await assert_project(settings)
+    # MPP: re-register promoted modules from the DB (the runtime library is in-memory).
+    try:
+        from .agents.module_pipeline import rehydrate_promoted
+        await rehydrate_promoted(settings)
+    except Exception as exc:  # noqa: BLE001 — a failed rehydrate degrades, never blocks startup
+        log.warning("startup.mpp_rehydrate_failed", error=str(exc))
     # B3: periodic stranded-run reconciler (recovers runs abandoned by a crashed worker).
     # Gated so no background loop auto-starts in a test lifespan (AEGISOPS_RECONCILER=off).
     if settings.aegisops_reconciler == "on":

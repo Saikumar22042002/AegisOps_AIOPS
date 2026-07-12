@@ -1275,6 +1275,14 @@ as done without the live run; the code paths behind each are covered by tests wi
       Expect: policy check **"No dependent resources (world model)" FAILED** naming the
       dependent + the "⚠ Dependent resources" reasoning card + console warning; reject leaves
       everything untouched.
+- [ ] **DLV-13 · Real security scan in the promotion pipeline (MPP)** — Needs: `checkov`
+      (pip) or `tfsec` (binary) installed in the api image.
+      Steps: (1) install the scanner (e.g. add `checkov` to the api image); (2) draft a module
+      with a known finding (e.g. an S3 bucket without encryption); (3) `run_checks` → scan
+      `failed` with the finding named; (4) fix the draft, re-check → `passed`; (5) propose →
+      promote succeeds only now.
+      Expect: promotion is impossible while the scan is failed/unavailable (fail closed); the
+      finding text appears in the proposal's scan detail.
 - [ ] **DLV-12 · VPC→EC2 goal-DAG e2e in the UI (DEP+U6 — Phase-3 exit-gate headline)** —
       Needs: valid `GEMINI_API_KEY` + AWS creds; `AEGISOPS_EXEC_LOOP=on`.
       Steps: (1) send **"Create an EC2 named web in a new vpc"**; (2) inspect the goal-DAG
@@ -1365,5 +1373,22 @@ this section mirrors phase-level status only.
         methods. SRE triage now gathers its K8s evidence through the investigator. deepagents
         (re-evaluate at 1.0/LTS) would plug in as a director over this registry. Evidence:
         `test_investigation.py` (21) + SRE remediation suite unchanged.
+  - [x] **MPP Module Promotion Pipeline** (2026-07-12): new `agents/module_pipeline.py` +
+        migration `0007_module_proposals`. Pipeline: `draft` stores the module files as INERT
+        data (validated shape; catalog collisions and path escapes refused; **nothing planned
+        or applied — generation and execution never share a turn**); `run_checks` runs REAL
+        `terraform fmt -check` + `init -backend=false` + `validate` in an isolated scratch dir
+        plus the security-scan seam (checkov preferred, tfsec fallback; neither installed here
+        → honestly `unavailable`); `propose` requires green fmt+validate; `review` (approver
+        RBAC at the API) either **promotes — which fails CLOSED without a PASSED scan** — or
+        rejects (terminal). Promotion materializes the module under
+        `infra/terraform-workspaces/promoted-<key>` and registers a runtime
+        `WorkflowTemplate` (permissive `name`-required schema, honest `_todo` policy row; the
+        plan-guard/approval/state-isolation machinery applies unchanged) — **only then** do
+        `select`/`by_key`/`catalog` see it; `rehydrate_promoted` re-registers from the DB at
+        startup. API: 5 org-scoped endpoints; frontend: proposals panel on the Infrastructure
+        page (checks + status + Promote/Reject for approvers). Evidence:
+        `test_module_pipeline.py` (9, real terraform runs). Live scan (checkov/tfsec install)
+        = **DLV-13**.
 
 _Legend: [x] done · [~] partial/scaffolded · [ ] pending._

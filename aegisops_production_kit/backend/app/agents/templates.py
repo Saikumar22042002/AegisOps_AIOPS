@@ -256,9 +256,22 @@ _SYNONYMS: dict[str, dict[str, str]] = {
 }
 
 
+# MPP: modules promoted through the Module Promotion Pipeline join the approved library at
+# runtime (rehydrated from the DB at startup). A draft/proposed module is NEVER in here —
+# only a human review's `promote` decision registers a template.
+_PROMOTED: dict[str, WorkflowTemplate] = {}
+
+
+def register_promoted(template: WorkflowTemplate) -> None:
+    """Add a PROMOTED module to the runtime library (MPP `review(decision='promote')` only)."""
+    if template.key in _BY_KEY:
+        raise ValueError(f"'{template.key}' already exists in the built-in catalog")
+    _PROMOTED[template.key] = template
+
+
 def by_key(key: str) -> WorkflowTemplate | None:
     """Approved template by its catalog key (e.g. "aws.vpc") — the exec loop's lookup."""
-    return _BY_KEY.get(key)
+    return _BY_KEY.get(key) or _PROMOTED.get(key)
 
 
 def select(cloud: str, resource: str) -> WorkflowTemplate | None:
@@ -271,10 +284,12 @@ def select(cloud: str, resource: str) -> WorkflowTemplate | None:
     cloud = (cloud or "").lower()
     resource = (resource or "").lower()
     resource = _SYNONYMS.get(cloud, {}).get(resource, resource)
-    return _BY_KEY.get(f"{cloud}.{resource}")
+    return _BY_KEY.get(f"{cloud}.{resource}") or _PROMOTED.get(f"{cloud}.{resource}")
 
 
 def catalog() -> list[dict[str, str]]:
-    """Compact catalog for the router's classification prompt."""
-    return [{"key": t.key, "cloud": t.cloud, "resource": t.resource, "description": t.description}
-            for t in TEMPLATES]
+    """Compact catalog for the router's classification prompt (built-ins + promoted)."""
+    return ([{"key": t.key, "cloud": t.cloud, "resource": t.resource, "description": t.description}
+             for t in TEMPLATES]
+            + [{"key": t.key, "cloud": t.cloud, "resource": t.resource, "description": t.description}
+               for t in _PROMOTED.values()])

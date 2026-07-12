@@ -262,6 +262,30 @@ class Resource(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class ModuleProposal(Base):
+    """MPP: a drafted Terraform module moving through draft → checks → proposed →
+    promoted|rejected. Only PROMOTED rows join the approved library; a draft is inert data —
+    generation and execution never happen in the same turn."""
+
+    __tablename__ = "module_proposals"
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    key: Mapped[str] = mapped_column(String(80), nullable=False)   # e.g. "aws.efs"
+    cloud: Mapped[str] = mapped_column(String(20), nullable=False)
+    resource: Mapped[str] = mapped_column(String(60), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    files: Mapped[dict] = mapped_column(JSONB, nullable=False)     # {filename: content}
+    status: Mapped[str] = mapped_column(String(20), default="draft")  # draft|proposed|promoted|rejected
+    fmt_ok: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    validate_ok: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    scan: Mapped[dict | None] = mapped_column(JSONB, nullable=True)  # {tool,status,findings}
+    created_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    reviewed_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class Notification(Base):
     __tablename__ = "notifications"
     id: Mapped[uuid.UUID] = _pk()

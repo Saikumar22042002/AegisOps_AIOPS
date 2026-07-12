@@ -12,11 +12,19 @@ interface ModuleData {
 }
 interface IntegrationRow { name: string; cat: string; mark: string; color: string; status: string; statusColor: string }
 
+type ProposalRow = {
+  id: string; key: string; status: string; description?: string | null;
+  fmt_ok?: boolean | null; validate_ok?: boolean | null; scan?: string | null;
+  created_by?: string | null; reviewed_by?: string | null; created: string;
+};
+
 export function ModuleView() {
   const activeNav = useUI((s) => s.activeNav);
   const navTo = useUI((s) => s.navTo);
   const [meta, setMeta] = useState<ModuleData | null>(null);
   const [integrations, setIntegrations] = useState<IntegrationRow[]>([]);
+  const [proposals, setProposals] = useState<ProposalRow[]>([]);
+  const [reviewErr, setReviewErr] = useState<string>("");
 
   useEffect(() => {
     if (activeNav === "workspace") return;
@@ -26,8 +34,24 @@ export function ModuleView() {
     if (activeNav === "admin") {
       api.get<{ integrations: IntegrationRow[] }>("/integrations").then((d) => alive && setIntegrations(d.integrations)).catch(() => {});
     }
+    if (activeNav === "infrastructure") {
+      api.get<{ proposals: ProposalRow[] }>("/modules/proposals").then((d) => alive && setProposals(d.proposals)).catch(() => {});
+    }
     return () => { alive = false; };
   }, [activeNav]);
+
+  // MPP: the human review gate — promote (fail-closed on scan) or reject. RBAC errors from the
+  // backend surface verbatim (approver roles only).
+  const review = async (id: string, decision: "promote" | "reject") => {
+    setReviewErr("");
+    try {
+      await api.post(`/modules/proposals/${id}/review`, { decision, note: "" });
+      const d = await api.get<{ proposals: ProposalRow[] }>("/modules/proposals");
+      setProposals(d.proposals);
+    } catch (e: any) {
+      setReviewErr(String(e?.message ?? e));
+    }
+  };
 
   const isAdmin = activeNav === "admin";
 
@@ -74,6 +98,51 @@ export function ModuleView() {
                 </div>
               ))}
             </div>
+
+            {activeNav === "infrastructure" && proposals.length > 0 && (
+              <div style={{ marginTop: 26 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text)" }}>Module proposals</span>
+                  <span style={{ fontSize: 11, color: "var(--text-4)" }}>
+                    draft → checks → proposed → promoted · a drafted module is unselectable until promoted
+                  </span>
+                </div>
+                {reviewErr && (
+                  <div style={{ fontSize: 12, color: "var(--red-2)", marginBottom: 10 }}>{reviewErr}</div>
+                )}
+                <div style={{ border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden", background: "var(--surface)" }}>
+                  {proposals.map((p) => {
+                    const statusColor = p.status === "promoted" ? "var(--green)"
+                      : p.status === "rejected" ? "var(--red)"
+                      : p.status === "proposed" ? "var(--amber)" : "var(--text-4)";
+                    const check = (v?: boolean | null) => v == null ? "—" : v ? "✓" : "✗";
+                    return (
+                      <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "13px 18px", borderBottom: "1px solid var(--surface-2)" }}>
+                        <span style={{ width: 8, height: 8, borderRadius: 99, background: statusColor, flexShrink: 0 }} />
+                        <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, color: "var(--text)", minWidth: 130 }}>{p.key}</span>
+                        <span style={{ fontSize: 12, color: "var(--text-3)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.description ?? ""}</span>
+                        <span style={{ fontSize: 11, fontFamily: "'IBM Plex Mono',monospace", color: "var(--text-4)" }} title="fmt / validate / scan">
+                          fmt {check(p.fmt_ok)} · validate {check(p.validate_ok)} · scan {p.scan ?? "not run"}
+                        </span>
+                        <span style={{ fontSize: 11.5, color: statusColor, fontWeight: 600, minWidth: 66, textAlign: "right" }}>{p.status}</span>
+                        {p.status === "proposed" && (
+                          <span style={{ display: "flex", gap: 6 }}>
+                            <button onClick={() => review(p.id, "promote")} className="ao-h-b3"
+                              style={{ padding: "5px 11px", borderRadius: 7, border: "1px solid rgba(52,211,153,.35)", background: "rgba(52,211,153,.1)", color: "var(--green)", fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}>
+                              Promote
+                            </button>
+                            <button onClick={() => review(p.id, "reject")} className="ao-h-b3"
+                              style={{ padding: "5px 11px", borderRadius: 7, border: "1px solid rgba(248,113,113,.35)", background: "rgba(248,113,113,.08)", color: "var(--red-2)", fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}>
+                              Reject
+                            </button>
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {isAdmin && (
               <div style={{ marginTop: 26 }}>

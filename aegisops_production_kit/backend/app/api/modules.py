@@ -213,3 +213,100 @@ def _ago(ts: datetime) -> str:
     if mins < 1440:
         return f"{mins // 60}h"
     return f"{mins // 1440}d"
+
+
+# ── MPP: Module Promotion Pipeline (draft → checks → propose → review) ─────────────────────
+
+from pydantic import BaseModel  # noqa: E402
+
+from ..agents import module_pipeline  # noqa: E402
+from ..db.models import ModuleProposal  # noqa: E402
+from ..security.deps import require_approver, require_initiator  # noqa: E402
+
+
+class DraftRequest(BaseModel):
+    key: str                     # "<cloud>.<resource>", e.g. "aws.efs"
+    files: dict[str, str]        # {filename: HCL}
+    description: str = ""
+
+
+class ReviewRequest(BaseModel):
+    decision: str                # promote | reject
+    note: str = ""
+
+
+def _proposal_row(p: ModuleProposal) -> dict:
+    return {"id": str(p.id), "key": p.key, "status": p.status, "description": p.description,
+            "fmt_ok": p.fmt_ok, "validate_ok": p.validate_ok,
+            "scan": (p.scan or {}).get("status"), "created_by": p.created_by,
+            "reviewed_by": p.reviewed_by, "files": sorted(p.files or {}),
+            "created": _ago(p.created_at)}
+
+
+@router.get("/modules/proposals")
+async def list_proposals(user: AuthUser = Depends(get_current_user)) -> dict:
+    async with session_scope() as s:
+        org = await repo.org_for(s, user)
+        rows = (await s.execute(
+            select(ModuleProposal).where(ModuleProposal.org_id == org.id)
+            .order_by(ModuleProposal.created_at.desc()).limit(50))).scalars().all()
+        return {"proposals": [_proposal_row(p) for p in rows]}
+
+
+@router.post("/modules/proposals")
+async def create_proposal(body: DraftRequest, user: AuthUser = Depends(require_initiator)) -> dict:
+    """Draft a module. The draft is inert data — never planned, never applied, unselectable
+    until a human PROMOTES it (generation and execution never share a turn)."""
+    async with session_scope() as s:
+        org = await repo.org_for(s, user)
+        org_id = str(org.id)
+    try:
+        pid = await module_pipeline.draft(org_id, body.key, body.files,
+                                          description=body.description, created_by=user.username)
+    except module_pipeline.ModulePipelineError as exc:
+        raise HTTPException(400, str(exc)) from None
+    return {"id": pid, "status": "draft"}
+
+
+@router.post("/modules/proposals/{proposal_id}/checks")
+async def check_proposal(proposal_id: str, user: AuthUser = Depends(require_initiator)) -> dict:
+    """Real `terraform fmt -check` + `validate` + the security-scan seam, in isolation."""
+    await _authorize_proposal(proposal_id, user)
+    try:
+        return await module_pipeline.run_checks(proposal_id)
+    except module_pipeline.ModulePipelineError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@router.post("/modules/proposals/{proposal_id}/propose")
+async def propose_proposal(proposal_id: str, user: AuthUser = Depends(require_initiator)) -> dict:
+    await _authorize_proposal(proposal_id, user)
+    try:
+        await module_pipeline.propose(proposal_id)
+    except module_pipeline.ModulePipelineError as exc:
+        raise HTTPException(400, str(exc)) from None
+    return {"status": "proposed"}
+
+
+@router.post("/modules/proposals/{proposal_id}/review")
+async def review_proposal(proposal_id: str, body: ReviewRequest,
+                          user: AuthUser = Depends(require_approver)) -> dict:
+    """The human gate (approver RBAC): promote — fail-closed on scan — or reject."""
+    await _authorize_proposal(proposal_id, user)
+    try:
+        return await module_pipeline.review(proposal_id, body.decision,
+                                            reviewer=user.username, note=body.note)
+    except module_pipeline.ModulePipelineError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+async def _authorize_proposal(proposal_id: str, user: AuthUser) -> None:
+    """S0: a proposal outside the caller's org does not exist for them (uniform 404)."""
+    async with session_scope() as s:
+        org = await repo.org_for(s, user)
+        try:
+            row = await s.get(ModuleProposal, uuid.UUID(proposal_id))
+        except ValueError:
+            raise HTTPException(404, "proposal not found") from None
+        if row is None or row.org_id != org.id:
+            raise HTTPException(404, "proposal not found")
