@@ -39,7 +39,7 @@ _TYPE_WORDS: list[tuple[tuple[str, ...], set[str]]] = [
     (("bucket", "s3", "gcs", "blob", "storage"), {"s3", "gcs", "storage"}),
     (("database", "db", "rds", "postgres", "sql"), {"rds", "postgres", "cloudsql"}),
     (("cluster", "eks", "aks", "gke", "k8s", "kubernetes"), {"eks", "aks", "gke"}),
-    (("vpc", "network"), {"vpc"}),
+    (("vpc", "vnet", "network"), {"vpc", "vnet"}),
 ]
 
 

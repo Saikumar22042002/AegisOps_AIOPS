@@ -161,6 +161,11 @@ PARAMS: dict[str, list[ParamSpec]] = {
         ParamSpec("node_count", "Node count", kind="int", default=2),
         ParamSpec("machine_type", "Node machine type", default="e2-medium"),
     ],
+    "azure.vnet": [
+        ParamSpec("name", "VNet name", required=True, help="e.g. prod-vnet"),
+        ParamSpec("location", "Region", default="eastus"),
+        ParamSpec("resource_group", "Resource group", help="defaults to '<name>-rg' (auto-created)"),
+    ],
     "gcp.vpc": [
         ParamSpec("name", "Network name", required=True, help="e.g. prod-network"),
         ParamSpec("region", "Region", default="us-central1"),

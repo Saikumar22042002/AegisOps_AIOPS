@@ -168,6 +168,35 @@ def _gcs_policy(i: dict, resources=None) -> list[dict]:
     ]
 
 
+def _azure_vnet_policy(i: dict, resources=None) -> list[dict]:
+    """MODSEED MS-2: over the real plan - >=1 subnet and an RFC1918 address space; the module
+    ships NO NSG (no admin ingress surface here at all)."""
+    import ipaddress
+    vnet = _after(resources, "azurerm_virtual_network")
+    checks: list[dict] = []
+    if vnet is not None:
+        subnet_count = sum(1 for r in (resources or [])
+                           if r.get("type") == "azurerm_subnet")
+        checks.append(_ck("At least one subnet", subnet_count >= 1,
+                          f"{subnet_count} subnet(s) in the plan"))
+        spaces = vnet.get("address_space") or []
+        try:
+            private = all(ipaddress.ip_network(c).is_private for c in spaces) and bool(spaces)
+        except ValueError:
+            private = False
+        checks.append(_ck("RFC1918 address space", private, ", ".join(spaces) or "none"))
+        nsg_count = sum(1 for r in (resources or [])
+                        if str(r.get("type", "")).startswith("azurerm_network_security"))
+        checks.append(_ck("No NSG in the network module (no admin ingress here)", nsg_count == 0,
+                          f"{nsg_count} NSG resource(s) planned"))
+    else:
+        checks.append(_ck("At least one subnet", len(i.get("subnet_cidrs", [])) >= 1,
+                          f"{len(i.get('subnet_cidrs', []))} requested"))
+        checks.append(_todo("RFC1918 address space"))
+        checks.append(_todo("No NSG in the network module"))
+    return checks
+
+
 def _azure_vm_policy(i: dict, resources=None) -> list[dict]:
     return [
         _todo("SSH key auth (no password)"),
@@ -245,6 +274,7 @@ TEMPLATES: list[WorkflowTemplate] = [
     WorkflowTemplate("aws.rds", "aws", "rds", "v1", "aws-rds", wf.AWSRDSInputs, "Provision an encrypted RDS instance", _rds_policy),
     WorkflowTemplate("aws.ec2", "aws", "ec2", "v1", "aws-ec2", wf.AWSEC2Inputs, "Provision an EC2 instance (IMDSv2, encrypted)", _ec2_policy),
     WorkflowTemplate("azure.storage", "azure", "storage", "v1", "azure-storage", wf.AzureStorageInputs, "Provision an Azure Storage Account", _azure_storage_policy),
+    WorkflowTemplate("azure.vnet", "azure", "vnet", "v1", "azure-vnet", wf.AzureVNetInputs, "Provision an Azure VNet (subnets, NAT gateway, route tables)", _azure_vnet_policy),
     WorkflowTemplate("azure.resource_group", "azure", "resource_group", "v1", "azure-resource-group", wf.AzureResourceGroupInputs, "Provision an Azure Resource Group", _azure_rg_policy),
     WorkflowTemplate("azure.vm", "azure", "vm", "v1", "azure-vm", wf.AzureVMInputs, "Provision an Azure Linux VM (generated SSH key)", _azure_vm_policy),
     WorkflowTemplate("azure.postgres", "azure", "postgres", "v1", "azure-postgres", wf.AzurePostgresInputs, "Provision an Azure PostgreSQL Flexible Server", _azure_pg_policy),
@@ -269,7 +299,7 @@ _SYNONYMS: dict[str, dict[str, str]] = {
     "azure": {"instance": "vm", "server": "vm", "compute": "vm", "ec2": "vm", "database": "postgres",
               "db": "postgres", "postgresql": "postgres", "sql": "postgres", "mysql": "postgres",
               "k8s": "aks", "kubernetes": "aks", "cluster": "aks", "blob": "storage", "bucket": "storage",
-              "object_storage": "storage", "storage_account": "storage", "rg": "resource_group"},
+              "object_storage": "storage", "storage_account": "storage", "rg": "resource_group", "network": "vnet"},
     "gcp": {"instance": "vm", "server": "vm", "compute": "vm", "gce": "vm", "ec2": "vm",
             "network": "vpc",
             "database": "cloudsql", "db": "cloudsql", "postgres": "cloudsql", "postgresql": "cloudsql",

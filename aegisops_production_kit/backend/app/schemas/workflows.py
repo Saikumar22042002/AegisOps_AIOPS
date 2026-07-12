@@ -239,6 +239,29 @@ class GCPVPCInputs(WorkflowInputs):
         return v
 
 
+class AzureVNetInputs(WorkflowInputs):
+    """MODSEED MS-2 - azure.vnet: VNet + subnets + NAT + route tables. Only `name` is
+    decision-critical; the RG defaults to a module-created '<name>-rg' (like azure-vm)."""
+
+    name: str
+    location: str = "eastus"
+    resource_group: str = ""
+    address_space: str = "10.20.0.0/16"
+    subnet_cidrs: list[str] = Field(default_factory=lambda: ["10.20.1.0/24"])
+    private_subnet_cidrs: list[str] = Field(default_factory=list)
+
+    @field_validator("address_space", "subnet_cidrs", "private_subnet_cidrs")
+    @classmethod
+    def _rfc1918(cls, v):
+        import ipaddress
+        vals = v if isinstance(v, list) else [v]
+        for c in vals:
+            net = ipaddress.ip_network(c, strict=True)
+            if not net.is_private:
+                raise ValueError(f"CIDR {c} must be RFC1918 private space")
+        return v
+
+
 # ── Azure (Phase 5) ──
 AZURE_OS_CHOICES = ("ubuntu-22.04", "ubuntu-24.04", "debian-12", "windows-2022")
 

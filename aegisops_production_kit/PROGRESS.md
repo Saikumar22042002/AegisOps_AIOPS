@@ -1291,6 +1291,13 @@ as done without the live run; the code paths behind each are covered by tests wi
       (4) "destroy prod-net" → gated destroy, impact_of consulted.
       Expect: full lifecycle through the governed pipeline; NAT + internal firewall visible in
       the GCP console; zero admin-ingress rules.
+- [ ] **DLV-16 · MODSEED azure.vnet live lifecycle (MS-2)** — Needs: valid `GEMINI_API_KEY`
+      + Azure creds.
+      Steps: (1) "create a vnet named prod-vnet in azure" → approve (checks: ≥1 subnet, RFC1918,
+      no-NSG all PASS); (2) day-2 "what subnets does prod-vnet have"; (3) "create a vm in
+      prod-vnet" → placed into the existing VNet from the world model (provenance on the card);
+      (4) gated destroy.
+      Expect: NAT + route tables visible in the portal; zero NSGs from this module.
 - [ ] **DLV-12 · VPC→EC2 goal-DAG e2e in the UI (DEP+U6 — Phase-3 exit-gate headline)** —
       Needs: valid `GEMINI_API_KEY` + AWS creds; `AEGISOPS_EXEC_LOOP=on`.
       Steps: (1) send **"Create an EC2 named web in a new vpc"**; (2) inspect the goal-DAG
@@ -1444,6 +1451,18 @@ this section mirrors phase-level status only.
         MS-1 makes it supported BY DESIGN; the parametrize entry now uses `("gcp","lambda")`
         (permanently uncurated). Behavior change: a GCP network request no longer falls to the
         honest-catalog clarification — it provisions through the governed pipeline.
+  - [x] **MODSEED MS-2 azure-vnet (`azure.vnet`)** (2026-07-12): VNet + public/private subnet
+        tiers + NAT gateway (static Standard IP, private tier only) + public/private route
+        tables associated BY NAME per tier (no explicit default route — Azure system routes
+        already handle public egress, keeping the module free of any 0.0.0.0/0 literal). RG
+        semantics identical to azure-vm (`<name>-rg` auto or existing). Deliberately NO NSG —
+        the network module never carries an admin-ingress surface. FULL registration in one
+        commit: template + `network`/`vnet` synonyms, `AzureVNetInputs` (RFC1918 validation on
+        address space + both subnet tiers), params (asks only `name`), `_azure_vnet_policy`
+        (REAL plan-JSON: ≥1 subnet, RFC1918 space, **zero NSG resources planned**), and the
+        azure.vnet→resource_group DEP slot (same family as azure.vm). Evidence:
+        `test_modseed_ms2_azure_vnet.py` (8) + MS-1 suite still green. Canary (B5): full suite
+        + Playwright core-flow green. Live lifecycle = **DLV-16**.
 
 
 _Legend: [x] done · [~] partial/scaffolded · [ ] pending._
