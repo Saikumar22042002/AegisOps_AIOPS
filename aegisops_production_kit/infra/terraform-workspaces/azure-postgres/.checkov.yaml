@@ -1,0 +1,6 @@
+# AegisOps scanner waivers - every skip is documented here AND in the
+# PROGRESS.md scanner ledger. New checks fail the scan until triaged.
+skip-check:
+  - CKV2_AZURE_26  # network access hardening arrives with MS-8 delegated-subnet/private-DNS (B2 opt-in)
+  - CKV2_AZURE_57  # private access (delegated subnet) arrives with MS-8 (B2 opt-in)
+  - CKV_AZURE_136  # geo-redundant backup arrives with MS-8 (B2 opt-in)

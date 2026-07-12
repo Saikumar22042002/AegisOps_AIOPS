@@ -36,6 +36,13 @@ resource "google_container_cluster" "this" {
   deletion_protection      = false
   network                  = "default"
   subnetwork               = "default"
+
+  # Explicit form of the GKE default (no client certificate issued) — zero plan impact.
+  master_auth {
+    client_certificate_config {
+      issue_client_certificate = false
+    }
+  }
 }
 
 resource "google_container_node_pool" "this" {
@@ -43,6 +50,12 @@ resource "google_container_node_pool" "this" {
   cluster    = google_container_cluster.this.id
   location   = var.region
   node_count = var.node_count
+
+  # Explicit form of the GKE node-management defaults — zero plan impact.
+  management {
+    auto_repair  = true
+    auto_upgrade = true
+  }
 
   node_config {
     machine_type = var.machine_type

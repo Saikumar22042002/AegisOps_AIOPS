@@ -7,6 +7,7 @@ Integration: live Postgres for the proposal rows; real `terraform fmt/validate` 
 
 from __future__ import annotations
 
+import shutil
 import uuid
 from pathlib import Path
 
@@ -98,7 +99,8 @@ async def test_run_checks_real_terraform_green_module(live_db, throwaway_org):
         res = await mpp.run_checks(pid)
         assert res["fmt_ok"] is True
         assert res["validate_ok"] is True
-        # No scanner in this environment → honestly unavailable (which blocks promotion).
+        # Environment-dependent: a real scan (passed/failed) when checkov/tfsec is
+        # installed (the image bakes checkov in), honestly `unavailable` otherwise.
         assert res["scan"]["status"] in ("unavailable", "passed", "failed")
     finally:
         await _cleanup_proposals(org)
@@ -131,15 +133,59 @@ async def test_propose_requires_green_checks(live_db, throwaway_org):
 
 # ── review: fail-closed promotion / rejection ──────────────────────────────────────────────
 
-async def test_promotion_is_blocked_without_a_passed_scan(live_db, throwaway_org):
-    """Fail closed: no scanner installed → scan 'unavailable' → promotion refused."""
+async def test_promotion_is_blocked_without_a_passed_scan(live_db, throwaway_org, monkeypatch):
+    """Fail closed: scanner unavailable → scan 'unavailable' → promotion refused.
+    Forced via the seam so the behavior is tested regardless of what the image installs
+    (the API image now bakes checkov in — the environment can no longer prove this path)."""
     org = throwaway_org
+    monkeypatch.setattr(mpp, "_scan_command", lambda workdir: None)
     try:
         pid = await mpp.draft(org, "aws.efs", {"main.tf": _GOOD_TF})
-        await mpp.run_checks(pid)          # scan: unavailable in this environment
+        await mpp.run_checks(pid)          # scan: unavailable (seam forced)
         await mpp.propose(pid)
         with pytest.raises(ModulePipelineError, match="PASSED security scan"):
             await mpp.review(pid, "promote", reviewer="maya")
+    finally:
+        await _cleanup_proposals(org)
+
+
+_LEAKY_TF = '''terraform {
+  required_providers {
+    null = { source = "hashicorp/null", version = "~> 3.2" }
+  }
+}
+
+resource "null_resource" "leak" {
+  triggers = {
+    aws_access_key = "AKIAIOSFODNN7EXAMPLE"
+    aws_secret     = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+  }
+}
+'''  # the canonical AWS documentation EXAMPLE credential — non-functional, published by AWS
+
+
+@pytest.mark.skipif(not (shutil.which("checkov") or shutil.which("tfsec")),
+                    reason="no scanner installed in this environment")
+async def test_real_scan_gates_promotion_end_to_end(live_db, throwaway_org):
+    """DLV-13, automated: a draft carrying an embedded credential really FAILS the scan
+    (finding text lands in the scan detail) and promotion is refused; a clean draft
+    really PASSES. Runs the actual scanner baked into the image — no seams."""
+    org = throwaway_org
+    try:
+        leaky = await mpp.draft(org, "aws.secretleak", {"main.tf": _LEAKY_TF})
+        res = await mpp.run_checks(leaky)
+        assert res["fmt_ok"] is True and res["validate_ok"] is True
+        assert res["scan"]["status"] == "failed"
+        assert res["scan"]["tool"] in ("checkov", "tfsec")
+        if res["scan"]["tool"] == "checkov":
+            assert "CKV_SECRET" in res["scan"]["detail"]
+        await mpp.propose(leaky)               # proposable (humans may see it) …
+        with pytest.raises(ModulePipelineError, match="PASSED security scan"):
+            await mpp.review(leaky, "promote", reviewer="maya")   # … but never the library
+
+        clean = await mpp.draft(org, "aws.cleandraft", {"main.tf": _GOOD_TF})
+        res2 = await mpp.run_checks(clean)
+        assert res2["scan"]["status"] == "passed"
     finally:
         await _cleanup_proposals(org)
 

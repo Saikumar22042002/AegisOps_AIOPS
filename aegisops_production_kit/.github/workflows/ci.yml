@@ -65,3 +65,20 @@ jobs:
           cp .env.example .env
           docker compose config -q
           echo "compose OK"
+
+  terraform-scan:
+    name: Terraform security scan (checkov + tfsec)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install scanners (pinned to the versions baked into the API image)
+        run: |
+          pip install "checkov==3.3.8"
+          sudo curl -fsSL "https://github.com/aquasecurity/tfsec/releases/download/v1.28.14/tfsec-linux-amd64" -o /usr/local/bin/tfsec
+          sudo chmod +x /usr/local/bin/tfsec
+          checkov --version && tfsec --version
+      - name: Scan all workspaces (waivers per-workspace, ledger in PROGRESS.md)
+        run: bash infra/scan-workspaces.sh

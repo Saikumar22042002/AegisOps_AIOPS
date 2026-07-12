@@ -1,0 +1,11 @@
+# AegisOps scanner waivers - every skip is documented here AND in the
+# PROGRESS.md scanner ledger. New checks fail the scan until triaged.
+skip-check:
+  - CKV2_AZURE_1  # CMEK: platform-managed keys are the sandbox posture
+  - CKV2_AZURE_33  # private endpoint: sandbox posture
+  - CKV2_AZURE_38  # blob soft-delete: day-2 candidate; changing it now would alter existing accounts' re-plans
+  - CKV2_AZURE_40  # shared-key auth: SDK verify paths use account keys; revisit with managed identity
+  - CKV2_AZURE_41  # SAS expiration policy: no SAS tokens are issued by the platform
+  - CKV_AZURE_206  # LRS replication: cost posture for sandbox storage
+  - CKV_AZURE_33  # queue-service logging: queues unused by the platform
+  - CKV_AZURE_59  # public network access: container ACLs are private; account-level lockdown is an enterprise opt-in

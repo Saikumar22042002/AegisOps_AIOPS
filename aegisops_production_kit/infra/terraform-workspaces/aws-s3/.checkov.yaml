@@ -1,0 +1,8 @@
+# AegisOps scanner waivers - every skip is documented here AND in the
+# PROGRESS.md scanner ledger. New checks fail the scan until triaged.
+skip-check:
+  - CKV2_AWS_61  # lifecycle rules: demo bucket posture; day-2 candidate
+  - CKV2_AWS_62  # event notifications: no consumer exists in the platform's flows
+  - CKV_AWS_144  # cross-region replication: not in any binding scope (explicitly out of MODSEED)
+  - CKV_AWS_145  # SSE-S3 (AES256) is the module contract; KMS default would add key cost/coupling
+  - CKV_AWS_18  # access logging needs a second bucket; demo posture, opt-in candidate

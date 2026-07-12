@@ -1,0 +1,5 @@
+# AegisOps scanner waivers - documented in the PROGRESS.md scanner ledger.
+# tfsec v1.28 config excludes match legacy IDs; the AVD id is in each comment.
+exclude:
+  - aws-s3-enable-bucket-logging  # AVD-AWS-0089 | access logging needs a second bucket; demo posture
+  - aws-s3-encryption-customer-key  # AVD-AWS-0132 | SSE-S3 is the module contract; CMK is a cost/coupling decision

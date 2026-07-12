@@ -1,0 +1,4 @@
+# AegisOps scanner waivers - documented in the PROGRESS.md scanner ledger.
+# tfsec v1.28 config excludes match legacy IDs; the AVD id is in each comment.
+exclude:
+  - google-storage-bucket-encryption-customer-key  # AVD-GCP-0066 | CMEK: platform-managed encryption is the sandbox posture

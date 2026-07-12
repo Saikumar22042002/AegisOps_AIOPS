@@ -29,6 +29,8 @@ resource "google_storage_bucket" "this" {
   storage_class               = var.storage_class
   uniform_bucket_level_access = true
   force_destroy               = false
+  # Hardening aligned with the platform's no-public-bucket policy (U1): in-place change.
+  public_access_prevention = "enforced"
 
   versioning {
     enabled = true

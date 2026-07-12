@@ -1,0 +1,11 @@
+# AegisOps scanner waivers - every skip is documented here AND in the
+# PROGRESS.md scanner ledger. New checks fail the scan until triaged.
+skip-check:
+  - CKV2_AWS_30  # query logging: engine-aware log exports arrive with MS-7 (B2 opt-in)
+  - CKV_AWS_129  # log exports arrive with MS-7 engine-aware log-exports (B2 opt-in)
+  - CKV2_AWS_60  # copy-tags-to-snapshot: MS-7 enhancement candidate
+  - CKV_AWS_118  # enhanced monitoring: cost posture for sandbox databases
+  - CKV_AWS_157  # multi-AZ: cost posture for sandbox databases; opt-in candidate
+  - CKV_AWS_161  # IAM auth: opt-in candidate; master credentials are AWS-managed (manage_master_user_password)
+  - CKV_AWS_293  # TF-level deletion protection would fail governed destroy runs mid-apply; destroys are approval-gated by the platform instead
+  - CKV_AWS_353  # performance insights: cost posture for sandbox databases

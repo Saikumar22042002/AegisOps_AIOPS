@@ -6,7 +6,8 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     TERRAFORM_VERSION=1.9.8 \
-    KUBECTL_VERSION=v1.31.3
+    KUBECTL_VERSION=v1.31.3 \
+    TFSEC_VERSION=v1.28.14
 
 # ── OS packages + Terraform + kubectl + Ansible (all real CLIs the agents shell out to) ──
 RUN set -eux; \
@@ -24,6 +25,19 @@ RUN set -eux; \
     terraform version; kubectl version --client=true; ansible --version; \
     apt-get purge -y --auto-remove build-essential; \
     rm -rf /var/lib/apt/lists/*
+
+# ── Security scanners (MPP promotion gate is fail-closed without one; checkov is
+#    preferred by the seam, tfsec is the fallback). checkov lives in its own venv so
+#    its dependency tree can never conflict with the app's. ──
+RUN set -eux; \
+    python -m venv /opt/checkov; \
+    /opt/checkov/bin/pip install --no-cache-dir "checkov==3.3.8"; \
+    ln -s /opt/checkov/bin/checkov /usr/local/bin/checkov; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in amd64) tsarch=amd64;; arm64) tsarch=arm64;; *) echo "unsupported arch $arch"; exit 1;; esac; \
+    curl -fsSL "https://github.com/aquasecurity/tfsec/releases/download/${TFSEC_VERSION}/tfsec-linux-${tsarch}" -o /usr/local/bin/tfsec; \
+    chmod +x /usr/local/bin/tfsec; \
+    checkov --version; tfsec --version
 
 WORKDIR /app
 

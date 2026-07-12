@@ -1,0 +1,4 @@
+# AegisOps scanner waivers - documented in the PROGRESS.md scanner ledger.
+# tfsec v1.28 config excludes match legacy IDs; the AVD id is in each comment.
+exclude:
+  - aws-ec2-no-public-egress-sgr  # AVD-AWS-0104 | egress-open by design; ingress is the guarded surface (U1 SSH-CIDR policy)

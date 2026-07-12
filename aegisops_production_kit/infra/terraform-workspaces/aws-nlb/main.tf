@@ -22,12 +22,14 @@ locals {
 # Egress-only security group (outbound only — an NLB's client traffic is governed by the
 # listeners; this SG deliberately carries ZERO ingress rules).
 resource "aws_security_group" "egress_only" {
-  count  = local.make_sg ? 1 : 0
-  name   = "${var.name}-nlb-egress"
-  vpc_id = var.vpc_id
-  tags   = { ManagedBy = "aegisops", Name = "${var.name}-nlb-egress" }
+  count       = local.make_sg ? 1 : 0
+  name        = "${var.name}-nlb-egress"
+  description = "AegisOps egress-only SG for NLB ${var.name} (zero ingress rules)"
+  vpc_id      = var.vpc_id
+  tags        = { ManagedBy = "aegisops", Name = "${var.name}-nlb-egress" }
 
   egress {
+    description = "Outbound default route (health checks, target traffic)"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"

@@ -1,0 +1,4 @@
+# AegisOps scanner waivers - every skip is documented here AND in the
+# PROGRESS.md scanner ledger. New checks fail the scan until triaged.
+skip-check:
+  - CKV_TF_1  # registry module terraform-aws-modules/eks pinned by exact version; commit-hash pinning applies to git sources

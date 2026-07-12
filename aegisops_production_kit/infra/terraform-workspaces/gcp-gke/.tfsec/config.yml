@@ -1,0 +1,13 @@
+# AegisOps scanner waivers - documented in the PROGRESS.md scanner ledger.
+# tfsec v1.28 config excludes match legacy IDs; the AVD id is in each comment.
+exclude:
+  - google-gke-enforce-pod-security-policy  # AVD-GCP-0047 | PodSecurityPolicy is removed in current Kubernetes; rule is legacy
+  - google-gke-metadata-endpoints-disabled  # AVD-GCP-0048 | legacy metadata endpoints are disabled by GKE since 1.12; explicit metadata would touch node_config
+  - google-gke-enable-ip-aliasing  # AVD-GCP-0049 | alias IP / VPC-native: plan-shape change for existing clusters
+  - google-gke-use-service-account  # AVD-GCP-0050 | dedicated node SA: sandbox uses the default compute SA; enterprise candidate
+  - google-gke-use-cluster-labels  # AVD-GCP-0051 | cluster resource labels: candidate; node labels already set
+  - google-gke-node-pool-uses-cos  # AVD-GCP-0054 | image type defaults to COS containerd in current GKE
+  - google-gke-enable-network-policy  # AVD-GCP-0056 | network policy: sandbox posture
+  - google-gke-node-metadata-security  # AVD-GCP-0057 | workload metadata config requires workload identity: plan-shape change
+  - google-gke-enable-private-cluster  # AVD-GCP-0059 | private nodes: sandbox posture (public endpoint demo)
+  - google-gke-enable-master-networks  # AVD-GCP-0061 | master authorized networks would cut the demo's kubectl access path

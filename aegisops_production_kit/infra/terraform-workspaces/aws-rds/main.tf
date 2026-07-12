@@ -39,6 +39,8 @@ resource "aws_db_instance" "this" {
   storage_encrypted           = true
   skip_final_snapshot         = true
   publicly_accessible         = false
+  # Explicit form of the provider/API default (checkov CKV_AWS_226) — zero plan impact.
+  auto_minor_version_upgrade = true
 
   tags = {
     ManagedBy = "AegisOps"

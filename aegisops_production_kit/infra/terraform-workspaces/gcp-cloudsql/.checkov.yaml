@@ -1,0 +1,17 @@
+# AegisOps scanner waivers - every skip is documented here AND in the
+# PROGRESS.md scanner ledger. New checks fail the scan until triaged.
+skip-check:
+  - CKV2_GCP_13  # pg log_duration flag: observability posture arrives with MS-9 query insights (B2)
+  - CKV_GCP_108  # pg log_hostname flag: same MS-9 observability posture
+  - CKV_GCP_109  # pg log_min_messages flag: same MS-9 observability posture
+  - CKV_GCP_110  # pgAudit: same MS-9 observability posture
+  - CKV_GCP_111  # pg log_statement flag: same MS-9 observability posture
+  - CKV_GCP_51  # pg log_checkpoints flag: same MS-9 observability posture
+  - CKV_GCP_52  # pg log_connections flag: same MS-9 observability posture
+  - CKV_GCP_53  # pg log_disconnections flag: same MS-9 observability posture
+  - CKV_GCP_54  # pg log_lock_waits flag: same MS-9 observability posture
+  - CKV_GCP_11  # public IP path: MS-9 delivers private-VPC-peering opt-in (B2); authorized networks guard today
+  - CKV_GCP_60  # public IP path: MS-9 private-VPC-peering opt-in (B2)
+  - CKV_GCP_6  # require-SSL arrives as the MS-9 ssl_mode option (B2)
+  - CKV_GCP_14  # backups arrive with MS-9 backup/PITR (B2 opt-in)
+  - CKV_GCP_79  # major-version bump is destructive for existing instances; version is variable-driven

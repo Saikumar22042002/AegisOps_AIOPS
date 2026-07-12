@@ -1,0 +1,5 @@
+# AegisOps scanner waivers - documented in the PROGRESS.md scanner ledger.
+# tfsec v1.28 config excludes match legacy IDs; the AVD id is in each comment.
+exclude:
+  - aws-elb-alb-not-public  # AVD-AWS-0053 | internet-facing is the module's purpose; internal=true is variable-driven
+  - aws-ec2-no-public-egress-sgr  # AVD-AWS-0104 | egress-only SG by design (zero ingress rules)

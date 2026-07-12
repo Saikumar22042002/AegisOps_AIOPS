@@ -1,0 +1,6 @@
+# AegisOps scanner waivers - every skip is documented here AND in the
+# PROGRESS.md scanner ledger. New checks fail the scan until triaged.
+skip-check:
+  - CKV_AZURE_119  # public IP by design: the demo access path is SSH to the VM (U1 CIDR-scoped)
+  - CKV_AZURE_151  # module provisions Linux VMs; Windows encryption rule does not apply
+  - CKV_AZURE_50  # extension operations stay allowed: provisioning/verify flows may install agents

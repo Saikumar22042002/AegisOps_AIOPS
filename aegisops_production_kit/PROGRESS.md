@@ -1275,14 +1275,14 @@ as done without the live run; the code paths behind each are covered by tests wi
       Expect: policy check **"No dependent resources (world model)" FAILED** naming the
       dependent + the "⚠ Dependent resources" reasoning card + console warning; reject leaves
       everything untouched.
-- [ ] **DLV-13 · Real security scan in the promotion pipeline (MPP)** — Needs: `checkov`
-      (pip) or `tfsec` (binary) installed in the api image.
-      Steps: (1) install the scanner (e.g. add `checkov` to the api image); (2) draft a module
-      with a known finding (e.g. an S3 bucket without encryption); (3) `run_checks` → scan
-      `failed` with the finding named; (4) fix the draft, re-check → `passed`; (5) propose →
-      promote succeeds only now.
-      Expect: promotion is impossible while the scan is failed/unavailable (fail closed); the
-      finding text appears in the proposal's scan detail.
+- [x] **DLV-13 · Real security scan in the promotion pipeline (MPP)** — **SATISFIED
+      2026-07-12 by the SCAN commit** (no cloud creds were ever needed — only a scanner in
+      the image, which the API image now bakes in: checkov 3.3.8 + tfsec v1.28.14).
+      Automated permanently as `test_real_scan_gates_promotion_end_to_end`: a draft
+      carrying an embedded credential (the canonical AWS docs EXAMPLE key) really FAILS
+      checkov (CKV_SECRET_2 in the scan detail) → propose OK but promote REFUSED; a clean
+      draft really PASSES. The fail-closed `unavailable` path is seam-forced in
+      `test_promotion_is_blocked_without_a_passed_scan`.
 - [ ] **DLV-15 · MODSEED gcp.vpc live lifecycle (MS-1)** — Needs: valid `GEMINI_API_KEY`
       (+ GCP SA present).
       Steps: (1) UI: "create a vpc named prod-net in gcp" (or `name=prod-net`); (2) approve on
@@ -1550,6 +1550,135 @@ this section mirrors phase-level status only.
         failing on an ASYMMETRIC_SIGN/HSM/no-rotation plan. Params ask only `name` (project
         auto-filled). Evidence: `test_modseed_ms6_gcp_kms.py` (9). Canary (B5) green. Live =
         **DLV-20**. **This completes MODSEED modules 1–6 — STOPPED for the evidence table.**
+  - [x] **SCAN — checkov + tfsec across all terraform workspaces** (2026-07-12, owner
+        pre-MS-7 condition): checkov 3.3.8 + tfsec v1.28.14 run over all 21 workspaces
+        (20 cloud + demo-null). Raw findings: **156** (99 checkov / 57 tfsec). Every one
+        fixed or waived — full ledger below. Enforcement: `infra/scan-workspaces.sh`
+        (single source of truth), new **CI job `terraform-scan`**, and both scanners baked
+        into the API image (checkov in an isolated venv at `/opt/checkov`, tfsec pinned
+        binary) — **the MPP promotion gate is no longer environment-blocked**: `promote`
+        now reaches a real scan verdict instead of fail-closed `unavailable` (DLV-13
+        posture updated). The fail-closed path itself is now seam-forced in
+        `test_promotion_is_blocked_without_a_passed_scan` (monkeypatched
+        `_scan_command → None`) — a deliberate test change: the environment can no longer
+        prove that path since the image always has a scanner (B4-style, recorded here).
+        Both sweeps green with waivers applied: **checkov 0 / tfsec 0 across all 21**.
+
+### Scanner ledger (fix or waiver per finding — owner condition, 2026-07-12)
+
+Scanners: checkov 3.3.8, tfsec v1.28.14. Waivers live per-workspace in
+`.checkov.yaml` (`skip-check`) and `.tfsec/config.yml` (`exclude`, legacy IDs — v1.28
+config matching; the AVD id sits in each entry's comment). Every waiver is commented at
+the site with the same reason as this ledger. New findings fail CI until fixed or triaged.
+
+**Zero-finding workspaces (7):** aws-kms · azure-vnet · azure-resource-group · azure-vm†
+· demo-null · gcp-kms† · gcp-vpc† — († = checkov-clean; tfsec/checkov had the entries
+listed below.) aws-kms and azure-vnet were fully clean in BOTH scanners.
+
+**FIXED (6 — all verified zero-plan-impact except the two noted):**
+
+| Workspace | Finding(s) | Fix |
+|---|---|---|
+| aws-ec2 | CKV_AWS_23 / AVD-AWS-0124 (SG rule descriptions) | descriptions added to the open-ports ingress + egress rules. In-place rule update (rule recreation on AWS for inline rules — no live resources exist yet). |
+| aws-nlb | AVD-AWS-0099 + CKV_AWS_23 / AVD-AWS-0124 (SG + rule descriptions) | description on the egress-only SG + its egress rule. NOTE: SG `description` forces replacement on AWS — changed before any live NLB exists. |
+| aws-rds | CKV_AWS_226 (auto minor upgrades) | `auto_minor_version_upgrade = true` — explicit form of the provider/API default, zero plan impact. |
+| azure-aks | AVD-AZU-0042 CRITICAL (RBAC) | `role_based_access_control_enabled = true` — explicit form of the azurerm default, zero plan impact. |
+| gcp-gke | CKV_GCP_9/10 + AVD-GCP-0063/0058 (node auto-repair/upgrade), CKV_GCP_13 (client cert auth) | explicit `management { auto_repair/auto_upgrade = true }` + `master_auth { issue_client_certificate = false }` — both explicit forms of GKE defaults, zero plan impact. |
+| gcp-gcs | CKV_GCP_114 (public access prevention) | `public_access_prevention = "enforced"` — real in-place hardening, aligned with the platform's existing no-public-bucket policy (U1). |
+
+**EXCLUDED AS UPSTREAM (not our source):** aws-vpc AVD-AWS-0102×4 / 0105×2 / 0178 and
+eks-provision AVD-AWS-0038×2 / 0104 sit inside the version-pinned registry modules'
+downloaded caches (`.terraform/modules/...`) — excluded via `--skip-path '\.terraform'`
+(checkov) and `--exclude-downloaded-modules` (tfsec). Upstream modules are scanned by
+their own projects; pins are exact versions (CKV_TF_1 on both registry sources is waived
+for the same reason — commit-hash pinning applies to git sources).
+
+**WAIVED (per-workspace; scanner IDs grouped where both flag the same concern):**
+
+| Workspace | Finding(s) | Waiver reason |
+|---|---|---|
+| aws-ec2 | CKV2_AWS_41 | IAM instance profile arrives as the MS-10 SSM opt-in (B2: off by default). |
+| aws-ec2 | CKV_AWS_126 | Detailed monitoring: sandbox cost posture; opt-in candidate. |
+| aws-ec2 | CKV_AWS_135 | EBS-optimized is instance-type dependent; modern types are optimized by default. |
+| aws-ec2 | CKV_AWS_382 / AVD-AWS-0104 | Egress-open by design (outbound updates); ingress is the guarded surface — U1 enforces the SSH-CIDR policy. |
+| aws-nlb | CKV2_AWS_20 | HTTP→HTTPS redirect is an ALB-listener concept; this is a network (TCP) LB. |
+| aws-nlb | CKV_AWS_150 | Deletion protection is variable-driven; Production env-default ON + the deletion-protection-as-approved policy check (MS-3 design). |
+| aws-nlb | CKV_AWS_91 | Access logging needs an S3 bucket dependency; opt-in candidate, never forced. |
+| aws-nlb | CKV_AWS_382 / AVD-AWS-0104 | Egress-only SG by design; zero ingress rules (MS-3 source invariant). |
+| aws-nlb | AVD-AWS-0053 | Internet-facing is the module's purpose; `internal = true` is variable-driven. |
+| aws-rds | CKV2_AWS_30 + CKV_AWS_129 | Engine-aware log exports arrive with MS-7 (B2 opt-in). |
+| aws-rds | CKV2_AWS_60 | Copy-tags-to-snapshot: MS-7 enhancement candidate. |
+| aws-rds | CKV_AWS_118 + CKV_AWS_353 / AVD-AWS-0133 | Enhanced monitoring / performance insights: sandbox cost posture. |
+| aws-rds | CKV_AWS_157 | Multi-AZ: sandbox cost posture; opt-in candidate. |
+| aws-rds | CKV_AWS_161 / AVD-AWS-0176 | IAM auth: opt-in candidate; master credentials are AWS-managed (`manage_master_user_password`). |
+| aws-rds | CKV_AWS_293 / AVD-AWS-0177 | TF-level deletion protection would fail governed destroy runs mid-apply; destroys are approval-gated by the platform instead (same reasoning as gcp-kms CKV_GCP_82 and gke's explicit `deletion_protection = false`). |
+| aws-rds | AVD-AWS-0077 | Backup retention: MS-7/day-2 candidate; sandbox cost posture. |
+| aws-s3 | CKV2_AWS_61 | Lifecycle rules: demo bucket posture; day-2 candidate. |
+| aws-s3 | CKV2_AWS_62 | Event notifications: no consumer exists in the platform's flows. |
+| aws-s3 | CKV_AWS_144 | Cross-region replication: not in any binding scope (explicitly out of MODSEED). |
+| aws-s3 | CKV_AWS_145 / AVD-AWS-0132 | SSE-S3 (AES256) is the module contract; KMS default would add key cost/coupling. |
+| aws-s3 | CKV_AWS_18 / AVD-AWS-0089 | Access logging needs a second bucket; demo posture, opt-in candidate. |
+| aws-vpc | CKV_TF_1 | Registry module `terraform-aws-modules/vpc` pinned by exact version (see upstream note). |
+| eks-provision | CKV_TF_1 | Registry module `terraform-aws-modules/eks` pinned by exact version (see upstream note). |
+| azure-aks | CKV_AZURE_4 / AVD-AZU-0040 | Log Analytics/OMS agent arrives with MS-13 (B2 opt-in). |
+| azure-aks | CKV_AZURE_7 / AVD-AZU-0043 | `network_policy=calico` arrives with MS-13 (B2 opt-in). |
+| azure-aks | CKV_AZURE_116 | Azure Policy add-on arrives as the MS-13 `azure_policy_enabled` opt-in (B2). |
+| azure-aks | CKV_AZURE_115 + CKV_AZURE_6 / AVD-AZU-0041 | Private cluster / authorized IP ranges would cut the demo's public API access path. |
+| azure-aks | CKV2_AZURE_29 | kubenet is the sandbox default; Azure CNI is a plan-shape change (network profile). |
+| azure-aks | CKV_AZURE_117 | Disk encryption set: platform-managed keys are the sandbox posture. |
+| azure-aks | CKV_AZURE_141 | Local admin stays enabled: `kube_config` output is the demo access path. |
+| azure-aks | CKV_AZURE_168 | Max-pods sizing: sandbox node defaults. |
+| azure-aks | CKV_AZURE_170 | Paid SLA SKU: sandbox cost posture. |
+| azure-aks | CKV_AZURE_171 | Upgrade channel: pinned-version posture; owner-controlled upgrades. |
+| azure-aks | CKV_AZURE_172 | CSI secret autorotation: CSI driver not enabled in this module. |
+| azure-aks | CKV_AZURE_226 | Ephemeral OS disks are VM-size dependent; sandbox sizes may not support them. |
+| azure-aks | CKV_AZURE_227 | Host encryption requires subscription feature registration; sandbox posture. |
+| azure-aks | CKV_AZURE_232 | Single-pool sandbox cluster; system/user pool split is an enterprise topology. |
+| azure-keyvault | CKV_AZURE_109 / AVD-AZU-0013 + CKV_AZURE_189 + CKV2_AZURE_32 | Network posture is variable-driven and honestly STATED on the approval card when Allow (MS-5 design); AzureServices bypass + ACLs are the guard; private endpoint is an enterprise opt-in. |
+| azure-keyvault | CKV_AZURE_112 | Standard SKU (software-protected keys) is the module contract; premium/HSM is a cost decision. |
+| azure-keyvault | CKV_AZURE_40 | Expiration on the optional RSA keys: opt-in candidate; rotation semantics owner-decided. |
+| azure-postgres | CKV2_AZURE_26 + CKV2_AZURE_57 | Network hardening (delegated subnet / private DNS) arrives with MS-8 (B2 opt-in). |
+| azure-postgres | CKV_AZURE_136 | Geo-redundant backup arrives with MS-8 (B2 opt-in). |
+| azure-storage | CKV2_AZURE_1 | CMEK: platform-managed keys are the sandbox posture. |
+| azure-storage | CKV2_AZURE_33 | Private endpoint: sandbox posture. |
+| azure-storage | CKV2_AZURE_38 | Blob soft-delete: day-2 candidate; enabling now would alter existing accounts' re-plans. |
+| azure-storage | CKV2_AZURE_40 | Shared-key auth: SDK verify paths use account keys; revisit with managed identity. |
+| azure-storage | CKV2_AZURE_41 | SAS expiration policy: no SAS tokens are issued by the platform. |
+| azure-storage | CKV_AZURE_206 | LRS replication: sandbox cost posture. |
+| azure-storage | CKV_AZURE_33 | Queue-service logging: queues unused by the platform. |
+| azure-storage | CKV_AZURE_59 | Public network access: container ACLs are private; account-level lockdown is an enterprise opt-in. |
+| azure-vm | CKV_AZURE_119 | Public IP by design: the demo access path is SSH to the VM (U1 CIDR-scoped admin ingress). |
+| azure-vm | CKV_AZURE_151 | Module provisions Linux VMs; the Windows-encryption rule does not apply. |
+| azure-vm | CKV_AZURE_50 ×2 | Extension operations stay allowed: provisioning/verify flows may install agents. |
+| gcp-cloudsql | CKV2_GCP_13, CKV_GCP_51–54, CKV_GCP_108–111 / AVD-GCP-0014/0016/0020/0022/0025 | PostgreSQL logging-flag family + pgAudit: observability posture arrives with MS-9 query insights (B2). |
+| gcp-cloudsql | CKV_GCP_11 + CKV_GCP_60 / AVD-GCP-0017 ×2 | Public IP path: MS-9 delivers the private-VPC-peering opt-in (B2); authorized networks guard today. |
+| gcp-cloudsql | CKV_GCP_6 / AVD-GCP-0015 | Require-SSL arrives as the MS-9 `ssl_mode` option (B2). |
+| gcp-cloudsql | CKV_GCP_14 / AVD-GCP-0024 | Backups arrive with MS-9 backup/PITR (B2 opt-in). |
+| gcp-cloudsql | CKV_GCP_79 | Major-version bump is destructive for existing instances; version is variable-driven. |
+| gcp-gce | CKV_GCP_32 / AVD-GCP-0030 | Project-wide SSH key blocking arrives with the MS-12 OS Login option (B2). |
+| gcp-gce | CKV_GCP_39 / AVD-GCP-0041 + AVD-GCP-0045 | Shielded VM arrives as the MS-12 `shielded_instance_config` option (B2). |
+| gcp-gce | CKV_GCP_40 / AVD-GCP-0031 | Public IP by design: demo access is SSH with the generated key (one-time reveal). |
+| gcp-gce | CKV_GCP_38 / AVD-GCP-0033 | CMEK disks: platform-managed keys are the sandbox posture. |
+| gcp-gcs | CKV_GCP_62 | Bucket access logging needs a log bucket; demo posture, opt-in candidate. |
+| gcp-gcs | AVD-GCP-0066 | CMEK: platform-managed encryption is the sandbox posture. |
+| gcp-gke | CKV_GCP_12 / AVD-GCP-0056 | Network policy: sandbox cluster posture; enterprise hardening candidate. |
+| gcp-gke | CKV_GCP_20 / AVD-GCP-0061 | Master authorized networks would cut the demo's kubectl access path. |
+| gcp-gke | CKV_GCP_21 / AVD-GCP-0051 | Cluster resource labels: candidate; node labels already set. |
+| gcp-gke | CKV_GCP_23 / AVD-GCP-0049 | Alias IP / VPC-native requires `ip_allocation_policy`: plan-shape change for existing clusters. |
+| gcp-gke | CKV_GCP_25 + CKV_GCP_64 / AVD-GCP-0059 | Private cluster/nodes: sandbox posture (public endpoint demo). |
+| gcp-gke | CKV_GCP_61 | VPC flow logs + intranode visibility: cost posture. |
+| gcp-gke | CKV_GCP_65 | Google Groups RBAC needs Workspace group setup outside the sandbox. |
+| gcp-gke | CKV_GCP_66 | Binary authorization: no image-signing pipeline exists in the sandbox. |
+| gcp-gke | CKV_GCP_68 | Secure boot for shielded nodes: enterprise hardening candidate. |
+| gcp-gke | CKV_GCP_69 ×2 / AVD-GCP-0057 ×2 | GKE metadata server / workload metadata requires workload identity: plan-shape change. |
+| gcp-gke | CKV_GCP_70 | Release channel: pinned-version posture; owner-controlled upgrades. |
+| gcp-gke | AVD-GCP-0047 | PodSecurityPolicy is removed in current Kubernetes; legacy rule. |
+| gcp-gke | AVD-GCP-0048 | Legacy metadata endpoints are disabled by GKE since 1.12; explicit metadata would touch `node_config`. |
+| gcp-gke | AVD-GCP-0050 | Dedicated node SA: sandbox uses the default compute SA; enterprise candidate. |
+| gcp-gke | AVD-GCP-0054 | Image type defaults to COS containerd in current GKE. |
+| gcp-vpc | AVD-GCP-0029 ×2 | Subnet flow logs: cost posture; opt-in candidate (MS-1 ships NAT + internal firewall). |
+| gcp-kms | CKV_GCP_43 | `rotation_period` is derived from `var.rotation_days` (default 90d); checkov cannot evaluate the expression — the `_gcp_kms_policy` plan-JSON check enforces rotation at approval time (stronger: it sees the real plan). |
+| gcp-kms | CKV_GCP_82 | `lifecycle prevent_destroy` would break the governed destroy flow; ring permanence is stated on the destroy card (MS-6). |
 
 
 _Legend: [x] done · [~] partial/scaffolded · [ ] pending._

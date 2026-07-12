@@ -51,6 +51,8 @@ resource "azurerm_kubernetes_cluster" "this" {
   resource_group_name = azurerm_resource_group.this.name
   dns_prefix          = var.name
   kubernetes_version  = var.kubernetes_version != "" ? var.kubernetes_version : null
+  # Explicit form of the azurerm default (tfsec AVD-AZU-0042) — zero plan impact.
+  role_based_access_control_enabled = true
 
   default_node_pool {
     name       = "default"
