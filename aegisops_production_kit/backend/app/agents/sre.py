@@ -73,6 +73,24 @@ async def _collect_telemetry(settings, emitter) -> dict:
                                             f"error_rate={signals['error_rate']:.3f}")
     except Exception as e:  # noqa: BLE001
         await emitter.console("stderr", f"prometheus query failed: {e}")
+
+    # INV: K8s triage evidence through the read-only investigation boundary — the investigator
+    # can only reach the frozen read-only registry, so triage work is structurally unable to
+    # mutate anything (mutation stays behind the approval gate in sre_execute).
+    try:
+        from ..tools.kubernetes import get_kubernetes as _get_k8s
+        if _get_k8s(settings).enabled:
+            from . import investigation
+            inv = investigation.Investigator(investigation.default_registry(settings))
+            ev = await inv.call("list_deployments", namespace="default")
+            if ev.ok:
+                signals["deployments"] = [d.get("name") for d in (ev.result or [])][:10]
+                await emitter.console(
+                    "stdout", f"investigation (read-only): {len(ev.result or [])} deployments")
+            else:
+                await emitter.console("stderr", f"investigation: {ev.error}")
+    except Exception as e:  # noqa: BLE001 — triage evidence is best-effort
+        await emitter.console("stderr", f"investigation failed: {e}")
     return signals
 
 

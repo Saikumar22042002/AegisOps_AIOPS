@@ -1353,5 +1353,17 @@ this section mirrors phase-level status only.
         `AEGISOPS_EXEC_LOOP` (default off → DEP's text proposal). Evidence:
         `test_exec_loop.py` (10). Live VPC→EC2 DAG e2e in the UI = **DLV-12** (exit-gate
         headline). tsc clean; vitest 28.
+  - [x] **INV read-only investigation agents** (2026-07-12): new `agents/investigation.py` —
+        the decision-13 boundary made structural. `ToolRegistry` ASSERTS read-only-ness at
+        registration (13 mutation-marker shapes rejected outright) and freezes after build;
+        `Investigator` can call only registered tools under a hard `MAX_CALLS=8` budget,
+        returning every call as evidence (failed reads included — never crashes);
+        **`spawn()` gives a sub-agent the SAME frozen registry and the SAME shared budget — a
+        spawned agent is structurally unable to reach mutation or widen its surface**.
+        `default_registry` holds the real reads (PromQL scalar, K8s list_deployments/pods,
+        org inventory, world-model impact) — verified by IDENTITY to exclude the K8s mutating
+        methods. SRE triage now gathers its K8s evidence through the investigator. deepagents
+        (re-evaluate at 1.0/LTS) would plug in as a director over this registry. Evidence:
+        `test_investigation.py` (21) + SRE remediation suite unchanged.
 
 _Legend: [x] done · [~] partial/scaffolded · [ ] pending._
