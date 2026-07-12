@@ -381,7 +381,7 @@ async def cloudops_plan(state: AgentState, config) -> dict:
                 "outcome": {"status": "blocked_by_guard", "error": violation}}
 
     await timing.start_step(run_id, "policy_evaluation")
-    policy_checks = template.policy_fn(validated)
+    policy_checks = template.policy_fn(validated, runner.planned_resources())  # U1: over the real plan
     await timing.end_step(run_id, "policy_evaluation", status="done",
                           result={"passed": sum(1 for p in policy_checks if p["passed"]), "total": len(policy_checks)})
     plan_json = {"summary": plan["summary"], "diff": plan["diff"], "workspace": template.workspace,
@@ -880,7 +880,7 @@ async def _modify_resource(state: AgentState, config, target: str | None) -> dic
         return await _say(violation)
 
     await timing.start_step(run_id, "policy_evaluation")
-    policy_checks = template.policy_fn(validated)
+    policy_checks = template.policy_fn(validated, runner.planned_resources())  # U1: over the real plan
     await timing.end_step(run_id, "policy_evaluation", status="done")
 
     plan_json = {"summary": plan["summary"], "diff": plan["diff"],

@@ -887,6 +887,14 @@ two known realm issuer URLs (internal + browser-facing), nothing else.
         `memory.plan_ref_line` is the short reference the context carries and `memory.fetch_plan`
         fetches the full plan on demand. Evidence: `test_memory.py` (2) — a 30-plan session stays
         within the purpose budget with no raw plan JSON inlined; fetch returns the stored plan.
+  - [x] **U1 real policy checks** (2026-07-12): each `_*_policy` now evaluates genuine predicates
+        over the planned resource attributes (`terraform show -json` `change.after`, stashed
+        in-memory by `show_plan` via `runner.planned_resources()` — never persisted). EC2 root-volume
+        encryption + IMDSv2, S3 public-access-block + SSE + versioning, RDS storage_encrypted +
+        publicly_accessible, Azure storage min_tls_version + public-blob, GCS uniform-access +
+        force_destroy are real pass/fail; a plan with a control DISABLED renders a genuine FAILED
+        check. Controls not extractable from the plan stay honest "not evaluated" (P8 label).
+        Evidence: `test_policy_real.py` (7) + `test_templates.py` (7) green.
   - [x] **S0 multi-tenancy** (2026-07-11): principal→(org_id,user_id) via Keycloak org claim
         (group-membership mapper; realm defines northwind-financial + acme-industrial groups)
         with the `users` mirror (by keycloak_sub, username/email fallback for seeded rows)

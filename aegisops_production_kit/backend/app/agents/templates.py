@@ -26,7 +26,7 @@ class WorkflowTemplate:
     workspace: str | None         # terraform workspace dir under TERRAFORM_WORKSPACES_DIR
     schema: type[wf.WorkflowInputs]
     description: str
-    policy_fn: Callable[[dict[str, Any]], list[dict[str, Any]]] = field(default=lambda _i: [])
+    policy_fn: Callable[..., list[dict[str, Any]]] = field(default=lambda _i, resources=None: [])
     actions: tuple[str, ...] = ("create", "modify", "destroy")
 
     def var_map(self, inputs: dict[str, Any]) -> dict[str, Any]:
@@ -40,24 +40,59 @@ def _ck(name: str, passed: bool, detail: str = "") -> dict[str, Any]:
 
 
 def _todo(name: str, detail: str = "") -> dict[str, Any]:
-    """Honesty label (P8, Phase 1): a control the module enforces but the policy engine does not
-    yet VERIFY against the plan. Rendered as "not evaluated" — never a green pass an approver
-    might trust. Becomes a real predicate over `terraform show -json` in Phase 2 (U1).
-    `passed=None` is the not-evaluated signal for the approval card."""
-    d = "enforced by the module · verified against the plan in a later pass"
+    """Honesty label: a control the module enforces but the policy engine cannot VERIFY against
+    the plan (attribute not extractable, or the plan JSON isn't available on this path).
+    Rendered as "not evaluated" — never a green pass. `passed=None` is the not-evaluated signal."""
+    d = "enforced by the module · not verifiable from the plan JSON here"
     return {"name": name, "passed": None, "detail": detail or d, "evaluated": False}
 
 
-def _s3_policy(i: dict) -> list[dict]:
-    return [
-        _ck("Public access blocked", i.get("block_public", True)),
-        _ck("Versioning enabled", i.get("versioning", True)),
-        _todo("Server-side encryption (AES256)"),
-        _todo("Approved module version", "aws/s3 v1"),
-    ]
+# U1: real-predicate helpers over the planned resource attributes (terraform show -json
+# `change.after`), passed in by cloudops after show_plan. `resources` is a list of
+# {type, name, address, after}. None/empty ⇒ no plan available ⇒ checks stay "not evaluated".
+def _after(resources, tf_type: str) -> dict | None:
+    for r in (resources or []):
+        if r.get("type") == tf_type:
+            return r.get("after") or {}
+    return None
 
 
-def _vpc_policy(i: dict) -> list[dict]:
+def _block0(after: dict, key: str) -> dict:
+    """First element of a Terraform nested-block list attribute (e.g. root_block_device)."""
+    v = (after or {}).get(key)
+    if isinstance(v, list) and v:
+        return v[0] or {}
+    return v if isinstance(v, dict) else {}
+
+
+def _s3_policy(i: dict, resources=None) -> list[dict]:
+    pab = _after(resources, "aws_s3_bucket_public_access_block")
+    sse = _after(resources, "aws_s3_bucket_server_side_encryption_configuration")
+    ver = _after(resources, "aws_s3_bucket_versioning")
+    checks = []
+    if pab is not None:
+        blocked = all(bool(pab.get(k)) for k in
+                      ("block_public_acls", "block_public_policy", "ignore_public_acls", "restrict_public_buckets"))
+        checks.append(_ck("Public access blocked", blocked,
+                          "all four public-access-block flags on" if blocked else "a public-access flag is OFF"))
+    else:
+        checks.append(_ck("Public access blocked", i.get("block_public", True)))
+    if sse is not None:
+        rule = _block0(sse, "rule")
+        algo = (_block0(rule, "apply_server_side_encryption_by_default") or {}).get("sse_algorithm")
+        checks.append(_ck("Server-side encryption", bool(algo), algo or "no SSE rule in the plan"))
+    else:
+        checks.append(_todo("Server-side encryption (AES256)"))
+    if ver is not None:
+        status = (_block0(ver, "versioning_configuration") or {}).get("status")
+        checks.append(_ck("Versioning enabled", status == "Enabled", status or "unset"))
+    else:
+        checks.append(_ck("Versioning enabled", i.get("versioning", True)))
+    checks.append(_todo("Approved module version", "aws/s3 v1"))
+    return checks
+
+
+def _vpc_policy(i: dict, resources=None) -> list[dict]:
     return [
         _ck("Multi-AZ subnets", int(i.get("az_count", 3)) >= 2, f"{i.get('az_count', 3)} AZs"),
         _todo("Private subnets + NAT egress"),
@@ -65,7 +100,7 @@ def _vpc_policy(i: dict) -> list[dict]:
     ]
 
 
-def _eks_policy(i: dict) -> list[dict]:
+def _eks_policy(i: dict, resources=None) -> list[dict]:
     return [
         _todo("Secrets encryption enabled"),
         _todo("Private API endpoint only"),
@@ -75,44 +110,65 @@ def _eks_policy(i: dict) -> list[dict]:
     ]
 
 
-def _rds_policy(i: dict) -> list[dict]:
+def _rds_policy(i: dict, resources=None) -> list[dict]:
+    db = _after(resources, "aws_db_instance")
+    checks = []
+    if db is not None:
+        checks.append(_ck("Storage encrypted", bool(db.get("storage_encrypted")),
+                          "encrypted" if db.get("storage_encrypted") else "NOT encrypted"))
+        checks.append(_ck("Not publicly accessible", db.get("publicly_accessible") is False,
+                          "public" if db.get("publicly_accessible") else "private"))
+    else:
+        checks.append(_todo("Storage encrypted"))
+        checks.append(_todo("Not publicly accessible"))
+    checks.append(_todo("RDS-managed master password"))
+    checks.append(_ck("Approved engine", i.get("engine", "postgres") in {"postgres", "mysql", "mariadb"}, i.get("engine", "")))
+    return checks
+
+
+def _ec2_policy(i: dict, resources=None) -> list[dict]:
+    inst = _after(resources, "aws_instance")
+    if inst is None:
+        return [_todo("IMDSv2 enforced"), _todo("Root volume encrypted"), _todo("Dedicated security group")]
+    mo = _block0(inst, "metadata_options")
+    rbd = _block0(inst, "root_block_device")
+    tokens = mo.get("http_tokens")
     return [
-        _todo("Storage encrypted"),
-        _todo("Not publicly accessible"),
-        _todo("RDS-managed master password"),
-        _ck("Approved engine", i.get("engine", "postgres") in {"postgres", "mysql", "mariadb"}, i.get("engine", "")),
+        _ck("IMDSv2 enforced", tokens == "required", tokens or "unset"),
+        _ck("Root volume encrypted", bool(rbd.get("encrypted")),
+            "encrypted" if rbd.get("encrypted") else "NOT encrypted"),
     ]
 
 
-def _ec2_policy(_i: dict) -> list[dict]:
+def _azure_storage_policy(i: dict, resources=None) -> list[dict]:
+    acct = _after(resources, "azurerm_storage_account")
+    if acct is None:
+        return [_todo("Minimum TLS 1.2"), _todo("No public blob access"), _todo("Approved replication")]
+    tls = acct.get("min_tls_version")
     return [
-        _todo("IMDSv2 enforced"),
-        _todo("Root volume encrypted"),
-        _todo("Launched in a private subnet"),
+        _ck("Minimum TLS 1.2", str(tls) in ("TLS1_2", "TLS1_3"), tls or "unset"),
+        _ck("No public blob access", acct.get("allow_nested_items_to_be_public") is False,
+            "public blobs disabled" if acct.get("allow_nested_items_to_be_public") is False else "public blobs ALLOWED"),
     ]
 
 
-def _azure_storage_policy(_i: dict) -> list[dict]:
-    return [
-        _todo("Minimum TLS 1.2"),
-        _todo("No public blob access"),
-        _todo("Approved replication"),
-    ]
-
-
-def _azure_rg_policy(_i: dict) -> list[dict]:
+def _azure_rg_policy(i: dict, resources=None) -> list[dict]:
     return [_todo("Tagging policy applied"), _todo("Approved region")]
 
 
-def _gcs_policy(_i: dict) -> list[dict]:
+def _gcs_policy(i: dict, resources=None) -> list[dict]:
+    b = _after(resources, "google_storage_bucket")
+    if b is None:
+        return [_todo("Uniform bucket-level access"), _todo("Versioning enabled"), _todo("force_destroy disabled")]
     return [
-        _todo("Uniform bucket-level access"),
-        _todo("Versioning enabled"),
-        _todo("force_destroy disabled"),
+        _ck("Uniform bucket-level access", bool(b.get("uniform_bucket_level_access")),
+            "uniform" if b.get("uniform_bucket_level_access") else "fine-grained ACLs"),
+        _ck("force_destroy disabled", b.get("force_destroy") is False,
+            "protected" if b.get("force_destroy") is False else "force_destroy ON"),
     ]
 
 
-def _azure_vm_policy(_i: dict) -> list[dict]:
+def _azure_vm_policy(i: dict, resources=None) -> list[dict]:
     return [
         _todo("SSH key auth (no password)"),
         _todo("Dedicated NSG (default-deny inbound)"),
@@ -120,23 +176,23 @@ def _azure_vm_policy(_i: dict) -> list[dict]:
     ]
 
 
-def _azure_pg_policy(_i: dict) -> list[dict]:
+def _azure_pg_policy(i: dict, resources=None) -> list[dict]:
     return [
         _todo("TLS-enforced connections"),
         _todo("Server-managed admin password (generated)"),
-        _ck("Approved PostgreSQL version", str(_i.get("pg_version", "15")) in {"14", "15", "16"}, _i.get("pg_version", "")),
+        _ck("Approved PostgreSQL version", str(i.get("pg_version", "15")) in {"14", "15", "16"}, i.get("pg_version", "")),
     ]
 
 
-def _azure_aks_policy(_i: dict) -> list[dict]:
+def _azure_aks_policy(i: dict, resources=None) -> list[dict]:
     return [
         _todo("System-assigned managed identity"),
         _todo("Azure RBAC enabled"),
-        _ck("Multi-node pool", int(_i.get("node_count", 2)) >= 2, f"{_i.get('node_count', 2)} nodes"),
+        _ck("Multi-node pool", int(i.get("node_count", 2)) >= 2, f"{i.get('node_count', 2)} nodes"),
     ]
 
 
-def _gcp_gce_policy(_i: dict) -> list[dict]:
+def _gcp_gce_policy(i: dict, resources=None) -> list[dict]:
     return [
         _todo("SSH key auth (no password)"),
         _todo("Ingress restricted to declared ports"),
@@ -144,18 +200,18 @@ def _gcp_gce_policy(_i: dict) -> list[dict]:
     ]
 
 
-def _gcp_gke_policy(_i: dict) -> list[dict]:
+def _gcp_gke_policy(i: dict, resources=None) -> list[dict]:
     return [
         _todo("Dedicated node pool (default removed)"),
         _todo("Deletion protection off (day-2 destroy)"),
-        _ck("Multi-node pool", int(_i.get("node_count", 2)) >= 2, f"{_i.get('node_count', 2)} nodes"),
+        _ck("Multi-node pool", int(i.get("node_count", 2)) >= 2, f"{i.get('node_count', 2)} nodes"),
     ]
 
 
-def _gcp_cloudsql_policy(_i: dict) -> list[dict]:
+def _gcp_cloudsql_policy(i: dict, resources=None) -> list[dict]:
     return [
         _todo("Generated root password"),
-        _ck("Approved engine (PostgreSQL)", str(_i.get("database_version", "")).startswith("POSTGRES"), _i.get("database_version", "")),
+        _ck("Approved engine (PostgreSQL)", str(i.get("database_version", "")).startswith("POSTGRES"), i.get("database_version", "")),
     ]
 
 

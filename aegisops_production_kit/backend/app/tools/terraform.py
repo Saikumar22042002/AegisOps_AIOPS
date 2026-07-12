@@ -234,7 +234,20 @@ class TerraformRunner:
             # that claims zero changes for a plan that isn't zero.
             raise TerraformError(f"could not parse the plan JSON ({e}); refusing to report a "
                                  "zero-change summary for an unparsed plan") from e
+        # U1: stash the planned resource attributes (change.after) for REAL policy evaluation.
+        # In-memory only — the reduced summary/diff is what gets persisted to runs.plan_json, so
+        # no raw `after` (which could carry a sensitive attribute) is ever persisted.
+        self._planned_resources = [
+            {"type": rc_.get("type"), "name": rc_.get("name"), "address": rc_.get("address"),
+             "after": (rc_.get("change", {}) or {}).get("after") or {}}
+            for rc_ in data.get("resource_changes", [])
+        ]
         return _summarize_plan(data)
+
+    def planned_resources(self) -> list[dict[str, Any]]:
+        """The planned resources' `after` attributes (from the last show_plan) — for U1 policy
+        evaluation against the real plan. Empty until show_plan has run."""
+        return getattr(self, "_planned_resources", [])
 
     async def output_raw(self, name: str) -> str:
         """A single output's raw value — used ONLY by the one-time credential reveal (N-02).
