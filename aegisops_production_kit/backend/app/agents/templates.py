@@ -256,6 +256,11 @@ _SYNONYMS: dict[str, dict[str, str]] = {
 }
 
 
+def by_key(key: str) -> WorkflowTemplate | None:
+    """Approved template by its catalog key (e.g. "aws.vpc") — the exec loop's lookup."""
+    return _BY_KEY.get(key)
+
+
 def select(cloud: str, resource: str) -> WorkflowTemplate | None:
     """Exact (cloud, resource) → curated template, or None (after resolving cloud synonyms).
 

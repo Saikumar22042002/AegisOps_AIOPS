@@ -194,6 +194,29 @@ function AiMessage({ m }: { m: ChatMessage }) {
                   </div>
                 </button>
 
+                {/* U6: goal-DAG card — one approval covers every ordered step. Each step shows
+                    its real plan summary, or states honestly that it plans at execute time
+                    (its inputs are wired to a parent's outputs that don't exist yet). */}
+                {Array.isArray(plan?.steps) && plan.steps.length > 0 && (
+                  <div style={{ marginTop: 11, border: "1px solid var(--border-2)", borderRadius: 12, background: "var(--surface)", padding: "12px 14px" }}>
+                    <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".07em", color: "var(--accent-2)", fontWeight: 600, marginBottom: 9 }}>
+                      Goal plan · {plan.steps.length} steps · one approval
+                    </div>
+                    {plan.steps.map((st: any) => (
+                      <div key={st.order} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderBottom: "1px solid var(--border)", fontSize: 12.5 }}>
+                        <span style={{ width: 18, height: 18, borderRadius: 99, background: "var(--surface-3)", color: "var(--text-3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10.5, fontFamily: "'IBM Plex Mono',monospace", flexShrink: 0 }}>{st.order}</span>
+                        <span style={{ fontFamily: "'IBM Plex Mono',monospace", color: "var(--accent-3)" }}>{st.template}</span>
+                        <span style={{ color: "var(--text-2)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{st.name}</span>
+                        {typeof st.plan === "object" && st.plan ? (
+                          <span style={chipMono("rgba(52,211,153,.12)", "var(--green)")}>+{st.plan.add ?? 0}</span>
+                        ) : (
+                          <span style={{ fontSize: 11, color: "var(--text-4)" }} title={String(st.plan ?? "")}>plans after parent</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 {approval === "pending" && (
                   <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", borderRadius: 12, border: "1px solid rgba(251,191,36,.25)", background: "rgba(251,191,36,.05)", marginTop: 11 }}>
                     <div style={{ flex: 1 }}>

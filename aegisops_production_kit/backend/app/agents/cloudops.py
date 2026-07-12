@@ -378,6 +378,11 @@ async def cloudops_plan(state: AgentState, config) -> dict:
                 "parsed_inputs": collected,
                 "confidentiality": {"level": cc.level, "score": cc.score}}
     if closure.status == "dag":
+        if settings.aegisops_exec_loop == "on":
+            # U6: hand the create-first DAG to the Governed Executive Loop — per-step plans +
+            # ONE whole-DAG approval; execution happens post-approval in the execute node.
+            from . import exec_loop
+            return await exec_loop.plan_goal_dag(state, config, closure.dag)
         steps_txt = " → ".join(f"{i+1}) {s['template_key']}"
                                f" “{s['inputs'].get('name') or s['inputs'].get('cluster_name') or s['inputs'].get('account_name') or ''}”"
                                for i, s in enumerate(closure.dag))

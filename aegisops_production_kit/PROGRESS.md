@@ -1275,6 +1275,17 @@ as done without the live run; the code paths behind each are covered by tests wi
       Expect: policy check **"No dependent resources (world model)" FAILED** naming the
       dependent + the "⚠ Dependent resources" reasoning card + console warning; reject leaves
       everything untouched.
+- [ ] **DLV-12 · VPC→EC2 goal-DAG e2e in the UI (DEP+U6 — Phase-3 exit-gate headline)** —
+      Needs: valid `GEMINI_API_KEY` + AWS creds; `AEGISOPS_EXEC_LOOP=on`.
+      Steps: (1) send **"Create an EC2 named web in a new vpc"**; (2) inspect the goal-DAG
+      approval card (step 1 `aws.vpc “web-net”` with its real plan summary; step 2 `aws.ec2
+      “web”` marked "plans after parent", wired `subnet_id ← public_subnet_ids[0]`);
+      (3) approve ONCE; (4) watch the per-step timeline: VPC plans+applies, then EC2 plans
+      (real policy checks) + applies into the new VPC's real subnet; (5) verify with a day-2
+      read; (6) gated destroy of the EC2 then the VPC (destroy order respects `impact_of` —
+      destroying the VPC first must warn, DLV-11).
+      Expect: one approval, both applied in order, wired to real outputs; partial-failure and
+      deviation paths behave as the U6 tests specify if anything fails mid-run.
 
 **STOPPED at the Phase-2 exit gate — awaiting owner sign-off before any Phase-3 work.**
 _(Sign-off received 2026-07-12; Phase 3 started — see section S below.)_
@@ -1325,5 +1336,22 @@ this section mirrors phase-level status only.
         honest ordered proposal + `state["goal_dag"]` (the executive loop U6 executes it);
         complete → enriched inputs + "Dependency resolution" provenance rows on the approval
         card. Evidence: `test_dependency.py` (11) covering acceptance (a)–(d).
+  - [x] **U6 Governed Executive Loop** (2026-07-12): new `agents/exec_loop.py`. PLAN phase
+        (`plan_goal_dag`): validates the DAG (bounds `MAX_STEPS=5`; approved-catalog-only — no
+        runtime-HCL escape hatch), terraform-plans + plan-guards + policy-checks every step
+        whose inputs are concrete, honestly marks wired steps "planned at execute time", and
+        raises **ONE approval interrupt** whose card lists every ordered step (frontend
+        goal-DAG card added). EXECUTE phase (`execute_goal_dag` → `execute_governed_step` per
+        step): deterministic core — resolve wires from PRIOR steps' real outputs
+        (`public_subnet_ids[0]`, `input:name`), validate, plan, plan-guard (create-only),
+        **real policy checks (a failing step halts, never auto-applies)**, apply, D2/D3
+        bookkeeping, per-step timing (`loop_step_N_<key>`). **Idempotent across LangGraph
+        interrupt-replays** via the A1 claim/stored-result store — a done step is never
+        re-applied. A replanned step is a **deviation → fresh approval interrupt** showing
+        was/now (reject → honest halt); `MAX_REPLANS_PER_STEP=1`. Partial failure reports
+        "steps 1–N applied; step K failed: …" and never attempts later steps blind. Gated by
+        `AEGISOPS_EXEC_LOOP` (default off → DEP's text proposal). Evidence:
+        `test_exec_loop.py` (10). Live VPC→EC2 DAG e2e in the UI = **DLV-12** (exit-gate
+        headline). tsc clean; vitest 28.
 
 _Legend: [x] done · [~] partial/scaffolded · [ ] pending._

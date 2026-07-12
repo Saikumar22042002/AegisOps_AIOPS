@@ -29,6 +29,11 @@ async def execute(state: AgentState, config) -> dict:
         return {"outcome": {"status": "blocked", "error": "capability assertion failed at execute"}}
 
     domain = state.get("domain")
+    if state.get("workflow") == "governed-exec-loop" and state.get("goal_dag"):
+        # U6: the approved goal DAG executes step-by-step (deterministic core; a deviation
+        # re-interrupts for approval inside the loop).
+        from .exec_loop import execute_goal_dag
+        return await execute_goal_dag(state, config)
     if domain == "cloudops":
         return await cloudops_execute(state, config)
     if domain == "devops":

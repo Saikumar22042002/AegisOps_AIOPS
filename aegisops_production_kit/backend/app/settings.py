@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     # `off` by default so tests (and installs without cloud read creds) drive `drift.sweep()`
     # explicitly. Turn on where live cloud reads are configured.
     aegisops_drift: Literal["on", "off"] = "off"
+    # U6: the Governed Executive Loop — multi-step goal DAGs (create-first closures) execute
+    # under one whole-DAG approval. `off` keeps the DEP dag branch as a text proposal.
+    aegisops_exec_loop: Literal["on", "off"] = "off"
     # A5 4-eyes: when on, the initiator of a Production-environment run cannot approve it.
     aegisops_four_eyes_for_production: bool = True
     # S1 credential reveal: the step-up re-auth proof (a fresh Keycloak authentication) must

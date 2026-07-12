@@ -49,6 +49,7 @@ class AgentState(TypedDict, total=False):
     diff: list
     policy_checks: list
     dependencies: list
+    goal_dag: list  # U6: the approved multi-step plan (DEP create-first closure)
     tool_results: list
     execution_mode: Literal["dry_run", "plan", "apply", "destroy"]
     needs_change: bool
