@@ -161,6 +161,11 @@ PARAMS: dict[str, list[ParamSpec]] = {
         ParamSpec("node_count", "Node count", kind="int", default=2),
         ParamSpec("machine_type", "Node machine type", default="e2-medium"),
     ],
+    "aws.kms": [
+        ParamSpec("name", "Key name", required=True, help="e.g. app-secrets (alias becomes alias/<name>)"),
+        ParamSpec("deletion_window", "Deletion window (days)", kind="int", default=30),
+        ParamSpec("enable_rotation", "Annual rotation", kind="bool", default=True),
+    ],
     "aws.nlb": [
         ParamSpec("name", "Load balancer name", required=True, help="e.g. web-lb"),
         ParamSpec("target_port", "Target port", kind="int", default=80),

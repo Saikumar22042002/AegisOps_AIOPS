@@ -28,6 +28,9 @@ class WorkflowTemplate:
     description: str
     policy_fn: Callable[..., list[dict[str, Any]]] = field(default=lambda _i, resources=None: [])
     actions: tuple[str, ...] = ("create", "modify", "destroy")
+    # MODSEED: honest per-module deletion semantics, surfaced on the destroy approval card
+    # (e.g. KMS keys enter a scheduled-deletion window; GCP key rings are not deletable).
+    destroy_note: str | None = None
 
     def var_map(self, inputs: dict[str, Any]) -> dict[str, Any]:
         """Validated inputs → Terraform variables (identity by default)."""
@@ -171,6 +174,24 @@ def _aws_nlb_policy(i: dict, resources=None) -> list[dict]:
     return checks
 
 
+def _aws_kms_policy(i: dict, resources=None) -> list[dict]:
+    """MODSEED MS-4: over the real plan - rotation ON and a deletion window of at least 7 days."""
+    key = _after(resources, "aws_kms_key")
+    checks: list[dict] = []
+    if key is not None:
+        checks.append(_ck("Key rotation enabled", key.get("enable_key_rotation") is True,
+                          "annual rotation on" if key.get("enable_key_rotation") else "rotation OFF"))
+        window = key.get("deletion_window_in_days")
+        checks.append(_ck("Deletion window >= 7 days", isinstance(window, int) and window >= 7,
+                          f"{window} days"))
+    else:
+        checks.append(_ck("Key rotation enabled", bool(i.get("enable_rotation", True))))
+        checks.append(_ck("Deletion window >= 7 days", int(i.get("deletion_window", 30)) >= 7,
+                          f"{i.get('deletion_window', 30)} days requested"))
+    checks.append(_todo("Key policy: root admin + allowed services only"))
+    return checks
+
+
 def _azure_storage_policy(i: dict, resources=None) -> list[dict]:
     acct = _after(resources, "azurerm_storage_account")
     if acct is None:
@@ -305,6 +326,8 @@ TEMPLATES: list[WorkflowTemplate] = [
     WorkflowTemplate("aws.rds", "aws", "rds", "v1", "aws-rds", wf.AWSRDSInputs, "Provision an encrypted RDS instance", _rds_policy),
     WorkflowTemplate("aws.ec2", "aws", "ec2", "v1", "aws-ec2", wf.AWSEC2Inputs, "Provision an EC2 instance (IMDSv2, encrypted)", _ec2_policy),
     WorkflowTemplate("aws.nlb", "aws", "nlb", "v1", "aws-nlb", wf.AWSNLBInputs, "Provision a network load balancer (TCP target group + listener)", _aws_nlb_policy),
+    WorkflowTemplate("aws.kms", "aws", "kms", "v1", "aws-kms", wf.AWSKMSInputs, "Provision a KMS key (rotation on, alias, service policy)", _aws_kms_policy,
+                     destroy_note="A destroyed KMS key enters its scheduled-deletion window (the module's deletion_window, 7-30 days) - it is NOT removed immediately and remains recoverable until the window elapses."),
     WorkflowTemplate("azure.storage", "azure", "storage", "v1", "azure-storage", wf.AzureStorageInputs, "Provision an Azure Storage Account", _azure_storage_policy),
     WorkflowTemplate("azure.vnet", "azure", "vnet", "v1", "azure-vnet", wf.AzureVNetInputs, "Provision an Azure VNet (subnets, NAT gateway, route tables)", _azure_vnet_policy),
     WorkflowTemplate("azure.resource_group", "azure", "resource_group", "v1", "azure-resource-group", wf.AzureResourceGroupInputs, "Provision an Azure Resource Group", _azure_rg_policy),
@@ -328,7 +351,8 @@ _SYNONYMS: dict[str, dict[str, str]] = {
             "db": "rds", "postgres": "rds", "postgresql": "rds", "mysql": "rds", "sql": "rds",
             "k8s": "eks", "kubernetes": "eks", "cluster": "eks", "bucket": "s3", "blob": "s3",
             "object_storage": "s3", "network": "vpc",
-            "lb": "nlb", "load_balancer": "nlb", "loadbalancer": "nlb"},
+            "lb": "nlb", "load_balancer": "nlb", "loadbalancer": "nlb",
+            "key": "kms", "encryption_key": "kms", "secrets": "kms"},
     "azure": {"instance": "vm", "server": "vm", "compute": "vm", "ec2": "vm", "database": "postgres",
               "db": "postgres", "postgresql": "postgres", "sql": "postgres", "mysql": "postgres",
               "k8s": "aks", "kubernetes": "aks", "cluster": "aks", "blob": "storage", "bucket": "storage",

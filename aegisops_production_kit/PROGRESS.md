@@ -1308,6 +1308,13 @@ as done without the live run; the code paths behind each are covered by tests wi
       then destroying the VPC first must WARN (the NLB depends on it).
       Expect: cross-zone NLB + TCP TG in the console; egress-only SG; deletion_protection per
       env.
+- [ ] **DLV-18 · MODSEED aws.kms live lifecycle (MS-4)** — Needs: valid `GEMINI_API_KEY`
+      + AWS creds.
+      Steps: (1) "create a kms key named app-secrets in aws" → approve (rotation/window checks
+      PASS) → apply; (2) day-2: "what's the rotation on app-secrets" (from recorded outputs);
+      (3) "destroy app-secrets" → the card states the scheduled-deletion window → approve →
+      verify the key shows "Pending deletion" in the console (not gone).
+      Expect: alias visible; key policy carries root + service statements only.
 - [ ] **DLV-12 · VPC→EC2 goal-DAG e2e in the UI (DEP+U6 — Phase-3 exit-gate headline)** —
       Needs: valid `GEMINI_API_KEY` + AWS creds; `AEGISOPS_EXEC_LOOP=on`.
       Steps: (1) send **"Create an EC2 named web in a new vpc"**; (2) inspect the goal-DAG
@@ -1488,6 +1495,18 @@ this section mirrors phase-level status only.
         quietly drops it FAILS). Evidence: `test_modseed_ms3_aws_nlb.py` (11) incl. the
         world-model DEPENDS_ON edge (impact_of names the NLB as the VPC's dependent). Canary
         (B5) green. Live lifecycle = **DLV-17**.
+  - [x] **MODSEED MS-4 aws-kms (`aws.kms`)** (2026-07-12): KMS key (rotation ON, deletion
+        window 7–30 bounded in BOTH the schema and the module) + `alias/<name>` + key policy
+        (root admin via the real caller identity; allowed services — default
+        secretsmanager/rds — get Decrypt/DescribeKey/CreateGrant). **Keys, never secrets**:
+        secret VALUES are permanently out of scope (asserted — no password/secret_string
+        anywhere). NEW `WorkflowTemplate.destroy_note` seam: the destroy approval card now
+        carries the module's honest deletion semantics — for KMS, "enters its
+        scheduled-deletion window, NOT removed immediately" (proven through the real
+        destroy-plan path; MS-6's not-deletable key rings reuse the seam). Synonyms include
+        **secrets→kms**. Policy (plan-JSON): rotation on + window ≥7, failing on rotation-off/
+        short-window plans. Evidence: `test_modseed_ms4_aws_kms.py` (9) incl. the day-2
+        rotation answer recorded in inventory attributes. Canary (B5) green. Live = **DLV-18**.
 
 
 _Legend: [x] done · [~] partial/scaffolded · [ ] pending._

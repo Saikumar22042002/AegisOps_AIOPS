@@ -135,6 +135,17 @@ class AWSRDSInputs(WorkflowInputs):
 EC2_OS_CHOICES = ("amazon-linux-2023", "ubuntu-22.04", "ubuntu-24.04", "windows-2022")
 
 
+class AWSKMSInputs(WorkflowInputs):
+    """MODSEED MS-4 - aws.kms: key + alias + service policy. Secret VALUES are permanently
+    out of scope (never chat-supplied) - this manages KEYS."""
+
+    name: str
+    region: str = "us-east-1"
+    deletion_window: int = Field(default=30, ge=7, le=30)
+    enable_rotation: bool = True
+    allowed_services: list[str] = Field(default_factory=lambda: ["secretsmanager", "rds"])
+
+
 class AWSNLBInputs(WorkflowInputs):
     """MODSEED MS-3 - aws.nlb: network LB + TCP target group/listener. vpc_id/subnets are
     DEP-resolved (existing VPC's recorded outputs, or a create-first DAG). deletion_protection

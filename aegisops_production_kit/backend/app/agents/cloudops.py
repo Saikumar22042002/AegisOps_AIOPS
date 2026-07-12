@@ -921,6 +921,9 @@ async def _destroy_resource(state: AgentState, config, target: str | None) -> di
                   "body": f"{res['name']} · {res['cloud']} {res['resource_type']} · "
                           f"{res.get('provider_id') or 'no provider id'} — resolved from the inventory; "
                           f"plan destroys {plan['summary']['destroy']} resource(s), creates none."}]
+    if template.destroy_note:
+        # MODSEED: the module's honest deletion semantics, stated where the human decides.
+        reasoning.append({"title": "Deletion semantics", "conf": "", "body": template.destroy_note})
     if dependents:
         dep_list = ", ".join(f"{d['name'] or d['provider_id']} ({d['type'] or d['kind']})"
                              for d in dependents[:6])
