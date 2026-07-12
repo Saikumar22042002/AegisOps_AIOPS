@@ -901,6 +901,16 @@ two known realm issuer URLs (internal + browser-facing), nothing else.
         JSON + interrupt payload; the approval card renders an amber "Defaults applied" section so
         there is no invisible placement. The resolved subnet id is named when the plan reveals it.
         Evidence: `test_defaults_honesty.py` (6); vitest 28; tsc clean.
+  - [x] **U2 SRE real signals + K8s actions** (2026-07-12): `recent_deploy` is now a real
+        Prometheus query (deployment-generation change in 15m via kube-state-metrics), defaulting
+        False when Prometheus is unavailable — the old hardcoded `recent_deploy=True` is gone; cpu
+        saturation + pod restarts are real queries too. `tools/kubernetes.py` gains real
+        `restart_deployment` (rollout-restart annotation), `scale_deployment` (patch replicas), and
+        `rollback_deployment` (patch to the prior ReplicaSet's template); `sre_execute` dispatches
+        the approved action to them when a cluster is configured (→ `applied:True` with the real
+        result), reports `remediation_failed` truthfully on error, and stays "proposed, not
+        executed" when no cluster / for `investigate`. Evidence: `test_sre_remediation.py` (8) +
+        the P7 honesty test still green.
   - [x] **S0 multi-tenancy** (2026-07-11): principal→(org_id,user_id) via Keycloak org claim
         (group-membership mapper; realm defines northwind-financial + acme-industrial groups)
         with the `users` mirror (by keycloak_sub, username/email fallback for seeded rows)

@@ -18,7 +18,7 @@ from ..integrations.gemini import GeminiError, get_gemini
 from ..rag import retriever
 from ..security.confidentiality import classify
 from ..settings import get_settings
-from ..tools.kubernetes import get_kubernetes
+from ..tools.kubernetes import KubernetesError, get_kubernetes
 from ..tools.prometheus import get_prometheus
 from . import llm
 from .runtime import emitter_of
@@ -50,7 +50,10 @@ def decision_matrix(signals: dict) -> dict:
 
 async def _collect_telemetry(settings, emitter) -> dict:
     prom = get_prometheus(settings)
-    signals: dict = {"recent_deploy": True}
+    # U2: recent_deploy is a REAL Prometheus signal (a deployment generation change in the last
+    # 15m via kube-state-metrics), not the old hardcoded True. Default False when Prometheus is
+    # unavailable or the metric is absent — we never assume a deploy happened.
+    signals: dict = {"recent_deploy": False}
     try:
         if prom.enabled and await prom.ping():
             up = await prom.scalar("sum(up)", default=0)
@@ -59,6 +62,15 @@ async def _collect_telemetry(settings, emitter) -> dict:
             signals["error_rate"] = await prom.scalar(
                 "sum(rate(aegisops_api_requests_total{status=~\"5..\"}[5m])) / "
                 "clamp_min(sum(rate(aegisops_api_requests_total[5m])),1)", default=0.0)
+            deploy_changes = await prom.scalar(
+                "sum(changes(kube_deployment_status_observed_generation[15m]))", default=0.0)
+            signals["recent_deploy"] = deploy_changes > 0
+            signals["cpu_saturation"] = await prom.scalar(
+                "max(1 - rate(node_cpu_seconds_total{mode=\"idle\"}[5m]))", default=0.0)
+            signals["pod_restarts"] = await prom.scalar(
+                "sum(increase(kube_pod_container_status_restarts_total[15m]))", default=0.0)
+            await emitter.console("stdout", f"prometheus: recent_deploy={signals['recent_deploy']} "
+                                            f"error_rate={signals['error_rate']:.3f}")
     except Exception as e:  # noqa: BLE001
         await emitter.console("stderr", f"prometheus query failed: {e}")
     return signals
@@ -138,33 +150,46 @@ async def sre_execute(state: AgentState, config) -> dict:
 
     target = decision.get("target", "unknown")
     action = decision.get("action")
-    # P7 honesty (Phase 1): the triage/telemetry/runbook analysis and the decision matrix are
-    # real, but the K8s MUTATION (rollback/scale/restart) is NOT implemented yet — real actions
-    # land in Phase 2 (U2). Never report `applied: True` for work that didn't happen. Report
-    # "proposed, not executed" and, when a cluster IS reachable, surface the real current state
-    # (a read) so the proposal is grounded — but do not claim to have changed anything.
-    note = (f"Remediation **proposed, not executed**: `{action}` on `{target}`. "
-            "Executing real Kubernetes rollback/scale/restart is a Phase-2 capability (U2); "
-            "for now this is a recommendation for a human to carry out.")
-    try:
-        observed = None
-        if k8s.enabled:
-            deployments = await k8s.list_deployments("default")
-            observed = len(deployments)
-            await emitter.console("stdout",
-                                  f"[read-only] cluster reachable · {observed} deployments in 'default' · "
-                                  f"proposed action '{action}' on {target} was NOT applied")
-        else:
-            await emitter.console("stdout",
-                                  f"no kubeconfig configured · '{action}' on {target} proposed, not executed")
-        await cg.update_step(order=3, status="done",
-                             result={"applied": False, "proposed": action, "target": target,
-                                     "observed_deployments": observed})
+    namespace = decision.get("namespace", "default")
+
+    # U2: execute the REAL K8s remediation when a cluster is configured; otherwise report
+    # "proposed, not executed" honestly (never a fake applied:True). All of this is already
+    # behind the approval gate — this node only runs after the human approved.
+    if not k8s.enabled:
+        note = (f"Remediation **proposed, not executed**: `{action}` on `{target}`. No Kubernetes "
+                "cluster is configured (set KUBECONFIG) — this is a recommendation for a human.")
+        await emitter.console("stdout", f"no kubeconfig · '{action}' on {target} proposed, not executed")
         await emitter.token(note)
-        return {"outcome": {"status": "proposed_not_executed", "applied": False,
-                            "decision": decision, "observed_deployments": observed},
+        await cg.update_step(order=3, status="done", result={"applied": False, "proposed": action, "target": target})
+        return {"outcome": {"status": "proposed_not_executed", "applied": False, "decision": decision},
                 "answer": note, "tool_results": [{"proposed_remediation": decision, "applied": False}]}
-    except Exception as e:  # noqa: BLE001
-        await emitter.error(f"remediation analysis failed: {e}", code="remediation_error", retriable=True)
+
+    if action == "investigate":
+        note = f"No automated remediation matched — human investigation recommended for `{target}`."
+        await emitter.token(note)
+        await cg.update_step(order=3, status="done", result={"applied": False, "proposed": action})
+        return {"outcome": {"status": "proposed_not_executed", "applied": False, "decision": decision},
+                "answer": note, "tool_results": [{"proposed_remediation": decision, "applied": False}]}
+
+    try:
+        if action == "restart":
+            result = await k8s.restart_deployment(target, namespace)
+        elif action == "scale_out":
+            current = next((d for d in await k8s.list_deployments(namespace) if d["name"] == target), None)
+            replicas = (current.get("replicas") or 1) + 1 if current else 2
+            result = await k8s.scale_deployment(target, replicas, namespace)
+        elif action == "rollback":
+            result = await k8s.rollback_deployment(target, namespace)
+        else:
+            raise KubernetesError(f"unsupported remediation action '{action}'")
+        msg = f"✅ Remediation applied: **{action}** on `{target}` — {result}"
+        await emitter.console("stdout", f"k8s: {action} on {target} applied · {result}")
+        await emitter.token(msg)
+        await cg.update_step(order=3, status="done", result={"applied": True, **result})
+        return {"outcome": {"status": "remediated", "applied": True, "decision": decision, "result": result},
+                "answer": msg, "tool_results": [{"remediation": decision, "applied": True, "result": result}]}
+    except Exception as e:  # noqa: BLE001 — a failed real remediation is reported truthfully
+        await emitter.error(f"remediation '{action}' failed: {e}", code="remediation_error", retriable=True)
         await cg.update_step(order=3, status="failed", error=str(e))
-        return {"outcome": {"status": "remediation_failed", "applied": False, "error": str(e)}}
+        return {"outcome": {"status": "remediation_failed", "applied": False, "error": str(e)[:400],
+                            "decision": decision}}
