@@ -24,7 +24,17 @@ export const envOptions: Opt[] = [
   { label: "Sandbox" },
 ];
 
+// U4: "Auto (ask me)" is the default — it maps to cloud=null on the wire, so an ambiguous
+// request (no cloud named) triggers the clarifying question instead of silently defaulting to AWS.
+export const AUTO_CLOUD = "Auto (ask me)";
+
+/** Selector label → wire value: Auto (or anything not a real cloud selection) sends null. */
+export function cloudToWire(cloud: string): string | null {
+  return !cloud || cloud.startsWith("Auto") ? null : cloud;
+}
+
 export const cloudOptions: Opt[] = [
+  { label: AUTO_CLOUD, sub: "clarify per request" },
   { label: "AWS", sub: "12 accounts" },
   { label: "Azure", sub: "4 subscriptions" },
   { label: "GCP", sub: "2 projects" },

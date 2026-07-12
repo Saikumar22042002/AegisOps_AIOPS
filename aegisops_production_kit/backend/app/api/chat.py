@@ -37,7 +37,7 @@ router = APIRouter(tags=["chat"])
 class ChatContext(BaseModel):
     org: str | None = None
     env: str | None = "Production"
-    cloud: str | None = "AWS"
+    cloud: str | None = None  # U4: no silent AWS default; None ⇒ resolve_cloud asks if ambiguous
     region: str | None = "us-east-1"
     role: str | None = None
 

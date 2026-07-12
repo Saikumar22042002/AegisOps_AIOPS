@@ -6,6 +6,7 @@
 import { create } from "zustand";
 
 import { api } from "./api";
+import { cloudToWire } from "./data";
 import { streamSSE } from "./sse";
 import type { ApprovalState, ArtifactTab, ChatMessage, MenuKey, NavKey, Overview, SessionMeta, ThemeMode } from "./types";
 
@@ -134,7 +135,7 @@ export const useUI = create<UIState>((set, get) => ({
   menu: null,
   org: "Northwind Financial",
   env: "Production",
-  cloud: "AWS",
+  cloud: "Auto (ask me)",  // U4: default to Auto so ambiguous requests ask which cloud
   region: "us-east-1",
   model: "Gemini 2.5 Pro",
   role: "Platform Admin",
@@ -271,7 +272,9 @@ export const useUI = create<UIState>((set, get) => ({
       }
     }
 
-    const ctx = { org: s0.org, env: s0.env, cloud: s0.cloud, region: s0.region, role: s0.role };
+    // U4: "Auto (ask me)" → cloud=null on the wire, so the backend never uses the selector as a
+    // hint and an ambiguous request triggers the clarifying question.
+    const ctx = { org: s0.org, env: s0.env, cloud: cloudToWire(s0.cloud), region: s0.region, role: s0.role };
     try {
       await streamSSE("/chat", { sessionId: sid, message: t, model: s0.model, context: ctx }, (ev) => {
         const m = get().messages.find((x) => x.id === aiId);

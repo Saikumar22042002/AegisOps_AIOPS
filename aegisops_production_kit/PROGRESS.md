@@ -614,6 +614,14 @@ explained instead of crashing).
         402 passed / 2 skipped; vitest 25 passed. Note: existing dev Keycloak containers must
         be recreated to import the new groups/mapper; invalid-Gemini-key environments now seed
         with NULL embeddings + loud warning (keyword recall degrade, per invariant 7).
+  - [x] **U4 "Auto (ask me)" cloud default** (2026-07-12): the cloud selector now defaults to
+        "Auto (ask me)", which maps to `cloud=null` on the wire (`cloudToWire`); `ChatContext.cloud`
+        no longer defaults to AWS. So an ambiguous request (a generic VM with no cloud named) now
+        reaches `resolve_cloud → None` and fires the clarifying question in the real UI, instead of
+        silently provisioning on AWS (P11). `resolve_cloud` already handled null — only the default
+        needed changing. Evidence: `cloud_selector.test.ts` (3) + existing
+        `test_routing_scenarios.py::test_ambiguous_cloud_asks_never_defaults_to_aws`; full backend
+        suite 424 passed / 2 skipped; vitest 28.
   - [x] **S5 execute-node capability assertion** (2026-07-12): the execute dispatcher fails closed
         unless the run is approved AND the recorded approver holds execute capability — a
         defense-in-depth check behind the approval gate. The approver's `can_execute` is carried
