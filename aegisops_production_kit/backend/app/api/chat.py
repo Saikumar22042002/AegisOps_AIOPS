@@ -71,6 +71,21 @@ async def _sse(channel: RunChannel, replay_after: int = 0):
         yield {"event": item["event"], "data": json.dumps(item["data"]), "id": str(item["id"])}
 
 
+async def _force_terminal(run_id: str, message: str) -> None:
+    """B5 backstop: guarantee a run reaches a terminal state even if the normal persist path
+    threw. A direct, self-guarded status write — the reconciler (B3) is the outer backstop, but
+    this closes the common case (an exception inside `_drive`/`_persist_result`) immediately so a
+    run is never left stuck in `running`."""
+    try:
+        async with session_scope() as s:
+            run = await s.get(Run, uuid.UUID(run_id))
+            if run and run.status in ("running", "applying"):
+                run.status = "failed"
+                run.outcome = {"status": "failed", "error": message[:500]}
+    except Exception as exc:  # noqa: BLE001 — last-ditch; the reconciler will catch what this can't
+        log.error("chat.force_terminal_failed", run_id=run_id, error=str(exc))
+
+
 async def _persist_result(run_id: str, session_id: str, org_id: str, state: dict, status_: str) -> str:
     """Persist the assistant message + run state; returns the assistant message id."""
     from ..security.redaction import redact, redact_dict
@@ -184,6 +199,13 @@ async def chat(body: ChatRequest, request: Request, user: User = Depends(require
                     "outcome": state.get("outcome") or ({"status": "failed", "error": error} if error
                                                         else {"status": "completed"}),
                 })
+        except Exception as exc:  # noqa: BLE001 — B5: never leave the run stuck in `running`
+            log.error("chat.drive_failed", run_id=run_id, error=str(exc))
+            await _force_terminal(run_id, f"run driver failed: {exc}")
+            try:
+                await emitter.error(f"This run failed unexpectedly: {exc}", code="drive_error")
+            except Exception:  # noqa: BLE001
+                pass
         finally:
             await channel.close()
 
@@ -249,6 +271,13 @@ async def resolve_approval(run_id: str, body: ApprovalRequest,
                 "outcome": state.get("outcome") or ({"status": "failed", "error": error} if error
                                                     else {"status": body.decision}),
             })
+        except Exception as exc:  # noqa: BLE001 — B5: a failed continuation must still terminate
+            log.error("chat.approval_drive_failed", run_id=run_id, error=str(exc))
+            await _force_terminal(run_id, f"approval continuation failed: {exc}")
+            try:
+                await emitter.error(f"The continuation failed unexpectedly: {exc}", code="drive_error")
+            except Exception:  # noqa: BLE001
+                pass
         finally:
             await get_redis().delete(inflight_key)  # A1: release the endpoint guard
             await channel.close()

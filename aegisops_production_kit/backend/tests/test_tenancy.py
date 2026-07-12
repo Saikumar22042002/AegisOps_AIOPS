@@ -399,6 +399,88 @@ class TestTwoOrgIsolation:
             "org B must never see org A's knowledge documents"
 
 
+class TestTerminalStateB5:
+    """B5: a run always reaches a terminal state — even if the persist path itself throws, the
+    drive's except backstop force-marks it failed rather than leaving it stuck in `running`."""
+
+    def test_force_terminal_marks_running_run_failed(self, two_orgs, client):
+        async def _run():
+            from app.api.chat import _force_terminal
+            from app.db.models import Run
+            from app.db.session import session_scope
+
+            async with session_scope() as s:
+                run = Run(org_id=uuid.UUID(two_orgs["org_a"]), status="running", mode="apply")
+                s.add(run)
+                await s.flush()
+                rid = str(run.id)
+            await _force_terminal(rid, "boom in the driver")
+            async with session_scope() as s:
+                row = await s.get(Run, uuid.UUID(rid))
+                return rid, row.status, (row.outcome or {}).get("status"), (row.outcome or {}).get("error")
+
+        rid, status, oc_status, err = client.portal.call(_run)
+        two_orgs["run_ids"].append(rid)
+        assert status == "failed" and oc_status == "failed"
+        assert "boom" in (err or "")
+
+    def test_force_terminal_leaves_terminal_run_untouched(self, two_orgs, client):
+        async def _run():
+            from app.api.chat import _force_terminal
+            from app.db.models import Run
+            from app.db.session import session_scope
+
+            async with session_scope() as s:
+                run = Run(org_id=uuid.UUID(two_orgs["org_a"]), status="completed", mode="apply",
+                          outcome={"status": "applied", "outputs": {"id": "keep"}})
+                s.add(run)
+                await s.flush()
+                rid = str(run.id)
+            await _force_terminal(rid, "should not overwrite a completed run")
+            async with session_scope() as s:
+                row = await s.get(Run, uuid.UUID(rid))
+                return rid, row.status, row.outcome
+        rid, status, outcome = client.portal.call(_run)
+        two_orgs["run_ids"].append(rid)
+        assert status == "completed" and outcome["status"] == "applied", \
+            "a run that already reached a terminal state must not be clobbered"
+
+    def test_chat_persist_failure_still_ends_failed(self, two_orgs, as_member, client, monkeypatch):
+        """Fault injection: raise inside _persist_result → the run ends `failed`, never `running`."""
+        from app.api import chat as chat_api
+
+        async def _fake_graph(run_id, channel, initial=None, resume=None):
+            return {"state": {"answer": "ok", "domain": "general"}, "interrupted": False, "error": None}
+
+        async def _boom(*a, **k):
+            raise RuntimeError("planted persist failure")
+
+        monkeypatch.setattr(chat_api, "run_graph", _fake_graph)
+        monkeypatch.setattr(chat_api, "_persist_result", _boom)
+
+        member = _member(two_orgs["org_a"], two_orgs["user_a"], ORG_A_SLUG, roles=["developer"])
+        body = {"message": "hello there", "context": {"env": "Staging"}}
+        with as_member(member).stream("POST", "/chat", json=body) as resp:
+            assert resp.status_code == 200
+            stream = "".join(resp.iter_text())  # drain until the channel closes (drive finished)
+        run_id = None
+        for line in stream.splitlines():
+            if line.startswith("data:") and '"runId"' in line:
+                import json as _json
+                run_id = _json.loads(line[5:].strip()).get("runId")
+                break
+        assert run_id, "no runId surfaced on the stream"
+        two_orgs["run_ids"].append(run_id)
+
+        async def _status():
+            from app.db.models import Run
+            from app.db.session import session_scope
+            async with session_scope() as s:
+                row = await s.get(Run, uuid.UUID(run_id))
+                return row.status
+        assert client.portal.call(_status) == "failed", "a persist failure must leave the run failed, not running"
+
+
 class TestCredentialRevealS1:
     """S1: reveal is initiator-or-approver + org-scoped + step-up re-auth + always-on audit.
 

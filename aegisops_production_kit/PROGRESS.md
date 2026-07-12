@@ -614,6 +614,12 @@ explained instead of crashing).
         402 passed / 2 skipped; vitest 25 passed. Note: existing dev Keycloak containers must
         be recreated to import the new groups/mapper; invalid-Gemini-key environments now seed
         with NULL embeddings + loud warning (keyword recall degrade, per invariant 7).
+  - [x] **B5 terminal-state guarantee** (2026-07-12): both `_drive` closures now have an `except`
+        that force-marks the run `failed` (via a self-guarded `_force_terminal`) if anything escapes
+        — including a throw inside `_persist_result` — so a run is never left stuck in `running`
+        (the B3 reconciler remains the outer backstop). `_force_terminal` only touches
+        running/applying runs, never clobbering a terminal one. Evidence:
+        `test_tenancy.py::TestTerminalStateB5` (3, incl. fault-injection through the real /chat endpoint).
   - [x] **B6 no blocking I/O on the event loop** (2026-07-12): `inventory.reconcile`'s sync boto3
         `describe_instances` (P6) now runs via `anyio.to_thread.run_sync`; the Gemini client no
         longer does a `models.list()` network call in its constructor (P18) — resolution is lazy
