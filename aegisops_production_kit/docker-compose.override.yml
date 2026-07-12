@@ -8,10 +8,52 @@
 # only the base file:  docker compose -f docker-compose.yml --profile full up -d).
 services:
   api:
+    environment:
+      # Phase-2 exit-gate posture (B1/B3): worker-agnostic streaming over Redis Streams and the
+      # stranded-run reconciler on. This is the multi-worker production posture; the in-memory
+      # bus remains the single-worker default in settings.
+      AEGISOPS_EVENT_BUS: redis
+      AEGISOPS_RECONCILER: "on"
     volumes:
       - "./backend/app:/app/app"
       # GCP service-account key for the Terraform google provider (gitignored host dir).
       - "./infra/secrets:/secrets:ro"
+
+  # ── Second API worker (Phase-2 exit gate: multi-worker streaming demo) ────────
+  # Same image + mounted source as `api`, on port 8001. A run started on `api` streams and
+  # reconnects from `api-b` because events live in Redis Streams, sessions in the server-side
+  # store, and state in PG — the API itself is stateless (B1).
+  api-b:
+    image: aegisops-api:local
+    restart: unless-stopped
+    profiles: ["full"]
+    env_file: [.env]
+    environment:
+      POSTGRES_HOST: postgres
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-aegisops}:${POSTGRES_PASSWORD:-aegisops}@postgres:5432/${POSTGRES_DB:-aegisops}
+      REDIS_URL: redis://redis:6379/0
+      NEO4J_URI: bolt://neo4j:7687
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_PUBLIC_URL: ${KEYCLOAK_PUBLIC_URL:-http://localhost:8080}
+      LANGFUSE_HOST: http://langfuse:3000
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      PROMETHEUS_URL: http://prometheus:9090
+      GRAFANA_URL: http://grafana:3000
+      TF_PLUGIN_CACHE_DIR: /app/.tf-plugin-cache
+      AEGISOPS_EVENT_BUS: redis
+      AEGISOPS_RECONCILER: "on"
+    ports: ["8001:8000"]
+    volumes:
+      - "./backend/app:/app/app"
+      - "./infra/secrets:/secrets:ro"
+      - "${KUBECONFIG_HOST:-./infra/kube/empty-kubeconfig}:/root/.kube/config:ro"
+      - "tfstate:/app/.terraform-state"
+      - "tfplugins:/app/.tf-plugin-cache"
+      - "./infra/terraform-workspaces:/app/infra/terraform-workspaces"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      neo4j: { condition: service_healthy }
 
   # ── Test runner (profile `test`, never auto-starts) ───────────────────────────
   # The prod API image is intentionally slim (`pip install .` — no dev extras), so it

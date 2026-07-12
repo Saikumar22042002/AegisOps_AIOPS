@@ -131,6 +131,72 @@ async def test_kill_mid_apply_recovers_once_without_reapply(live_db, live_redis,
         await _cleanup(rid)
 
 
+class ExecutingSupervisor(FakeSupervisor):
+    """A fake that captures the drive coroutine so the test can execute it deterministically."""
+
+    def __init__(self):
+        super().__init__()
+        self.drives: list = []
+
+    def run(self, run_id, drive):
+        self.redriven.append(run_id)
+        self.drives.append(drive)
+
+
+async def test_redrive_persists_the_result_and_second_sweep_is_a_noop(
+        live_db, live_redis, org_id, monkeypatch):
+    """Gate defect (2026-07-12): _redrive ran the graph but never persisted the result, so a
+    successfully re-driven run stayed `running` and the NEXT sweep force-failed it — two
+    reconciler actions for one run, and a redriven apply's outcome would have been stamped over.
+    Now the redrive persists status + assistant message itself: recovery happens ONCE."""
+    from sqlalchemy import delete, select as sa_select
+
+    from app.db.models import Message, Session
+
+    async with session_scope() as s:
+        sess = Session(org_id=uuid.UUID(org_id), title="redrive-test")
+        s.add(sess)
+        await s.flush()
+        sid = str(sess.id)
+        run = Run(org_id=uuid.UUID(org_id), session_id=uuid.UUID(sid), status="running", mode="apply")
+        s.add(run)
+        await s.flush()
+        rid = str(run.id)
+    await live_redis.delete(hb_key(rid))
+
+    async def _fake_run_graph(run_id, channel, initial=None, resume=None):
+        return {"state": {"answer": "recovered heuristic answer", "domain": "general"},
+                "interrupted": False, "error": None}
+
+    from app.agents import runner as runner_mod
+    monkeypatch.setattr(runner_mod, "run_graph", _fake_run_graph)
+
+    fake = ExecutingSupervisor()
+    rec = Reconciler(supervisor=fake)
+    monkeypatch.setattr(rec, "_is_resumable", lambda _r: _true())
+    try:
+        first = await rec.sweep()
+        assert rid in fake.redriven and first["resumed"] >= 1
+        await fake.drives[-1]()  # execute the captured redrive drive
+
+        # The redrive itself persisted the terminal state + the assistant message.
+        assert await _status(rid) == "completed"
+        async with session_scope() as s:
+            msg = (await s.execute(sa_select(Message).where(
+                Message.run_id == uuid.UUID(rid), Message.role == "assistant"))).scalar_one_or_none()
+        assert msg is not None and "recovered heuristic answer" in msg.content
+
+        # Second sweep: the run is terminal — NOT a candidate; no second recovery action.
+        second = await rec.sweep()
+        assert rid not in fake.redriven[1:], "no second redrive for the same run"
+        assert await _status(rid) == "completed", "a recovered run is never re-marked failed"
+    finally:
+        async with session_scope() as s:
+            await s.execute(delete(Message).where(Message.run_id == uuid.UUID(rid)))
+            await s.execute(delete(Run).where(Run.id == uuid.UUID(rid)))
+            await s.execute(delete(Session).where(Session.id == uuid.UUID(sid)))
+
+
 # tiny async helpers so monkeypatched sync lambdas can return awaitables
 async def _false():
     return False

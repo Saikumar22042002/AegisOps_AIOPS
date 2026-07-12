@@ -987,6 +987,18 @@ two known realm issuer URLs (internal + browser-facing), nothing else.
         leaves the status non-completed rather than inventing success. Removed the now-unused
         `latest_run_status`. Evidence: `test_devops_ci_poll.py` (5). A live poll against real
         GitHub Actions needs a `GITHUB_TOKEN` (not configured) — recorded pending.
+  - [x] **DEF: reconciler redrive never persisted its result** (2026-07-12, found live at the
+        Phase-2 gate worker-kill demo): after SIGKILLing worker A mid-run, worker B's reconciler
+        logged `reconciler.resumed` — and 60 seconds later `reconciler.marked_failed` for the
+        SAME run. Root cause: `Reconciler._redrive` called `run_graph` (which only executes the
+        graph) and never persisted status/answer — persistence lived only in the API driver — so
+        even a successful redrive left the run `running`, and the next sweep honestly-but-wrongly
+        force-failed it; a redriven APPLY would have had its `applied` outcome overwritten with
+        `failed`. Fix: the redrive drive now mirrors the API driver — `_persist_result` (status
+        `completed`/`failed`/`awaiting_approval` + assistant message), `done` event on the
+        channel, `_force_terminal` (B5) backstop on exception. Evidence:
+        `test_redrive_persists_the_result_and_second_sweep_is_a_noop` (redrive persists; second
+        sweep is a no-op) + the live re-demo showing exactly ONE reconciler action.
   - [x] **S0 multi-tenancy** (2026-07-11): principal→(org_id,user_id) via Keycloak org claim
         (group-membership mapper; realm defines northwind-financial + acme-industrial groups)
         with the `users` mirror (by keycloak_sub, username/email fallback for seeded rows)

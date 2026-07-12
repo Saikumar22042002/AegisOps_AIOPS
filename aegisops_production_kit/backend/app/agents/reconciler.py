@@ -18,6 +18,7 @@ stranded — so the reconciler only ever queries the executing states.
 from __future__ import annotations
 
 import asyncio
+import uuid
 
 import structlog
 from sqlalchemy import select
@@ -106,16 +107,48 @@ class Reconciler:
             return False
 
     async def _redrive(self, run_id: str) -> None:
-        from .events import create_channel
+        from .events import Emitter, create_channel
         from .runner import run_graph
+
+        # The re-driven result must be PERSISTED like any API-driven run — run_graph only
+        # executes the graph; status + assistant message land via _persist_result. Without this,
+        # a successful redrive left the run `running` and the NEXT sweep force-failed it
+        # (observed live at the Phase-2 gate: `resumed` → 60s later `marked_failed`, two actions
+        # for one run — and a redriven APPLY would have had its applied outcome stamped over
+        # with `failed`).
+        async with session_scope() as s:
+            run = await s.get(Run, uuid.UUID(run_id))
+            org_id = str(run.org_id) if run else ""
+            session_id = str(run.session_id) if run and run.session_id else ""
 
         channel = create_channel(run_id)
 
         async def _drive() -> None:
+            from ..api.chat import _force_terminal, _persist_result
+            emitter = Emitter(channel)
             try:
+                await emitter.run({"runId": run_id, "sessionId": session_id or None})
                 # Continue from the checkpoint (no new input). A1 idempotency makes the apply
                 # safe to re-enter — it will return the stored result or abort, never double-apply.
-                await run_graph(run_id, channel)
+                res = await run_graph(run_id, channel)
+                state = res["state"]
+                error = res.get("error")
+                status_ = "failed" if error else ("awaiting_approval" if res["interrupted"] else "completed")
+                if error and not state.get("answer"):
+                    state = {**state,
+                             "answer": f"⚠️ This run was recovered after an interruption and then "
+                                       f"failed: {error}. Nothing was changed beyond what the Logs show.",
+                             "outcome": state.get("outcome") or {"status": "failed", "error": error}}
+                if session_id:
+                    msg_id = await _persist_result(run_id, session_id, org_id, state, status_)
+                    if not res["interrupted"]:
+                        await emitter.done({"messageId": msg_id, "runId": run_id, "traceId": run_id,
+                                            "outcome": state.get("outcome") or {"status": status_}})
+                else:  # no session to persist an answer into — still reach a terminal state
+                    await _force_terminal(run_id, "recovered after an interruption (no session)")
+            except Exception as exc:  # noqa: BLE001 — B5: a failed recovery must still terminate
+                log.error("reconciler.redrive_failed", run_id=run_id, error=str(exc))
+                await _force_terminal(run_id, f"recovery re-drive failed: {exc}")
             finally:
                 await channel.close()
 
