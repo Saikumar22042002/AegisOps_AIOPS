@@ -802,6 +802,14 @@ two known realm issuer URLs (internal + browser-facing), nothing else.
         streamed-run test is flaky-but-passes in this env (invalid Gemini key → slow backend
         retries occasionally exceed the 30s UI wait; clean with a real key). Frontend served by
         host `next dev` for live code (the compose frontend image was 9h stale).
+  - [x] **B1 Redis Streams event bus** (2026-07-12): new `RedisChannel` (XADD on emit, background
+        XREAD-BLOCK pump feeding the same `.queue` the memory consumer drains) behind the unchanged
+        `Emitter`/`_sse` contract; flag `AEGISOPS_EVENT_BUS=memory|redis` (default memory =
+        rollback). Terminal runs publish an EOS marker (never delivered to the client) + set a TTL
+        so the stream self-evicts — fixing the unbounded `_channels` leak (P4) and enabling
+        worker-agnostic streaming/reconnect. The memory path is byte-identical (test_sse_contract
+        unchanged). Evidence: `test_event_bus_redis.py` (5, incl. multi-worker publish-A/consume-B
+        + TTL-on-terminal) + `test_sse_contract.py` (7) green.
   - [x] **S0 multi-tenancy** (2026-07-11): principal→(org_id,user_id) via Keycloak org claim
         (group-membership mapper; realm defines northwind-financial + acme-industrial groups)
         with the `users` mirror (by keycloak_sub, username/email fallback for seeded rows)

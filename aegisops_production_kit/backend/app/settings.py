@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     # username is the fallback for seeded users). legacy: pre-S0 single-default-org
     # behavior — rollback path only.
     aegisops_tenancy: Literal["strict", "legacy"] = "strict"
+    # B1 event bus. memory: in-process asyncio channels (single-worker; the rollback default).
+    # redis: Redis Streams (`run:<id>:events`) — worker-agnostic streaming + reconnect-anywhere,
+    # required for horizontal scale. The Emitter/SSE frame contract is identical in both modes.
+    aegisops_event_bus: Literal["memory", "redis"] = "memory"
     # A5 4-eyes: when on, the initiator of a Production-environment run cannot approve it.
     aegisops_four_eyes_for_production: bool = True
     # S1 credential reveal: the step-up re-auth proof (a fresh Keycloak authentication) must

@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from langchain_core.messages import HumanMessage
@@ -301,7 +302,12 @@ async def chat_stream(run_id: str, user: User = Depends(get_current_user),
     channel = get_channel(run_id)
     if not channel:
         raise HTTPException(404, "no active stream for this run")
-    after = int(last_event_id) if last_event_id and last_event_id.isdigit() else 0
+    # B1: in redis mode any worker can serve the stream, but a run whose stream never started or
+    # already evicted has nothing to attach to → 404 (parity with memory mode's missing channel).
+    if hasattr(channel, "exists") and not await channel.exists():
+        raise HTTPException(404, "no active stream for this run")
+    # Cursor: memory ids are ints; redis ids are stream ids. Each channel's replay_after coerces.
+    after: Any = last_event_id if last_event_id else 0
     return EventSourceResponse(_sse(channel, replay_after=after))
 
 
