@@ -1,11 +1,8 @@
 # AegisOps scanner waivers - documented in the PROGRESS.md scanner ledger.
 # tfsec v1.28 config excludes match legacy IDs; the AVD id is in each comment.
+# REMOVED when the enhancement shipped (tfsec evaluates the module's secure defaults):
+# the pg flag family (temp-file/connections/disconnections/lock-waits/checkpoints),
+# backups, and the world-open authorized-network finding.
 exclude:
-  - google-sql-enable-pg-temp-file-logging  # AVD-GCP-0014 | pg temp-file logging: MS-9 observability posture
-  - google-sql-encrypt-in-transit-data  # AVD-GCP-0015 | require-SSL arrives as the MS-9 ssl_mode option (B2)
-  - google-sql-pg-log-connections  # AVD-GCP-0016 | pg log_connections: MS-9 observability posture
-  - google-sql-no-public-access  # AVD-GCP-0017 | public IP path: MS-9 private-VPC-peering opt-in; authorized networks guard today
-  - google-sql-pg-log-lock-waits  # AVD-GCP-0020 | pg log_lock_waits: MS-9 observability posture
-  - google-sql-pg-log-disconnections  # AVD-GCP-0022 | pg log_disconnections: MS-9 observability posture
-  - google-sql-enable-backup  # AVD-GCP-0024 | backups arrive with MS-9 backup/PITR (B2 opt-in)
-  - google-sql-pg-log-checkpoints  # AVD-GCP-0025 | pg log_checkpoints: MS-9 observability posture
+  - google-sql-encrypt-in-transit-data  # AVD-GCP-0015 | google provider 5.x replaced require_ssl with ssl_mode (module default ENCRYPTED_ONLY); the check tracks the removed attribute
+  - google-sql-no-public-access  # AVD-GCP-0017 | public IP is the sandbox access path; the private_network option ships and drops it entirely

@@ -505,11 +505,36 @@ class GCPGKEInputs(WorkflowInputs):
 
 
 class GCPCloudSQLInputs(WorkflowInputs):
+    """MS-9. BACKCOMPAT B2: every new option defaults to the OLD behavior here — including
+    the legacy world-open 'all' authorized network, which the module itself no longer
+    defaults to (module defaults are the secure ones). The platform passes all fields
+    explicitly, so stored pre-enhancement inputs render the exact old plan (B1, proven by
+    the workspace's committed terraform test)."""
+
     name: str
     project: str = ""
     region: str = "us-central1"
     tier: str = "db-f1-micro"
     database_version: str = "POSTGRES_15"
+    authorized_networks: list[str] = Field(default_factory=lambda: ["0.0.0.0/0"])
+    private_network: str = ""           # VPC self-link → private peering, drops the public IP
+    ssl_mode: str = ""                  # "" = provider default (old); ENCRYPTED_ONLY etc.
+    backup_enabled: bool = False        # module default is ON; schema keeps old behavior
+    database_flags: dict[str, str] = Field(default_factory=dict)
+    enable_query_insights: bool = False
+    maintenance_day: int = Field(default=0, ge=0, le=7)    # 0 = unset (old behavior)
+    maintenance_hour: int = Field(default=3, ge=0, le=23)
+    deletion_protection: bool = False   # destroys stay approval-gated by the platform
+    encryption_key_name: str = ""       # CMEK; offered by the DEP slot, never forced
+
+    @field_validator("ssl_mode")
+    @classmethod
+    def _valid_ssl_mode(cls, v: str) -> str:
+        allowed = ("", "ALLOW_UNENCRYPTED_AND_ENCRYPTED", "ENCRYPTED_ONLY",
+                   "TRUSTED_CLIENT_CERTIFICATE_REQUIRED")
+        if v.strip() not in allowed:
+            raise ValueError(f"ssl_mode must be empty (provider default) or one of {allowed[1:]}")
+        return v.strip()
 
     @field_validator("tier")
     @classmethod

@@ -94,6 +94,13 @@ SLOTS: dict[str, list[Slot]] = {
                       creator="azure.resource_group", value_from="name",
                       wires={"resource_group": "input:name"},
                       stated_default="a module-created resource group")],
+    # MS-9: CMEK is OFFERED when a gcp.kms ring exists (its first key's id), never forced —
+    # with no ring the field stays empty and Google-managed encryption applies.
+    "gcp.cloudsql": [Slot(field="encryption_key_name", parent_cloud="gcp",
+                          parent_type="kms", required=False,
+                          creator="gcp.kms", value_from="attr:key_ids[0]",
+                          wires={},
+                          stated_default="Google-managed encryption (no CMEK)")],
 }
 
 # "in a NEW vpc" / "with a fresh resource group" — the user explicitly wants the parent

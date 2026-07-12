@@ -211,6 +211,15 @@ PARAMS: dict[str, list[ParamSpec]] = {
         ParamSpec("region", "Region", default="us-central1"),
         ParamSpec("tier", "Machine tier", default="db-f1-micro"),
         ParamSpec("database_version", "Engine version", default="POSTGRES_15"),
+        ParamSpec("backup_enabled", "Automated backups + PITR", kind="bool", default=False,
+                  help="B2: off for existing resources; module default is on"),
+        ParamSpec("ssl_mode", "Connection encryption", kind="choice",
+                  choices=["", "ENCRYPTED_ONLY", "TRUSTED_CLIENT_CERTIFICATE_REQUIRED"],
+                  default="", help="empty = provider default (old behavior)"),
+        ParamSpec("private_network", "Private VPC self-link", default="",
+                  help="set to peer privately and drop the public IP"),
+        ParamSpec("deletion_protection", "TF deletion protection", kind="bool", default=False,
+                  help="off by default: destroys are approval-gated by the platform"),
     ],
 }
 

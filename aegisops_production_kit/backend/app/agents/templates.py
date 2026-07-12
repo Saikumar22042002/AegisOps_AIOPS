@@ -394,10 +394,24 @@ def _gcp_gke_policy(i: dict, resources=None) -> list[dict]:
 
 
 def _gcp_cloudsql_policy(i: dict, resources=None) -> list[dict]:
-    return [
+    checks = [
         _todo("Generated root password"),
         _ck("Approved engine (PostgreSQL)", str(i.get("database_version", "")).startswith("POSTGRES"), i.get("database_version", "")),
     ]
+    # MS-9: a world-open authorized network fails VISIBLY (the legacy default is exactly
+    # that — the approver sees it; the private path or a scoped CIDR list passes).
+    if i.get("private_network"):
+        checks.append(_ck("Network exposure", True, "private VPC peering (no public IP)"))
+    else:
+        nets = [str(n) for n in (i.get("authorized_networks") or [])]
+        world_open = any(n.endswith("/0") for n in nets)
+        checks.append(_ck("No world-open authorized networks", not world_open,
+                          ", ".join(nets) or "none"))
+    if i.get("backup_enabled"):
+        checks.append(_ck("Automated backups + PITR", True, "daily backups, point-in-time recovery"))
+    if i.get("encryption_key_name"):
+        checks.append(_ck("CMEK encryption", True, str(i["encryption_key_name"])))
+    return checks
 
 
 # Every template is a curated, org-approved, version-controlled Terraform workspace. There is

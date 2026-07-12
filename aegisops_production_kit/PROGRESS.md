@@ -1322,6 +1322,22 @@ as done without the live run; the code paths behind each are covered by tests wi
       (3) gated destroy → card states soft-delete/purge semantics → verify the vault is
       soft-deleted (recoverable), not purged.
       Expect: AzureServices bypass + current-SP policy visible in the portal.
+- [ ] **DLV-23 · MODSEED gcp.cloudsql enhanced live lifecycle + CMEK slot (MS-9)** —
+      Needs: valid `GEMINI_API_KEY` + the working GCP SA (Cloud SQL Admin API enabled).
+      Steps: (1) with the gcp.kms ring from DLV-20 present: "create a cloudsql database
+      named orders-db" → the DEP card OFFERS the ring's key as CMEK (provenance stated)
+      → approve → apply; day-2 "what's the connection name for orders-db"; (2) with NO
+      ring: the card states "Google-managed encryption (no CMEK)" — never forced;
+      (3) secure-options pass: create one with backup_enabled + ssl_mode=ENCRYPTED_ONLY
+      + the flag set → verify PITR/ssl/flags in the console; policy card shows
+      "No world-open authorized networks" PASS for a scoped CIDR and **FAIL for the
+      legacy 0.0.0.0/0 default** (the approver sees the honest fail); (4) private pass:
+      private_network set → no public IP; (5) **live B1**: a pre-enhancement instance
+      re-planned from stored inputs → "No changes." (the legacy `all` network keeps its
+      name); (6) gated destroy (deletion_protection stays off so it completes).
+      Expect: CMEK key must be same-region; the Cloud SQL service agent needs
+      encrypter/decrypter on the key (grant via the ring's IAM var) — documented here so
+      the live run grants it up front.
 - [ ] **DLV-22 · MODSEED azure.db multi-engine live lifecycle + live moved-block B1 (MS-8)** —
       Needs: valid `GEMINI_API_KEY` + Azure creds.
       Steps: (1) "create a mysql database named orders-sql in azure" → routed to azure.db,
@@ -1642,6 +1658,27 @@ this section mirrors phase-level status only.
         MS tags; 10 net-new mssql/mysql findings triaged (ledger). Scans green.
         Evidence: `test_modseed_ms8_azure_db.py` (9). Canary (B5) green. Live = **DLV-22**.
 
+  - [x] **MODSEED MS-9 gcp-cloudsql enhanced (`gcp.cloudsql`)** (2026-07-12): every
+        option variable-driven — authorized_networks (schema preserves the legacy
+        world-open `all` entry verbatim, value AND name, so existing instances re-plan
+        with zero renames; the MODULE default is none), private_network (drops the
+        public IP + networks), ssl_mode (module default ENCRYPTED_ONLY; provider 5.x
+        replaced require_ssl), backup_enabled (+PITR; module default ON),
+        database_flags (module default = the full 10-flag pg observability set incl.
+        pgAudit), enable_query_insights, maintenance window, deletion_protection var,
+        **CMEK via a DEP slot on gcp.kms** (required=False, `attr:key_ids[0]`,
+        stated default "Google-managed encryption (no CMEK)" — offered when a ring
+        exists, never forced). Generated root password KEPT. **B1/B2 gate = committed
+        native `terraform test`** (mock providers, 5 runs green). Policy: "No world-open
+        authorized networks" **fails visibly on the legacy default**; private/backup/
+        CMEK stated. **Waivers REMOVED**: CKV_GCP_14 + CKV_GCP_11 (checkov), and on the
+        tfsec side the entire pg-flag family + backups + the world-open-network finding
+        (tfsec evaluates the module's secure defaults through the dynamic block).
+        Checkov's flag family re-justified as a documented scanner limitation (cannot
+        expand dynamics inside `settings`; the terraform test asserts all 10 flags
+        render). Evidence: `test_modseed_ms9_gcp_cloudsql.py` (8). Canary (B5) green.
+        Live = **DLV-23**.
+
 ### Scanner ledger (fix or waiver per finding — owner condition, 2026-07-12)
 
 Scanners: checkov 3.3.8, tfsec v1.28.14. Waivers live per-workspace in
@@ -1735,10 +1772,11 @@ for the same reason — commit-hash pinning applies to git sources).
 | azure-vm | CKV_AZURE_119 | Public IP by design: the demo access path is SSH to the VM (U1 CIDR-scoped admin ingress). |
 | azure-vm | CKV_AZURE_151 | Module provisions Linux VMs; the Windows-encryption rule does not apply. |
 | azure-vm | CKV_AZURE_50 ×2 | Extension operations stay allowed: provisioning/verify flows may install agents. |
-| gcp-cloudsql | CKV2_GCP_13, CKV_GCP_51–54, CKV_GCP_108–111 / AVD-GCP-0014/0016/0020/0022/0025 | PostgreSQL logging-flag family + pgAudit: observability posture arrives with MS-9 query insights (B2). |
-| gcp-cloudsql | CKV_GCP_11 + CKV_GCP_60 / AVD-GCP-0017 ×2 | Public IP path: MS-9 delivers the private-VPC-peering opt-in (B2); authorized networks guard today. |
-| gcp-cloudsql | CKV_GCP_6 / AVD-GCP-0015 | Require-SSL arrives as the MS-9 `ssl_mode` option (B2). |
-| gcp-cloudsql | CKV_GCP_14 / AVD-GCP-0024 | Backups arrive with MS-9 backup/PITR (B2 opt-in). |
+| gcp-cloudsql | ~~CKV_GCP_14 / AVD-GCP-0024~~ | **WAIVER REMOVED by MS-9 (2026-07-12)** — the module defaults backups+PITR ON (schema keeps old behavior per B2); both scanners pass. |
+| gcp-cloudsql | ~~CKV_GCP_11 + tfsec pg-flag family (AVD-GCP-0014/0016/0020/0022/0025) + one AVD-GCP-0017~~ | **WAIVERS REMOVED by MS-9** — module defaults: NO authorized networks (the world-open finding dies) and the full 10-flag observability `database_flags` set, which tfsec evaluates through the dynamic block and passes. |
+| gcp-cloudsql | CKV2_GCP_13, CKV_GCP_51–54, CKV_GCP_108–111 | **Scanner limitation, not a missing capability**: the flags ship in the module-default `database_flags` map, but checkov cannot expand dynamic blocks inside `settings` (tfsec sees them and passes). The committed terraform test asserts all 10 flags render — regression-proof. *(Re-justified when MS-9 shipped.)* |
+| gcp-cloudsql | CKV_GCP_6 / AVD-GCP-0015 | google provider 5.x replaced `require_ssl` with `ssl_mode` (module default ENCRYPTED_ONLY); both scanners track the removed attribute. *(Re-justified when MS-9 shipped.)* |
+| gcp-cloudsql | CKV_GCP_60 / AVD-GCP-0017 (public-address rule) | Public IP is the sandbox access path; the `private_network` option ships and drops it entirely. *(Re-justified when MS-9 shipped.)* |
 | gcp-cloudsql | CKV_GCP_79 | Major-version bump is destructive for existing instances; version is variable-driven. |
 | gcp-gce | CKV_GCP_32 / AVD-GCP-0030 | Project-wide SSH key blocking arrives with the MS-12 OS Login option (B2). |
 | gcp-gce | CKV_GCP_39 / AVD-GCP-0041 + AVD-GCP-0045 | Shielded VM arrives as the MS-12 `shielded_instance_config` option (B2). |
