@@ -195,3 +195,53 @@ async def test_general_answers_positional_recall_without_the_llm(big_convo, monk
              "message": "what was my 20th question?"}
     out = await gen.general(state, {"configurable": {"emitter": Emitter(RunChannel("r"))}})
     assert "Question number 20: how do I configure widget 20?" in out["answer"]
+
+
+# ═══ M5 — context offloading: plans live in the store, referenced not inlined ═════════════════
+
+async def test_context_stays_in_budget_and_never_inlines_plan_json(org_id):
+    """A long session with many plan-bearing runs stays within the context budget — the large
+    plan JSON lives in runs.plan_json, never inlined into the transcript."""
+    from app.agents import memory
+    # Simulate assistant turns that mention plans WITHOUT embedding raw plan JSON.
+    turns = []
+    for i in range(30):
+        turns.append(("user", f"create resource {i}"))
+        turns.append(("assistant", memory.plan_ref_line(f"run-{i}", {"summary": {"add": 3}})))
+    sid = await _make_session(org_id, turns)
+    try:
+        ctx = await memory.build_context(sid, purpose="cloudops", current_message="what next?")
+        assert len(ctx) <= 3000 * 1.2, "context must stay within the purpose budget"
+        assert "resource_changes" not in ctx and "after_unknown" not in ctx, \
+            "raw plan JSON must never be inlined into the LLM context"
+    finally:
+        from sqlalchemy import delete
+        async with session_scope() as s:
+            await s.execute(delete(Message).where(Message.session_id == uuid.UUID(sid)))
+            await s.execute(delete(Session).where(Session.id == uuid.UUID(sid)))
+
+
+async def test_fetch_plan_returns_stored_plan_on_demand(org_id):
+    """An agent asked about a prior plan fetches it from the store — not a truncated inline copy."""
+    import uuid as _uuid
+
+    from sqlalchemy import delete
+
+    from app.agents import memory
+    from app.db.models import Run
+
+    plan = {"summary": {"add": 8, "change": 0, "destroy": 0},
+            "diff": [{"address": f"r{i}", "actions": ["create"]} for i in range(8)]}
+    async with session_scope() as s:
+        run = Run(org_id=_uuid.UUID(org_id), status="completed", mode="apply", plan_json=plan)
+        s.add(run)
+        await s.flush()
+        rid = str(run.id)
+    try:
+        fetched = await memory.fetch_plan(rid)
+        assert fetched and fetched["summary"]["add"] == 8 and len(fetched["diff"]) == 8
+        ref = memory.plan_ref_line(rid, plan)
+        assert "+8" in ref and "full plan available" in ref and "diff" not in ref
+    finally:
+        async with session_scope() as s:
+            await s.execute(delete(Run).where(Run.id == _uuid.UUID(rid)))

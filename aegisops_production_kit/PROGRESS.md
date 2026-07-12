@@ -882,6 +882,11 @@ two known realm issuer URLs (internal + browser-facing), nothing else.
         `test_memory.py` (+6). **PENDING (Gemini key):** the full turn-20-recall UI demo needs a
         valid Gemini key (the router + general LLM calls) — the recall logic itself is deterministic
         and proven; the exact-recall answer is even LLM-free once routed.
+  - [x] **M5 context offloading** (2026-07-12): large operational payloads (plan JSON, apply logs)
+        live in the store (`runs.plan_json`), never inlined into the transcript/LLM prompt;
+        `memory.plan_ref_line` is the short reference the context carries and `memory.fetch_plan`
+        fetches the full plan on demand. Evidence: `test_memory.py` (2) — a 30-plan session stays
+        within the purpose budget with no raw plan JSON inlined; fetch returns the stored plan.
   - [x] **S0 multi-tenancy** (2026-07-11): principal→(org_id,user_id) via Keycloak org claim
         (group-membership mapper; realm defines northwind-financial + acme-industrial groups)
         with the `users` mirror (by keycloak_sub, username/email fallback for seeded rows)

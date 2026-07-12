@@ -139,6 +139,29 @@ async def retrieve(session_id: str, query: str, *, k: int = 3, settings=None) ->
         return []
 
 
+# ── M5: context offloading — large payloads live in the store, referenced (not inlined) ────────
+
+
+def plan_ref_line(run_id: str, plan_json: dict | None) -> str:
+    """A short REFERENCE to a plan that lives in the store — never the full plan JSON inlined into
+    an LLM prompt. Agents fetch the full plan on demand via `fetch_plan`."""
+    summ = (plan_json or {}).get("summary", {}) if isinstance(plan_json, dict) else {}
+    return (f"[plan run {run_id}: +{summ.get('add', 0)} ~{summ.get('change', 0)} "
+            f"-{summ.get('destroy', 0)} — full plan available on request]")
+
+
+async def fetch_plan(run_id: str) -> dict | None:
+    """On-demand fetch of a run's stored plan JSON (M5 offloading). Deterministic, store-grounded."""
+    try:
+        from ..db.models import Run
+        async with session_scope() as s:
+            run = await s.get(Run, uuid.UUID(str(run_id)))
+            return run.plan_json if run else None
+    except Exception as e:  # noqa: BLE001
+        log.warning("memory.fetch_plan_failed", run_id=run_id, error=str(e))
+        return None
+
+
 async def embed_message(message_id: str, content: str, settings) -> None:
     """Embed one message on write (M2). Best-effort: no Gemini key ⇒ leaves NULL (keyword recall)."""
     if not content or not content.strip():
