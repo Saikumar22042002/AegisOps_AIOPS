@@ -109,3 +109,14 @@ async def list_integrations(
         _row("Gemini", "connected" if gemini.enabled else "not configured"),
     ]
     return {"integrations": rows}
+
+
+@router.get("/models")
+async def list_models(
+    _user: User = Depends(require_auth), settings: Settings = Depends(get_settings)
+) -> dict[str, Any]:
+    """U3: the real LLM catalog — exactly the models the backend serves and validates. The
+    model menu shows these and only these; anything else is rejected at /chat with a 400."""
+    from ..integrations.llm import available_models
+
+    return {"models": available_models(settings)}

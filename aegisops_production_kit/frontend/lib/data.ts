@@ -49,13 +49,14 @@ export const regionOptions: Opt[] = [
   { label: "ap-south-1", sub: "Mumbai" },
 ];
 
+// U3: the model menu lists exactly the models the backend serves (Google Gemini today) and
+// sends the raw model id as `model` on /chat. The backend validates it against the same
+// catalog (GET /models) and rejects anything else with a 400 — no advertising providers we
+// can't run. Keep this in sync with `available_models` in the backend registry.
 export const modelOptions: Opt[] = [
-  { label: "Claude Sonnet 4.5", sub: "Anthropic · default" },
-  { label: "Claude Opus 4.1", sub: "Anthropic · deep reasoning" },
-  { label: "GPT-4o", sub: "OpenAI" },
-  { label: "Gemini 2.5 Pro", sub: "Google" },
-  { label: "Azure OpenAI", sub: "GPT-4o · private" },
-  { label: "Llama 3.1 70B", sub: "Ollama · self-hosted" },
+  { label: "gemini-3.5-flash", sub: "Google Gemini · default" },
+  { label: "gemini-flash-latest", sub: "Google Gemini · latest flash" },
+  { label: "gemini-2.5-flash", sub: "Google Gemini · GA fallback" },
 ].map((o) => ({ ...o, dot: modelColor(o.label) }));
 
 export const roleOptions: Opt[] = [

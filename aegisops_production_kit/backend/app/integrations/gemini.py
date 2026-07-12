@@ -8,6 +8,7 @@ No fabricated output — if the API is unreachable the call raises and is surfac
 
 from __future__ import annotations
 
+import contextvars
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from typing import Any
@@ -20,6 +21,23 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from ..settings import Settings
 
 log = structlog.get_logger(__name__)
+
+# U3: the per-run model chosen at the API layer (already validated against the provider
+# catalog). It is stored in a contextvar rather than mutated onto the shared GeminiLLM
+# singleton so that concurrent runs — different asyncio tasks — never clobber each other's
+# model. Every GeminiLLM call reads it, so router/cloudops/devops/sre all honor the choice
+# without threading a `model` argument through the whole graph.
+_run_model: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "aegisops_run_model", default=None)
+
+
+def set_run_model(model: str | None) -> None:
+    """Bind the model for the current run's asyncio context (call once per run driver)."""
+    _run_model.set(model)
+
+
+def get_run_model() -> str | None:
+    return _run_model.get()
 
 
 class GeminiError(Exception):
@@ -85,33 +103,42 @@ class GeminiLLM:
             tools=tools or None,
         )
 
+    def _effective_model(self, model: str | None) -> str:
+        """Resolve the model for one call: explicit arg > per-run choice > resolved default."""
+        return model or _run_model.get() or self.model
+
     async def astream(
-        self, system: str | None, contents: Any, tools: list | None = None
+        self, system: str | None, contents: Any, tools: list | None = None,
+        model: str | None = None,
     ) -> AsyncIterator[types.GenerateContentResponse]:
         """Stream raw response chunks (caller reads .text and tool-call parts)."""
         if not self._enabled:
             raise GeminiError("GEMINI_API_KEY is not configured")
         await self._ensure_model()
+        use = self._effective_model(model)
         stream = await self.client.aio.models.generate_content_stream(
-            model=self.model, contents=contents, config=self._config(system, tools)
+            model=use, contents=contents, config=self._config(system, tools)
         )
         async for chunk in stream:
             yield chunk
 
     async def astream_text(
-        self, system: str | None, contents: Any, tools: list | None = None
+        self, system: str | None, contents: Any, tools: list | None = None,
+        model: str | None = None,
     ) -> AsyncIterator[str]:
-        async for chunk in self.astream(system, contents, tools):
+        async for chunk in self.astream(system, contents, tools, model=model):
             if getattr(chunk, "text", None):
                 yield chunk.text
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=0.5, max=6), reraise=True)
     async def agenerate(
-        self, system: str | None, contents: Any, tools: list | None = None
+        self, system: str | None, contents: Any, tools: list | None = None,
+        model: str | None = None,
     ) -> types.GenerateContentResponse:
         if not self._enabled:
             raise GeminiError("GEMINI_API_KEY is not configured")
         await self._ensure_model()
+        use = self._effective_model(model)
         # Each attempt is recorded as one Langfuse generation (tokens/cost/latency; failures
         # as ERROR generations) under whichever step span is currently open for the run.
         from .langfuse_client import get_tracer
@@ -119,16 +146,16 @@ class GeminiLLM:
         t0 = datetime.now(timezone.utc)
         try:
             resp = await self.client.aio.models.generate_content(
-                model=self.model, contents=contents, config=self._config(system, tools)
+                model=use, contents=contents, config=self._config(system, tools)
             )
         except Exception as e:
             get_tracer(self.settings).generation(
-                name="gemini.generate", model=self.model,
+                name="gemini.generate", model=use,
                 input={"system": system, "prompt": contents if isinstance(contents, str) else str(contents)},
                 start_time=t0, error=str(e))
             raise
         get_tracer(self.settings).generation(
-            name="gemini.generate", model=self.model,
+            name="gemini.generate", model=use,
             input={"system": system, "prompt": contents if isinstance(contents, str) else str(contents)},
             output=resp.text or "", usage=usage_of(resp), start_time=t0)
         return resp

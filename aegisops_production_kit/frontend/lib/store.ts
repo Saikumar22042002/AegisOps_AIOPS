@@ -137,7 +137,7 @@ export const useUI = create<UIState>((set, get) => ({
   env: "Production",
   cloud: "Auto (ask me)",  // U4: default to Auto so ambiguous requests ask which cloud
   region: "us-east-1",
-  model: "Gemini 2.5 Pro",
+  model: "gemini-3.5-flash",  // U3: a real, backend-served model id (see modelOptions)
   role: "Platform Admin",
   feedback: {},
   activeRunId: null,

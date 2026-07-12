@@ -13,9 +13,9 @@ export function cloudColor(name: string): string {
 }
 
 export function modelColor(name: string): string {
-  if (/Claude/.test(name)) return "var(--amber)";
-  if (/GPT|OpenAI/.test(name)) return "var(--green)";
-  if (/Gemini/.test(name)) return "var(--cyan)";
-  if (/Azure/.test(name)) return "var(--accent-2)";
+  if (/Claude/i.test(name)) return "var(--amber)";
+  if (/GPT|OpenAI/i.test(name)) return "var(--green)";
+  if (/Gemini/i.test(name)) return "var(--cyan)";
+  if (/Azure/i.test(name)) return "var(--accent-2)";
   return "var(--violet)";
 }

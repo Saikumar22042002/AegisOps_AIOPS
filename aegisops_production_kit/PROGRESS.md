@@ -911,6 +911,18 @@ two known realm issuer URLs (internal + browser-facing), nothing else.
         result), reports `remediation_failed` truthfully on error, and stays "proposed, not
         executed" when no cluster / for `investigate`. Evidence: `test_sre_remediation.py` (8) +
         the P7 honesty test still green.
+  - [x] **U3 real LLM provider seam + honest model menu** (2026-07-12): new `integrations/llm/`
+        package — `LLMProvider` protocol, `GeminiProvider` (the one provider we ship), and
+        `get_provider(settings, model)` that returns the default for `None`, the requested id
+        when served, or raises `UnknownModelError` (naming what we serve) — never a silent
+        fallback. `body.model` is now honored: `/chat` validates it up front (unknown → clear
+        400 before any DB) and binds the resolved id to the run via a **contextvar** in
+        `gemini.py` (per-asyncio-task, so concurrent runs don't clobber each other's model —
+        the shared GeminiLLM singleton is never mutated); every Gemini call reads it, so
+        router/cloudops/devops/sre all honor the choice. `GET /models` exposes the real catalog.
+        The frontend menu, which advertised Claude/GPT-4o/Azure/Llama we can't run, is trimmed
+        to the 3 real Gemini ids and sends the raw id; store default is now a served id.
+        Evidence: `test_llm_provider.py` (9); vitest 28; tsc clean.
   - [x] **S0 multi-tenancy** (2026-07-11): principal→(org_id,user_id) via Keycloak org claim
         (group-membership mapper; realm defines northwind-financial + acme-industrial groups)
         with the `users` mirror (by keycloak_sub, username/email fallback for seeded rows)

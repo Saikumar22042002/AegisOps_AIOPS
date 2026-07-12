@@ -26,6 +26,8 @@ from ..agents.supervisor import get_supervisor
 from ..db import repositories as repo
 from ..db.models import Message, Run, Session
 from ..db.session import session_scope
+from ..integrations.gemini import set_run_model
+from ..integrations.llm import UnknownModelError, get_provider
 from ..logging_conf import bind_correlation, get_logger
 from ..metrics import AGENT_RUNS
 from ..schemas.auth import User
@@ -139,6 +141,13 @@ async def chat(body: ChatRequest, request: Request, user: User = Depends(require
                settings: Settings = Depends(get_settings)):
     # S3: read-only roles (auditor/read-only) cannot initiate a run — they can still view
     # (GET endpoints stay on get_current_user). require_initiator → 403 with a clear message.
+    # U3: the requested model is validated against the real provider catalog up front. An
+    # unknown model fails loudly (400) instead of being silently ignored; the resolved id is
+    # bound to this run so the model the operator picked is the model the run actually uses.
+    try:
+        _provider, resolved_model = get_provider(settings, body.model)
+    except UnknownModelError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
     async with session_scope() as s:
         org = await repo.org_for(s, user)
         org_id = str(org.id)
@@ -184,6 +193,7 @@ async def chat(body: ChatRequest, request: Request, user: User = Depends(require
 
     async def _drive():
         from ..agents.events import Emitter
+        set_run_model(resolved_model)  # U3: bind the chosen model for this run's async context
         emitter = Emitter(channel)
         try:
             # Lead with the run identity so the client binds its live artifact panel to THIS

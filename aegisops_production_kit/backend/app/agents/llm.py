@@ -9,7 +9,7 @@ from typing import Any
 
 import structlog
 
-from ..integrations.gemini import GeminiError, get_gemini, usage_of
+from ..integrations.gemini import GeminiError, get_gemini, get_run_model, usage_of
 from ..integrations.langfuse_client import get_tracer
 from ..metrics import LLM_LATENCY
 from ..settings import Settings
@@ -34,7 +34,8 @@ async def classify_json(settings: Settings, system: str, prompt: str) -> dict[st
     gemini = get_gemini(settings)
     if not gemini.enabled:
         raise GeminiError("GEMINI_API_KEY is not configured")
-    with LLM_LATENCY.labels(model=gemini.model, operation="classify").time():
+    model = get_run_model() or gemini.model  # U3: label reflects the model the run actually uses
+    with LLM_LATENCY.labels(model=model, operation="classify").time():
         resp = await gemini.agenerate(system, prompt)
     return _extract_json(resp.text or "")
 
@@ -43,7 +44,8 @@ async def generate(settings: Settings, system: str, prompt: str) -> str:
     gemini = get_gemini(settings)
     if not gemini.enabled:
         raise GeminiError("GEMINI_API_KEY is not configured")
-    with LLM_LATENCY.labels(model=gemini.model, operation="generate").time():
+    model = get_run_model() or gemini.model  # U3
+    with LLM_LATENCY.labels(model=model, operation="generate").time():
         resp = await gemini.agenerate(system, prompt)
     return resp.text or ""
 
@@ -71,6 +73,7 @@ async def stream_answer(settings: Settings, system: str, prompt: str, emitter: E
     gemini = get_gemini(settings)
     if not gemini.enabled:
         raise GeminiError("GEMINI_API_KEY is not configured")
+    model = get_run_model() or gemini.model  # U3: the model this run selected (or the default)
     full: list[str] = []
     attempt = 0
     usage: dict | None = None
@@ -80,13 +83,13 @@ async def stream_answer(settings: Settings, system: str, prompt: str, emitter: E
         # usage the final stream chunk reported. Best-effort — never breaks the stream.
         try:
             get_tracer(settings).generation(
-                name="gemini.stream", model=gemini.model,
+                name="gemini.stream", model=model,
                 input={"system": system, "prompt": prompt},
                 output=output, usage=usage, start_time=t0, error=error)
         except Exception:  # noqa: BLE001
             pass
 
-    with LLM_LATENCY.labels(model=gemini.model, operation="stream").time():
+    with LLM_LATENCY.labels(model=model, operation="stream").time():
         while True:
             attempt += 1
             t0 = datetime.now(timezone.utc)
