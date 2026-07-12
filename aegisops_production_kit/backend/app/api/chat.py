@@ -24,12 +24,13 @@ from ..agents.events import DONE, RunChannel, create_channel, get_channel
 from ..agents.runner import run_graph
 from ..agents.supervisor import get_supervisor
 from ..db import repositories as repo
-from ..db.models import Message, Run, Session
+from ..db.models import Message, Run, RunStep, Session
 from ..db.session import session_scope
 from ..integrations.gemini import set_run_model
 from ..integrations.llm import UnknownModelError, get_provider
 from ..logging_conf import bind_correlation, get_logger
-from ..metrics import AGENT_RUNS
+from ..metrics import AGENT_RUNS, APPROVAL_WAIT
+from ..ratelimit import limiter
 from ..schemas.auth import User
 from ..security.deps import authorize_run, get_current_user, require_approver, require_initiator
 from ..settings import Settings, get_settings
@@ -236,6 +237,18 @@ async def chat(body: ChatRequest, request: Request, user: User = Depends(require
     return EventSourceResponse(_sse(channel))
 
 
+def _record_approval_wait(domain: str | None, decision: str, started_at) -> None:
+    """O3: observe the real human-approval wait (seconds) labeled by domain + decision.
+
+    `started_at` is the approval step's start (when the run paused at the gate); None for a
+    legacy run with no recorded approval step, in which case there is nothing honest to record."""
+    if not started_at:
+        return
+    from datetime import datetime, timezone
+    wait = (datetime.now(timezone.utc) - started_at).total_seconds()
+    APPROVAL_WAIT.labels(domain=domain or "unknown", decision=decision).observe(max(wait, 0.0))
+
+
 @router.post("/approvals/{run_id}")
 async def resolve_approval(run_id: str, body: ApprovalRequest,
                            user: User = Depends(require_approver), settings: Settings = Depends(get_settings)):
@@ -259,6 +272,15 @@ async def resolve_approval(run_id: str, body: ApprovalRequest,
         if run.status != "awaiting_approval":
             raise HTTPException(status.HTTP_409_CONFLICT, "run is not awaiting approval")
         org_id, session_id = str(run.org_id), str(run.session_id)
+        # O3: record the real human-approval wait — from when the run paused at the gate (the
+        # approval step's start) to this decision. Labeled by domain + decision. Best-effort.
+        try:
+            step = (await s.execute(
+                select(RunStep).where(RunStep.run_id == run.id, RunStep.name == "approval")
+            )).scalar_one_or_none()
+            _record_approval_wait(run.domain, body.decision, step.started_at if step else None)
+        except Exception as exc:  # noqa: BLE001 — metrics never block an approval
+            log.warning("approval.wait_metric_failed", run_id=run_id, error=str(exc))
 
     # A1 endpoint guard: reject a second /approvals for this run while a prior decision is
     # still being driven (the run stays `awaiting_approval` in the DB until the drive ends,
@@ -357,3 +379,13 @@ async def run_input(run_id: str, body: dict, user: User = Depends(get_current_us
 
     await get_redis().rpush(f"runinput:{run_id}", json.dumps({"value": body.get("value", "")}))
     return {"status": "received"}
+
+
+# O3: exempt the SSE endpoints from the per-IP rate limit. We register the exemption by NAME
+# rather than via @limiter.exempt, because that decorator wraps the endpoint in a
+# `(*args, **kwargs)` shim FastAPI cannot introspect — the ChatRequest body param is lost and
+# every POST /chat 422s. SlowAPIMiddleware checks `f"{fn.__module__}.{fn.__name__}"` against
+# `limiter._exempt_routes`, so registering the real (unwrapped) function names has the same
+# effect while leaving the signatures — and request validation — intact.
+for _sse_endpoint in (chat, chat_stream):
+    limiter._exempt_routes.add(f"{_sse_endpoint.__module__}.{_sse_endpoint.__name__}")

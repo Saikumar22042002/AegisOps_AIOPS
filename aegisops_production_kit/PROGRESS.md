@@ -932,6 +932,18 @@ two known realm issuer URLs (internal + browser-facing), nothing else.
         still deep-links to Langfuse, now shown alongside the tree; a run with no recorded steps
         falls back to the honest note + link. `coming_soon` retired. Evidence:
         `test_traces_tree.py` (4, pure builder — no DB) + updated traces honesty test; vitest 28.
+  - [x] **O3 metrics hygiene + SSE rate-limit exemption** (2026-07-12): three declared metrics
+        were always-empty series (a lie on the dashboard). Fixed honestly: `AGENT_STEP_DURATION`
+        is now observed with the real per-step elapsed in `timing.end_step` (grouped by
+        subsystem via `_AGENT_OF`); `APPROVAL_WAIT` is observed in `resolve_approval` with the
+        real human wall-clock wait (from the approval step's start to the decision), labeled by
+        domain + decision; `TOOL_RETRIES` — which had no real population source in this item's
+        scope and no dashboard panel — is removed rather than left empty. Separately, the SSE
+        endpoints (`POST /chat`, `GET /chat/stream/{id}`) are marked `@limiter.exempt`: an SSE
+        connection is long-lived and reconnects with Last-Event-ID, so counting it against a
+        per-minute budget would throttle normal streaming. The limiter moved to a new
+        `ratelimit.py` so `main.py` and `api/chat.py` share one instance without an import cycle.
+        Evidence: `test_metrics_hygiene.py` (6) incl. a live-DB step-duration sample.
   - [x] **S0 multi-tenancy** (2026-07-11): principal→(org_id,user_id) via Keycloak org claim
         (group-membership mapper; realm defines northwind-financial + acme-industrial groups)
         with the `users` mirror (by keycloak_sub, username/email fallback for seeded rows)

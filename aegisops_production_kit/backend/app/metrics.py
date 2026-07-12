@@ -63,13 +63,6 @@ APPROVAL_WAIT = Histogram(
     registry=REGISTRY,
 )
 
-TOOL_RETRIES = Counter(
-    "aegisops_tool_retries_total",
-    "Tool execution retries.",
-    labelnames=("tool",),
-    registry=REGISTRY,
-)
-
 DEP_UP = Gauge(
     "aegisops_dependency_up",
     "Liveness of a backing dependency (1 up, 0 down).",

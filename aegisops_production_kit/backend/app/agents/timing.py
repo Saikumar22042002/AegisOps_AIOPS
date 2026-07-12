@@ -25,6 +25,7 @@ from sqlalchemy import select
 from ..db.models import RunStep
 from ..db.session import session_scope
 from ..integrations.langfuse_client import get_tracer
+from ..metrics import AGENT_STEP_DURATION
 from ..settings import get_settings
 
 log = structlog.get_logger(__name__)
@@ -35,6 +36,17 @@ ORDER: dict[str, int] = {
     "cloudops_agent": 1, "devops_plan": 1, "sre_analyze": 1, "knowledge": 1, "general": 1,
     "policy_evaluation": 2, "planner": 3, "approval": 4, "execute": 5, "verify": 6,
     "finalize": 7, "servicenow_update": 8, "notify": 9,
+}
+
+# Subsystem each step belongs to (the `agent` label of the AGENT_STEP_DURATION histogram, so
+# the series is grouped by subsystem rather than exploding one label per node name).
+_AGENT_OF: dict[str, str] = {
+    "router": "router",
+    "cloudops_agent": "cloudops", "devops_plan": "devops", "sre_analyze": "sre",
+    "knowledge": "knowledge", "general": "general",
+    "policy_evaluation": "core", "planner": "core", "execute": "core", "verify": "core",
+    "approval": "approval", "finalize": "finalize",
+    "servicenow_update": "servicenow", "notify": "notify",
 }
 
 
@@ -88,6 +100,11 @@ async def end_step(run_id: str, name: str, *, status: str = "done", error: str |
                 started_at = row.started_at
     except Exception as e:  # noqa: BLE001
         log.warning("timing.end_failed", name=name, error=str(e))
+    # O3: emit the real per-step latency (non-empty series; was declared but never observed).
+    if started_at is not None:
+        elapsed = (ended_at - started_at).total_seconds()
+        if elapsed >= 0:
+            AGENT_STEP_DURATION.labels(agent=_AGENT_OF.get(name, "other"), step=name).observe(elapsed)
     try:
         get_tracer(get_settings()).step_ended(run_id, name, status=status, error=error,
                                               result=result, started_at=started_at, ended_at=ended_at)

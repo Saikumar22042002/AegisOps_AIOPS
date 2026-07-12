@@ -18,10 +18,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
-from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
-from slowapi.util import get_remote_address
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from . import __version__
@@ -34,12 +32,11 @@ from .graph_db import neo4j as neo4j_client
 from .logging_conf import bind_correlation, clear_correlation, configure_logging, get_logger
 from .metrics import API_REQUEST_DURATION, API_REQUESTS, REGISTRY
 from .otel import setup_otel, shutdown_otel
+from .ratelimit import limiter
 from .settings import get_settings
 
 log = get_logger(__name__)
 settings = get_settings()
-
-limiter = Limiter(key_func=get_remote_address, default_limits=[f"{settings.rate_limit_per_minute}/minute"])
 
 
 @asynccontextmanager
