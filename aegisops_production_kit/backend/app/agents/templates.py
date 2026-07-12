@@ -35,116 +35,126 @@ class WorkflowTemplate:
 
 
 def _ck(name: str, passed: bool, detail: str = "") -> dict[str, Any]:
-    return {"name": name, "passed": bool(passed), "detail": detail}
+    """A REAL policy check: `passed` is a genuine predicate over the request inputs."""
+    return {"name": name, "passed": bool(passed), "detail": detail, "evaluated": True}
+
+
+def _todo(name: str, detail: str = "") -> dict[str, Any]:
+    """Honesty label (P8, Phase 1): a control the module enforces but the policy engine does not
+    yet VERIFY against the plan. Rendered as "not evaluated" — never a green pass an approver
+    might trust. Becomes a real predicate over `terraform show -json` in Phase 2 (U1).
+    `passed=None` is the not-evaluated signal for the approval card."""
+    d = "enforced by the module · verified against the plan in a later pass"
+    return {"name": name, "passed": None, "detail": detail or d, "evaluated": False}
 
 
 def _s3_policy(i: dict) -> list[dict]:
     return [
         _ck("Public access blocked", i.get("block_public", True)),
         _ck("Versioning enabled", i.get("versioning", True)),
-        _ck("Server-side encryption (AES256)", True),
-        _ck("Approved module version", True, "aws/s3 v1"),
+        _todo("Server-side encryption (AES256)"),
+        _todo("Approved module version", "aws/s3 v1"),
     ]
 
 
 def _vpc_policy(i: dict) -> list[dict]:
     return [
         _ck("Multi-AZ subnets", int(i.get("az_count", 3)) >= 2, f"{i.get('az_count', 3)} AZs"),
-        _ck("Private subnets + NAT egress", True),
-        _ck("Approved module (terraform-aws-modules/vpc)", True, "v5.8"),
+        _todo("Private subnets + NAT egress"),
+        _todo("Approved module (terraform-aws-modules/vpc)", "v5.8"),
     ]
 
 
 def _eks_policy(i: dict) -> list[dict]:
     return [
-        _ck("Secrets encryption enabled", True),
-        _ck("Private API endpoint only", True),
-        _ck("IRSA configured · no node IAM keys", True),
-        _ck("Approved module version (v20.8)", True),
+        _todo("Secrets encryption enabled"),
+        _todo("Private API endpoint only"),
+        _todo("IRSA configured · no node IAM keys"),
+        _todo("Approved module version (v20.8)"),
         _ck("Multi-AZ node placement", len(i.get("subnet_ids", [])) >= 2, f"{len(i.get('subnet_ids', []))} subnets"),
     ]
 
 
 def _rds_policy(i: dict) -> list[dict]:
     return [
-        _ck("Storage encrypted", True),
-        _ck("Not publicly accessible", True),
-        _ck("RDS-managed master password", True),
+        _todo("Storage encrypted"),
+        _todo("Not publicly accessible"),
+        _todo("RDS-managed master password"),
         _ck("Approved engine", i.get("engine", "postgres") in {"postgres", "mysql", "mariadb"}, i.get("engine", "")),
     ]
 
 
 def _ec2_policy(_i: dict) -> list[dict]:
     return [
-        _ck("IMDSv2 enforced", True),
-        _ck("Root volume encrypted", True),
-        _ck("Launched in a private subnet", True),
+        _todo("IMDSv2 enforced"),
+        _todo("Root volume encrypted"),
+        _todo("Launched in a private subnet"),
     ]
 
 
 def _azure_storage_policy(_i: dict) -> list[dict]:
     return [
-        _ck("Minimum TLS 1.2", True),
-        _ck("No public blob access", True),
-        _ck("Approved replication", True),
+        _todo("Minimum TLS 1.2"),
+        _todo("No public blob access"),
+        _todo("Approved replication"),
     ]
 
 
 def _azure_rg_policy(_i: dict) -> list[dict]:
-    return [_ck("Tagging policy applied", True), _ck("Approved region", True)]
+    return [_todo("Tagging policy applied"), _todo("Approved region")]
 
 
 def _gcs_policy(_i: dict) -> list[dict]:
     return [
-        _ck("Uniform bucket-level access", True),
-        _ck("Versioning enabled", True),
-        _ck("force_destroy disabled", True),
+        _todo("Uniform bucket-level access"),
+        _todo("Versioning enabled"),
+        _todo("force_destroy disabled"),
     ]
 
 
 def _azure_vm_policy(_i: dict) -> list[dict]:
     return [
-        _ck("SSH key auth (no password)", True),
-        _ck("Dedicated NSG (default-deny inbound)", True),
-        _ck("Managed OS disk", True),
+        _todo("SSH key auth (no password)"),
+        _todo("Dedicated NSG (default-deny inbound)"),
+        _todo("Managed OS disk"),
     ]
 
 
 def _azure_pg_policy(_i: dict) -> list[dict]:
     return [
-        _ck("TLS-enforced connections", True),
-        _ck("Server-managed admin password (generated)", True),
+        _todo("TLS-enforced connections"),
+        _todo("Server-managed admin password (generated)"),
         _ck("Approved PostgreSQL version", str(_i.get("pg_version", "15")) in {"14", "15", "16"}, _i.get("pg_version", "")),
     ]
 
 
 def _azure_aks_policy(_i: dict) -> list[dict]:
     return [
-        _ck("System-assigned managed identity", True),
-        _ck("Azure RBAC enabled", True),
+        _todo("System-assigned managed identity"),
+        _todo("Azure RBAC enabled"),
         _ck("Multi-node pool", int(_i.get("node_count", 2)) >= 2, f"{_i.get('node_count', 2)} nodes"),
     ]
 
 
 def _gcp_gce_policy(_i: dict) -> list[dict]:
     return [
-        _ck("SSH key auth (no password)", True),
-        _ck("Ingress restricted to declared ports", True),
-        _ck("Labelled ManagedBy=aegisops", True),
+        _todo("SSH key auth (no password)"),
+        _todo("Ingress restricted to declared ports"),
+        _todo("Labelled ManagedBy=aegisops"),
     ]
 
 
 def _gcp_gke_policy(_i: dict) -> list[dict]:
     return [
-        _ck("Dedicated node pool (default removed)", True),
-        _ck("Deletion protection off (day-2 destroy)", True),
+        _todo("Dedicated node pool (default removed)"),
+        _todo("Deletion protection off (day-2 destroy)"),
         _ck("Multi-node pool", int(_i.get("node_count", 2)) >= 2, f"{_i.get('node_count', 2)} nodes"),
     ]
 
 
 def _gcp_cloudsql_policy(_i: dict) -> list[dict]:
     return [
-        _ck("Generated root password", True),
+        _todo("Generated root password"),
         _ck("Approved engine (PostgreSQL)", str(_i.get("database_version", "")).startswith("POSTGRES"), _i.get("database_version", "")),
     ]
 

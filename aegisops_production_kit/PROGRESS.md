@@ -614,6 +614,18 @@ explained instead of crashing).
         402 passed / 2 skipped; vitest 25 passed. Note: existing dev Keycloak containers must
         be recreated to import the new groups/mapper; invalid-Gemini-key environments now seed
         with NULL embeddings + loud warning (keyword recall degrade, per invariant 7).
+  - [x] **Honesty labels (P7/P8/P9)** (2026-07-12): no surface claims what it didn't do.
+        **P8** — policy checks that the module enforces but the engine doesn't yet verify against
+        the plan are marked `evaluated=False`/`passed=None` ("not evaluated"), never a green pass;
+        real input predicates (encryption-off etc.) still show a real fail; the approval card and
+        timeline count only genuinely-evaluated checks (`X/Y evaluated · N pending`). Real
+        predicates over `terraform show -json` are Phase 2 (U1). **P7** — SRE remediation no longer
+        returns `applied:True` after only listing; it reports `proposed_not_executed` and tells the
+        user "proposed, not executed" (real K8s actions are Phase 2/U2). **P9** — the Traces tab
+        returns no fabricated spans; it shows an honest note + a deep-link to the real Langfuse
+        trace (trace_id==run_id); the real in-app tree is Phase 2 (O1). Evidence:
+        `test_templates.py` (2), `test_honesty_labels.py` (2); full backend suite 427 passed /
+        2 skipped; vitest 28.
   - [x] **U4 "Auto (ask me)" cloud default** (2026-07-12): the cloud selector now defaults to
         "Auto (ask me)", which maps to `cloud=null` on the wire (`cloudToWire`); `ChatContext.cloud`
         no longer defaults to AWS. So an ambiguous request (a generic VM with no cloud named) now

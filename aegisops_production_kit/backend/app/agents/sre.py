@@ -137,17 +137,34 @@ async def sre_execute(state: AgentState, config) -> dict:
     await cg.add_step(order=3, name=f"remediate_{decision.get('action')}", agent="sre", tool="kubernetes", status="running")
 
     target = decision.get("target", "unknown")
+    action = decision.get("action")
+    # P7 honesty (Phase 1): the triage/telemetry/runbook analysis and the decision matrix are
+    # real, but the K8s MUTATION (rollback/scale/restart) is NOT implemented yet — real actions
+    # land in Phase 2 (U2). Never report `applied: True` for work that didn't happen. Report
+    # "proposed, not executed" and, when a cluster IS reachable, surface the real current state
+    # (a read) so the proposal is grounded — but do not claim to have changed anything.
+    note = (f"Remediation **proposed, not executed**: `{action}` on `{target}`. "
+            "Executing real Kubernetes rollback/scale/restart is a Phase-2 capability (U2); "
+            "for now this is a recommendation for a human to carry out.")
     try:
-        if not k8s.enabled:
-            await emitter.console("stdout", f"remediation '{decision.get('action')}' on {target} requires a configured kubeconfig.")
-            await cg.update_step(order=3, status="done", result={"applied": False, "reason": "k8s not configured"})
-            return {"outcome": {"status": "remediation_skipped", "reason": "k8s not configured", "decision": decision}}
-        # Real remediation: re-apply/scale the target deployment.
-        deployments = await k8s.list_deployments("default")
-        await emitter.console("stdout", f"found {len(deployments)} deployments; applying {decision['action']} to {target}")
-        await cg.update_step(order=3, status="done", result={"applied": True, "action": decision["action"]})
-        return {"outcome": {"status": "remediated", "decision": decision}, "tool_results": [{"remediation": decision}]}
+        observed = None
+        if k8s.enabled:
+            deployments = await k8s.list_deployments("default")
+            observed = len(deployments)
+            await emitter.console("stdout",
+                                  f"[read-only] cluster reachable · {observed} deployments in 'default' · "
+                                  f"proposed action '{action}' on {target} was NOT applied")
+        else:
+            await emitter.console("stdout",
+                                  f"no kubeconfig configured · '{action}' on {target} proposed, not executed")
+        await cg.update_step(order=3, status="done",
+                             result={"applied": False, "proposed": action, "target": target,
+                                     "observed_deployments": observed})
+        await emitter.token(note)
+        return {"outcome": {"status": "proposed_not_executed", "applied": False,
+                            "decision": decision, "observed_deployments": observed},
+                "answer": note, "tool_results": [{"proposed_remediation": decision, "applied": False}]}
     except Exception as e:  # noqa: BLE001
-        await emitter.error(f"remediation failed: {e}", code="remediation_error", retriable=True)
+        await emitter.error(f"remediation analysis failed: {e}", code="remediation_error", retriable=True)
         await cg.update_step(order=3, status="failed", error=str(e))
-        return {"outcome": {"status": "remediation_failed", "error": str(e)}}
+        return {"outcome": {"status": "remediation_failed", "applied": False, "error": str(e)}}

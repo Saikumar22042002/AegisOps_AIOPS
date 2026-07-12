@@ -181,13 +181,24 @@ function Timeline({ data }: { data: any }) {
 
 function Terraform({ data }: { data: any }) {
   const s = data.summary ?? {};
-  const passed = (data.policy_checks ?? []).filter((p: any) => p.passed).length;
+  const checks = data.policy_checks ?? [];
+  // P8 honesty: a check with passed===null / evaluated===false is NOT a pass — it's "not
+  // evaluated" (the module enforces it but the policy engine doesn't verify it against the plan
+  // yet; real in Phase 2). Count only genuinely-evaluated checks; never inflate the pass tally.
+  const isNotEval = (p: any) => p.evaluated === false || p.passed === null || p.passed === undefined;
+  const evaluated = checks.filter((p: any) => !isNotEval(p));
+  const passed = evaluated.filter((p: any) => p.passed === true).length;
+  const failed = evaluated.filter((p: any) => p.passed === false).length;
+  const pending = checks.length - evaluated.length;
+  const policyColor = failed > 0 ? "var(--red)" : "var(--green)";
   return (
     <>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 11, marginBottom: 16 }}>
         <Card label="Plan"><span style={{ display: "flex", gap: 7, fontFamily: "'IBM Plex Mono',monospace", fontSize: 13 }}><span style={{ color: "var(--green)" }}>+{s.add ?? 0}</span><span style={{ color: "var(--amber)" }}>~{s.change ?? 0}</span><span style={{ color: "var(--text-4)" }}>-{s.destroy ?? 0}</span></span></Card>
         <Card label="Mode"><span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, color: "var(--text)" }}>{data.mode}</span></Card>
-        <Card label="Policy"><span style={{ fontSize: 13, color: "var(--green)", fontWeight: 600, display: "flex", alignItems: "center", gap: 5 }}><Icon kind="check" color="#34d399" />{passed}/{(data.policy_checks ?? []).length}</span></Card>
+        <Card label="Policy"><span style={{ fontSize: 13, color: policyColor, fontWeight: 600, display: "flex", alignItems: "center", gap: 5 }}>
+          {failed > 0 ? <Icon kind="x" color="#f87171" /> : <Icon kind="check" color="#34d399" />}
+          {passed}/{evaluated.length} evaluated{pending > 0 ? ` · ${pending} pending` : ""}</span></Card>
       </div>
       <div style={{ border: "1px solid var(--border-2)", borderRadius: 12, background: "var(--code-bg)", marginBottom: 16, padding: "14px 15px", fontFamily: "'IBM Plex Mono',monospace", fontSize: 11.5, lineHeight: 1.7, overflowX: "auto" }}>
         {(data.diff ?? []).length === 0 ? <span style={{ color: "var(--text-4)" }}>No resource changes.</span> :
@@ -197,11 +208,19 @@ function Terraform({ data }: { data: any }) {
       </div>
       <div style={{ ...eyebrow, marginBottom: 11 }}>Policy checks</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {(data.policy_checks ?? []).map((p: any, i: number) => (
-          <div key={i} style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 12.5 }}>
-            <Icon kind={p.passed ? "check" : "x"} color={p.passed ? "#34d399" : "#f87171"} /><span style={{ color: "var(--text-2)" }}>{p.name}{p.detail ? ` · ${p.detail}` : ""}</span>
-          </div>
-        ))}
+        {checks.map((p: any, i: number) => {
+          const notEval = isNotEval(p);
+          return (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 12.5 }}>
+              {notEval
+                ? <span title="not evaluated" style={{ width: 14, textAlign: "center", color: "var(--text-4)", fontWeight: 700 }}>–</span>
+                : <Icon kind={p.passed ? "check" : "x"} color={p.passed ? "#34d399" : "#f87171"} />}
+              <span style={{ color: notEval ? "var(--text-4)" : "var(--text-2)" }}>
+                {p.name}{p.detail ? ` · ${p.detail}` : ""}{notEval ? " · not evaluated" : ""}
+              </span>
+            </div>
+          );
+        })}
       </div>
     </>
   );
@@ -250,19 +269,41 @@ function Metrics({ data }: { data: any }) {
 }
 
 function Traces({ data }: { data: any }) {
+  const spans = data.spans ?? [];
   return (
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
         <span style={eyebrow}>Langfuse trace</span>
         <span style={{ marginLeft: "auto", fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: "var(--text-4)" }}>{String(data.trace_id ?? "").slice(0, 12)}</span>
       </div>
-      {(data.spans ?? []).map((sp: any, i: number) => (
-        <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: "1px solid var(--border)" }}>
-          <span style={{ width: 7, height: 7, borderRadius: 99, background: sp.dot, marginLeft: sp.indent }} />
-          <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, color: "var(--text-2)", flex: 1 }}>{sp.name}</span>
-          <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: "var(--text-4)" }}>{sp.dur}</span>
+      {/* P9 honesty: no fabricated spans. When the in-app tree isn't built yet, say so plainly
+          and deep-link to the real trace in Langfuse (the full O1 tree replaces this). */}
+      {spans.length === 0 ? (
+        <div style={{ border: "1px solid var(--border-2)", borderRadius: 12, background: "var(--surface-2)", padding: "16px 18px" }}>
+          <div style={{ fontSize: 13, color: "var(--text-3)", lineHeight: 1.55 }}>
+            {data.message ?? "In-app trace view is coming. The full span tree is available in Langfuse."}
+          </div>
+          {data.deep_link ? (
+            <a href={data.deep_link} target="_blank" rel="noreferrer"
+               style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 12, padding: "7px 13px", borderRadius: 8, border: "1px solid var(--border-3)", background: "var(--surface)", color: "var(--text)", fontSize: 12.5, fontWeight: 500, textDecoration: "none" }}>
+              Open in Langfuse
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M7 17 17 7M9 7h8v8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            </a>
+          ) : (
+            <div style={{ fontSize: 11.5, color: "var(--text-4)", marginTop: 10 }}>
+              Set <code>LANGFUSE_HOST</code> to enable the deep-link. Trace id: <span style={{ fontFamily: "'IBM Plex Mono',monospace" }}>{data.trace_id}</span>
+            </div>
+          )}
         </div>
-      ))}
+      ) : (
+        spans.map((sp: any, i: number) => (
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: "1px solid var(--border)" }}>
+            <span style={{ width: 7, height: 7, borderRadius: 99, background: sp.dot, marginLeft: sp.indent }} />
+            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, color: "var(--text-2)", flex: 1 }}>{sp.name}</span>
+            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: "var(--text-4)" }}>{sp.dur}</span>
+          </div>
+        ))
+      )}
     </>
   );
 }

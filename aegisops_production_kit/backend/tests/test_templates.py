@@ -37,9 +37,31 @@ def test_catalog_covers_three_clouds() -> None:
 
 
 def test_s3_policy_checks() -> None:
+    # P8 honesty: genuinely-evaluated checks carry a real pass/fail; controls the module
+    # enforces but the policy engine doesn't yet VERIFY are marked evaluated=False / passed=None
+    # ("not evaluated"), never a green pass. Real predicates over the plan land in Phase 2 (U1).
     t = templates.select("aws", "s3")
     checks = t.policy_fn({"block_public": True, "versioning": True})
-    assert all(c["passed"] for c in checks)
+    evaluated = [c for c in checks if c.get("evaluated") is not False]
+    not_evaluated = [c for c in checks if c.get("evaluated") is False]
+    assert evaluated and all(c["passed"] is True for c in evaluated)   # block_public + versioning
+    assert not_evaluated and all(c["passed"] is None for c in not_evaluated)  # SSE, module version
+    # a failing real predicate surfaces as a real fail (not hidden)
+    bad = t.policy_fn({"block_public": False, "versioning": True})
+    assert any(c["name"] == "Public access blocked" and c["passed"] is False for c in bad)
+
+
+def test_policy_checks_never_fake_a_pass() -> None:
+    """Across every template, a check is either a real evaluated predicate (bool passed) or an
+    explicit not-evaluated placeholder (passed is None) — never a hardcoded True pretending to
+    be verified (P8 honesty)."""
+    for entry in templates.catalog():
+        t = templates.select(entry["cloud"], entry["resource"])
+        for c in t.policy_fn({}):
+            if c.get("evaluated") is False:
+                assert c["passed"] is None, f"{t.key}:{c['name']} not-evaluated must have passed=None"
+            else:
+                assert isinstance(c["passed"], bool), f"{t.key}:{c['name']} evaluated must be a real bool"
 
 
 def test_s3_input_validation() -> None:

@@ -109,8 +109,13 @@ async def timeline(run_id: str, user: User = Depends(get_current_user)) -> dict:
     if has_plan:
         summ = run.plan_json.get("summary", {})
         checks = run.plan_json.get("policy_checks", [])
-        nodes.append(_node("Policy Evaluation", f"{sum(1 for p in checks if p.get('passed'))}/{len(checks)} checks passed",
-                           dur.get("policy_evaluation", "—"), "done"))
+        # P8 honesty: count only genuinely-evaluated checks; not-evaluated (passed is None /
+        # evaluated=False) are surfaced as pending, never folded into a "passed" tally.
+        _ev = [p for p in checks if p.get("evaluated") is not False and p.get("passed") is not None]
+        _passed = sum(1 for p in _ev if p.get("passed"))
+        _pending = len(checks) - len(_ev)
+        _detail = f"{_passed}/{len(_ev)} evaluated" + (f" · {_pending} pending" if _pending else "")
+        nodes.append(_node("Policy Evaluation", _detail, dur.get("policy_evaluation", "—"), "done"))
         nodes.append(_node("Planner", f"+{summ.get('add',0)} ~{summ.get('change',0)} -{summ.get('destroy',0)}",
                            dur.get("planner", "—"), "done"))
         awaiting = run.status == "awaiting_approval"
@@ -190,14 +195,25 @@ async def metrics(run_id: str, user: User = Depends(get_current_user), settings:
 
 @router.get("/runs/{run_id}/traces")
 async def traces(run_id: str, user: User = Depends(get_current_user)) -> dict:
+    """P9 honesty (Phase 1): the real Langfuse span tree exists (trace_id == run_id), but the
+    in-app trace view is not built yet — it lands in Phase 2 (O1, derived from run_steps). Rather
+    than render fake spans with `—` durations, return NO spans, an honest note, and a deep-link to
+    open the real trace in Langfuse. The real in-app tree replaces this in O1."""
     run, _msg, _, _ = await _load(run_id, user)
-    spans = [{"name": "intent.classify", "dur": "—", "dot": "var(--green)", "indent": "0px", "tokens": ""},
-             {"name": "agent.route", "dur": "—", "dot": "var(--green)", "indent": "0px", "tokens": ""}]
-    if run.plan_json:
-        spans.append({"name": "workflow.plan", "dur": "—", "dot": "var(--green)", "indent": "12px", "tokens": ""})
-        spans.append({"name": "tool.terraform_plan", "dur": "—", "dot": "var(--green)", "indent": "24px", "tokens": ""})
-        spans.append({"name": "approval.gate", "dur": "···", "dot": "var(--amber)", "indent": "0px", "tokens": ""})
-    return {"spans": spans, "trace_id": run.trace_id or run_id, "context_id": run.context_id or run_id}
+    settings = get_settings()
+    trace_id = run.trace_id or run_id
+    host = (settings.langfuse_host or "").rstrip("/")
+    return {
+        "spans": [],  # no fabricated spans — the real tree is O1 (Phase 2)
+        "trace_id": trace_id,
+        "context_id": run.context_id or run_id,
+        "coming_soon": True,
+        "message": "In-app trace view is coming in the Traces upgrade. The full span tree "
+                   "(durations, tokens, cost) already exists in Langfuse — the trace id is the "
+                   "run id. Open it in Langfuse below.",
+        "deep_link": f"{host}/project/aegisops/traces/{trace_id}" if host else None,
+        "langfuse_host": host or None,
+    }
 
 
 @router.get("/runs/{run_id}/references")
