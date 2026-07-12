@@ -26,7 +26,7 @@ from ..tools import aws as aws_tool
 from ..tools import azure as azure_tool
 from ..tools import gcp as gcp_tool
 from ..tools.terraform import TerraformError, TerraformRunner, state_slug
-from . import intent_guard, inventory, llm, params, plan_guard, provider_errors, templates, timing
+from . import dependency, intent_guard, inventory, llm, params, plan_guard, provider_errors, templates, timing
 from .runtime import emitter_of
 from .state import AgentState
 
@@ -358,6 +358,44 @@ async def cloudops_plan(state: AgentState, config) -> dict:
                 "cloud": cloud, "resource": resource, "answer": msg, "parsed_inputs": collected,
                 "confidentiality": {"level": cc.level, "score": cc.score}}
 
+    # ── DEP: dependency closure (strict order: named → world model → stated default →
+    # create-first DAG). An ambiguous parent ASKS with the real candidates; a missing required
+    # parent yields an ordered create-first plan (executed by the executive loop, U6) — the
+    # single-step path proceeds with the resolved inputs + provenance notes for the card.
+    closure = dependency.resolve_closure(
+        template.key, validated,
+        await inventory.list_active(state["org_id"]), message=state.get("message", ""))
+    if closure.status == "ask":
+        if session_id:
+            await params.save_pending(session_id, _pending_record(collected))
+        await emitter.step(4, "Placement is ambiguous — asking")
+        await emitter.token(closure.question)
+        cc = classify(closure.question)
+        await emitter.confidentiality(cc.level, cc.score)
+        await timing.end_step(run_id, "cloudops_agent", status="done")
+        return {"needs_change": False, "approval_status": "not_required", "collecting": True,
+                "cloud": cloud, "resource": resource, "answer": closure.question,
+                "parsed_inputs": collected,
+                "confidentiality": {"level": cc.level, "score": cc.score}}
+    if closure.status == "dag":
+        steps_txt = " → ".join(f"{i+1}) {s['template_key']}"
+                               f" “{s['inputs'].get('name') or s['inputs'].get('cluster_name') or s['inputs'].get('account_name') or ''}”"
+                               for i, s in enumerate(closure.dag))
+        msg = (f"**{template.key}** needs a {closure.dag[0]['provides']} that doesn't exist yet. "
+               f"Ordered plan (parents first): {steps_txt} — the child is wired to the parent's "
+               "real outputs. Multi-step execution runs through the governed executive loop; "
+               "each plan is applied only after your approval.")
+        await emitter.step(4, "Create-first plan drafted (dependency closure)")
+        await emitter.token(msg)
+        cc = classify(msg)
+        await emitter.confidentiality(cc.level, cc.score)
+        await timing.end_step(run_id, "cloudops_agent", status="done")
+        return {"needs_change": False, "approval_status": "not_required", "answer": msg,
+                "goal_dag": closure.dag, "cloud": cloud, "resource": resource,
+                "confidentiality": {"level": cc.level, "score": cc.score}}
+    validated = closure.inputs
+    tf_vars = validated
+
     mode = "apply"
     await emitter.step(4, f"Ran terraform plan · state {tf_state_ws}")
     await timing.start_step(run_id, "planner", tool="terraform")
@@ -409,8 +447,10 @@ async def cloudops_plan(state: AgentState, config) -> dict:
     policy_checks = template.policy_fn(validated, runner.planned_resources())  # U1: over the real plan
     await timing.end_step(run_id, "policy_evaluation", status="done",
                           result={"passed": sum(1 for p in policy_checks if p["passed"]), "total": len(policy_checks)})
-    # DEF: surface any silently-defaulted dependency placement on the approval card.
+    # DEF: surface any silently-defaulted dependency placement on the approval card — plus the
+    # DEP resolver's provenance ("using existing vpc … from the world model").
     defaults = _defaulted_dependencies(cloud, template.resource, validated, runner.planned_resources())
+    defaults += [{"name": "Dependency resolution", "value": n, "note": ""} for n in closure.notes]
     plan_json = {"summary": plan["summary"], "diff": plan["diff"], "workspace": template.workspace,
                  "policy_checks": policy_checks, "mode": mode, "state_workspace": tf_state_ws,
                  "defaults": defaults}

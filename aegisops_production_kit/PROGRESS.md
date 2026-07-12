@@ -1312,5 +1312,18 @@ this section mirrors phase-level status only.
         shared dev inventory is never polluted). Schema constraint ensured at startup.
         Evidence: `test_world_model.py` (9) + `test_drift.py` (8). Live sweeps + the UI destroy
         warning are **DLV-10/DLV-11**.
+  - [x] **DEP dependency closure resolution** (2026-07-12): new `agents/dependency.py` — a
+        declarative `Slot` map of the approved modules' REAL dependency fields (EKS
+        `vpc_id`+`subnet_ids`, EC2 `subnet_id`, Azure `resource_group`) and `resolve_closure`
+        applying the locked strict order: **named** (user's value untouched) → **world model**
+        (one candidate → used, filled from its recorded outputs — an EC2 slot gets a real
+        subnet id, never the VPC id; several → OFFERED with the real names/ids + "or say new";
+        underivable facts → ask, never guess) → **stated default** (proceeds, stated on the
+        card) → **create-first DAG** (parents-first ordered steps, child wired to the parent's
+        real outputs — `subnet_id ← public_subnet_ids[0]`, RG by name; forced by "in a new
+        vpc/rg"). Wired into `cloudops_plan` after validation: ask → clarification turn; dag →
+        honest ordered proposal + `state["goal_dag"]` (the executive loop U6 executes it);
+        complete → enriched inputs + "Dependency resolution" provenance rows on the approval
+        card. Evidence: `test_dependency.py` (11) covering acceptance (a)–(d).
 
 _Legend: [x] done · [~] partial/scaffolded · [ ] pending._
