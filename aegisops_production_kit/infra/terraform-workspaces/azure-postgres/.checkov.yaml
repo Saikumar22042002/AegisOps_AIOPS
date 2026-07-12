@@ -1,6 +1,17 @@
 # AegisOps scanner waivers - every skip is documented here AND in the
 # PROGRESS.md scanner ledger. New checks fail the scan until triaged.
+# The geo-redundant-backup waiver was REMOVED when the enhancement shipped (the module
+# defaults it ON; the platform schema keeps old behavior for existing resources).
 skip-check:
-  - CKV2_AZURE_26  # network access hardening arrives with MS-8 delegated-subnet/private-DNS (B2 opt-in)
-  - CKV2_AZURE_57  # private access (delegated subnet) arrives with MS-8 (B2 opt-in)
-  - CKV_AZURE_136  # geo-redundant backup arrives with MS-8 (B2 opt-in)
+  - CKV2_AZURE_26   # the 0.0.0.0-0.0.0.0 firewall rule is Azure's allow-azure-services sentinel, not world-open; the private path (delegated_subnet_id) removes the rule entirely
+  - CKV2_AZURE_57   # private access ships via delegated_subnet_id + private_dns_zone_id; the default stays public for existing resources' re-plans (B1/B2) - a module cannot fabricate network identity
+  - CKV2_AZURE_56   # mysql: same private-access posture as postgresql above
+  - CKV_AZURE_113   # mssql public network: the demo access path; SQL Server private connectivity is private-endpoint class, documented out of module scope (precondition)
+  - CKV2_AZURE_45   # mssql private endpoint: same as above
+  - CKV2_AZURE_34   # mssql firewall 0.0.0.0-0.0.0.0 is the allow-azure-services sentinel, not world-open
+  - CKV2_AZURE_27   # mssql AAD auth needs a caller-supplied AAD admin identity; opt-in candidate
+  - CKV_AZURE_23    # mssql auditing needs a log storage-account dependency; opt-in candidate, never forced
+  - CKV_AZURE_24    # mssql audit retention: same storage dependency as above
+  - CKV2_AZURE_2    # mssql vulnerability assessment needs storage + Defender plan; enterprise opt-in
+  - CKV_AZURE_224   # SQL Ledger: niche compliance feature; not part of the module contract
+  - CKV_AZURE_229   # zone-redundant database requires premium tiers; S0 is the sandbox sku

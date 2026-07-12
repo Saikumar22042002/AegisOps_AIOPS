@@ -132,12 +132,20 @@ PARAMS: dict[str, list[ParamSpec]] = {
         ParamSpec("resource_group", "Resource group", help="created as <name>-rg if omitted"),
         ParamSpec("ingress_ports", "Inbound ports", kind="int", default=None, help="optional; day-2 modifiable"),
     ],
-    "azure.postgres": [
+    "azure.db": [
         ParamSpec("name", "Server name", required=True, help="e.g. payments-pg (globally-unique)"),
+        ParamSpec("engine", "Engine", kind="choice",
+                  choices=["postgresql", "mysql", "mssql"], default="postgresql"),
         ParamSpec("location", "Location", default="eastus"),
         ParamSpec("admin_username", "Admin username", default="pgadmin"),
         ParamSpec("pg_version", "PostgreSQL version", kind="choice", choices=["14", "15", "16"], default="15"),
         ParamSpec("sku_name", "SKU", default="B_Standard_B1ms"),
+        ParamSpec("ha_enabled", "Zone-redundant HA", kind="bool", default=False,
+                  help="postgresql/mysql flexible servers (B2: off for existing)"),
+        ParamSpec("geo_redundant_backup", "Geo-redundant backup", kind="bool", default=False,
+                  help="B2: off for existing resources; module default is on"),
+        ParamSpec("delegated_subnet_id", "Delegated subnet (private access)", default="",
+                  help="pair with a private DNS zone; postgresql/mysql only"),
     ],
     "azure.aks": [
         ParamSpec("name", "Cluster name", required=True, help="e.g. payments-aks"),

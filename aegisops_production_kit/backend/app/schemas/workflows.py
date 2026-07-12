@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 def parse_freeform(text: str) -> dict[str, Any]:
@@ -400,14 +400,51 @@ class AzureVMInputs(WorkflowInputs):
         return [int(p) for p in v] if isinstance(v, (list, tuple)) else v
 
 
-class AzurePostgresInputs(WorkflowInputs):
+class AzureDBInputs(WorkflowInputs):
+    """MS-8 multi-engine Azure database (postgresql/mysql/mssql). BACKCOMPAT B2: every
+    plan-shape-changing option defaults to OLD behavior HERE (module defaults stay secure
+    for bare use) — the platform passes these explicitly, so stored pre-enhancement inputs
+    render the exact old postgres shape (B1, proven by the workspace's terraform test)."""
+
     name: str
+    engine: str = "postgresql"
     location: str = "eastus"
     admin_username: str = "pgadmin"
     sku_name: str = "B_Standard_B1ms"
     storage_mb: int = Field(default=32768, ge=32768)
     pg_version: str = "15"
+    engine_version: str = ""            # mysql override (default 8.0.21); mssql is fixed 12.0
     resource_group: str = ""
+    ha_enabled: bool = False            # ZoneRedundant HA (postgresql/mysql)
+    geo_redundant_backup: bool = False  # module default is ON; schema keeps old behavior
+    delegated_subnet_id: str = ""       # private access (postgresql/mysql)
+    private_dns_zone_id: str = ""
+
+    @field_validator("engine")
+    @classmethod
+    def _valid_engine(cls, v: str) -> str:
+        allowed = ("postgresql", "mysql", "mssql")
+        vv = v.strip().lower()
+        if vv == "postgres":
+            vv = "postgresql"           # common shorthand
+        if vv not in allowed:
+            raise ValueError(f"engine must be one of {allowed} — got '{v}'")
+        return vv
+
+    @model_validator(mode="after")
+    def _private_access_pairing(self) -> "AzureDBInputs":
+        if self.delegated_subnet_id and not self.private_dns_zone_id:
+            raise ValueError("private access needs BOTH delegated_subnet_id and private_dns_zone_id")
+        if self.delegated_subnet_id and self.engine == "mssql":
+            raise ValueError("delegated-subnet private access applies to postgresql/mysql; "
+                             "SQL Server private connectivity uses private endpoints")
+        if self.ha_enabled and self.engine == "mssql":
+            raise ValueError("HA (ZoneRedundant) applies to the postgresql/mysql engines")
+        return self
+
+
+# MS-8 backcompat alias — old imports and stored references keep validating.
+AzurePostgresInputs = AzureDBInputs
 
 
 class AzureAKSInputs(WorkflowInputs):

@@ -20,7 +20,7 @@ _REQUIRED = {
     "azure.resource_group": {"name"},
     "azure.storage": {"account_name", "resource_group"},
     "azure.vm": {"name", "size", "os", "allowed_cidr"},
-    "azure.postgres": {"name"},
+    "azure.db": {"name"},  # MS-8 (B4): key renamed from azure.postgres; required set unchanged
     "azure.aks": {"name"},
     "gcp.gcs": {"bucket_name"},
     "gcp.vm": {"name", "machine_type", "os", "allowed_cidr"},

@@ -45,8 +45,12 @@ _SUPPORTED = [
     ("azure", "compute", "azure.vm"),
     ("azure", "storage", "azure.storage"), ("azure", "blob", "azure.storage"),
     ("azure", "bucket", "azure.storage"), ("azure", "storage_account", "azure.storage"),
-    ("azure", "postgres", "azure.postgres"), ("azure", "database", "azure.postgres"),
-    ("azure", "db", "azure.postgres"), ("azure", "sql", "azure.postgres"),
+    # MS-8 (B4, deliberate): azure.postgres became the multi-engine azure.db — the same
+    # words now land on the enhanced template (old key stays alive via the by_key alias).
+    ("azure", "postgres", "azure.db"), ("azure", "database", "azure.db"),
+    ("azure", "db", "azure.db"), ("azure", "sql", "azure.db"),
+    ("azure", "mysql", "azure.db"), ("azure", "mssql", "azure.db"),
+    ("azure", "sqlserver", "azure.db"),
     ("azure", "aks", "azure.aks"), ("azure", "k8s", "azure.aks"), ("azure", "kubernetes", "azure.aks"),
     ("azure", "cluster", "azure.aks"),
     ("azure", "resource_group", "azure.resource_group"), ("azure", "rg", "azure.resource_group"),

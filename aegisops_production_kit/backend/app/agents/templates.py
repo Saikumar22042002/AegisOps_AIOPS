@@ -295,12 +295,33 @@ def _azure_vm_policy(i: dict, resources=None) -> list[dict]:
     ]
 
 
-def _azure_pg_policy(i: dict, resources=None) -> list[dict]:
-    return [
+def _azure_db_policy(i: dict, resources=None) -> list[dict]:
+    """MS-8 multi-engine (postgresql/mysql/mssql). Keeps the pre-enhancement postgres
+    checks verbatim and adds engine-aware statements."""
+    engine = str(i.get("engine", "postgresql"))
+    checks = [
         _todo("TLS-enforced connections"),
         _todo("Server-managed admin password (generated)"),
-        _ck("Approved PostgreSQL version", str(i.get("pg_version", "15")) in {"14", "15", "16"}, i.get("pg_version", "")),
+        _ck("Approved engine", engine in {"postgresql", "mysql", "mssql"}, engine),
     ]
+    if engine == "postgresql":
+        checks.append(_ck("Approved PostgreSQL version",
+                          str(i.get("pg_version", "15")) in {"14", "15", "16"},
+                          i.get("pg_version", "")))
+    if engine == "mssql":
+        mssql = _after(resources, "azurerm_mssql_server")
+        if mssql is not None:
+            checks.append(_ck("TLS 1.2 minimum (SQL Server)",
+                              mssql.get("minimum_tls_version") == "1.2",
+                              str(mssql.get("minimum_tls_version"))))
+    if i.get("ha_enabled"):
+        checks.append(_ck("Zone-redundant HA", engine in {"postgresql", "mysql"},
+                          f"ZoneRedundant ({engine})"))
+    if i.get("delegated_subnet_id"):
+        checks.append(_ck("Private access (delegated subnet)", bool(i.get("private_dns_zone_id")),
+                          "delegated subnet + private DNS" if i.get("private_dns_zone_id")
+                          else "delegated subnet WITHOUT a private DNS zone"))
+    return checks
 
 
 def _azure_aks_policy(i: dict, resources=None) -> list[dict]:
@@ -397,7 +418,7 @@ TEMPLATES: list[WorkflowTemplate] = [
                      destroy_note="A destroyed Key Vault enters soft-delete retention (the module's soft_delete_days) - with purge protection ON it CANNOT be permanently purged until the window elapses; the name stays reserved meanwhile."),
     WorkflowTemplate("azure.resource_group", "azure", "resource_group", "v1", "azure-resource-group", wf.AzureResourceGroupInputs, "Provision an Azure Resource Group", _azure_rg_policy),
     WorkflowTemplate("azure.vm", "azure", "vm", "v1", "azure-vm", wf.AzureVMInputs, "Provision an Azure Linux VM (generated SSH key)", _azure_vm_policy),
-    WorkflowTemplate("azure.postgres", "azure", "postgres", "v1", "azure-postgres", wf.AzurePostgresInputs, "Provision an Azure PostgreSQL Flexible Server", _azure_pg_policy),
+    WorkflowTemplate("azure.db", "azure", "db", "v2", "azure-postgres", wf.AzureDBInputs, "Provision an Azure database (PostgreSQL/MySQL flexible server or SQL Server)", _azure_db_policy),
     WorkflowTemplate("azure.aks", "azure", "aks", "v1", "azure-aks", wf.AzureAKSInputs, "Provision an Azure Kubernetes Service (AKS) cluster", _azure_aks_policy),
     WorkflowTemplate("gcp.gcs", "gcp", "gcs", "v1", "gcp-gcs", wf.GCPGCSInputs, "Provision a GCS bucket (uniform access, versioned)", _gcs_policy),
     WorkflowTemplate("gcp.vpc", "gcp", "vpc", "v1", "gcp-vpc", wf.GCPVPCInputs, "Provision a custom-mode GCP VPC (subnets + secondary ranges, NAT, internal firewall)", _gcp_vpc_policy),
@@ -409,6 +430,9 @@ TEMPLATES: list[WorkflowTemplate] = [
 ]
 
 _BY_KEY = {t.key: t for t in TEMPLATES}
+# MS-8 (B3 backcompat): `azure.postgres` became the multi-engine `azure.db`; the old key
+# stays resolvable so anything holding it (stored refs, older clients) keeps working.
+_BY_KEY["azure.postgres"] = _BY_KEY["azure.db"]
 
 # Per-cloud resource synonyms → the canonical resource key for that cloud. Lets a generic word
 # ("vm", "database", "k8s") resolve to the right cloud-specific module (aws.ec2 vs azure.vm vs
@@ -420,8 +444,9 @@ _SYNONYMS: dict[str, dict[str, str]] = {
             "object_storage": "s3", "network": "vpc",
             "lb": "nlb", "load_balancer": "nlb", "loadbalancer": "nlb",
             "key": "kms", "encryption_key": "kms", "secrets": "kms"},
-    "azure": {"instance": "vm", "server": "vm", "compute": "vm", "ec2": "vm", "database": "postgres",
-              "db": "postgres", "postgresql": "postgres", "sql": "postgres", "mysql": "postgres",
+    "azure": {"instance": "vm", "server": "vm", "compute": "vm", "ec2": "vm", "database": "db",
+              "postgres": "db", "postgresql": "db", "sql": "db", "mysql": "db",
+              "mssql": "db", "sqlserver": "db", "sql_server": "db",
               "k8s": "aks", "kubernetes": "aks", "cluster": "aks", "blob": "storage", "bucket": "storage",
               "object_storage": "storage", "storage_account": "storage", "rg": "resource_group", "network": "vnet",
               "key_vault": "keyvault", "kv": "keyvault", "vault": "keyvault"},

@@ -89,11 +89,11 @@ SLOTS: dict[str, list[Slot]] = {
                        creator="azure.resource_group", value_from="name",
                        wires={"resource_group": "input:name"},
                        stated_default="a module-created “<name>-rg” resource group")],
-    "azure.postgres": [Slot(field="resource_group", parent_cloud="azure",
-                            parent_type="resource_group", required=False,
-                            creator="azure.resource_group", value_from="name",
-                            wires={"resource_group": "input:name"},
-                            stated_default="a module-created resource group")],
+    "azure.db": [Slot(field="resource_group", parent_cloud="azure",
+                      parent_type="resource_group", required=False,
+                      creator="azure.resource_group", value_from="name",
+                      wires={"resource_group": "input:name"},
+                      stated_default="a module-created resource group")],
 }
 
 # "in a NEW vpc" / "with a fresh resource group" — the user explicitly wants the parent

@@ -1322,6 +1322,21 @@ as done without the live run; the code paths behind each are covered by tests wi
       (3) gated destroy → card states soft-delete/purge semantics → verify the vault is
       soft-deleted (recoverable), not purged.
       Expect: AzureServices bypass + current-SP policy visible in the portal.
+- [ ] **DLV-22 · MODSEED azure.db multi-engine live lifecycle + live moved-block B1 (MS-8)** —
+      Needs: valid `GEMINI_API_KEY` + Azure creds.
+      Steps: (1) "create a mysql database named orders-sql in azure" → routed to azure.db,
+      card shows engine mysql / port 3306 → approve → apply → verify the flexible server +
+      allow-azure firewall rule in the portal; (2) "create a sql server named ledger-mssql
+      in azure" → mssql server + S0 database, TLS-1.2 check PASS; (3) day-2: "what's the
+      admin username for orders-sql" (from recorded outputs; password only via the
+      sensitive output path); (4) **live moved-block B1**: against a PRE-enhancement
+      postgres server's real state, `terraform plan` from its stored inputs → the plan
+      shows the address MOVE (`.this` → `.this["postgresql"]`) and **no changes**;
+      (5) optional-capability pass: re-create one with `ha_enabled` + geo backup on and
+      verify ZoneRedundant + geo-backup in the portal; (6) gated destroys (old-shape row
+      destroy proves B3 live).
+      Expect: engine families never mix; mssql requests with HA are rejected at the schema
+      with the honest message.
 - [ ] **DLV-21 · MODSEED aws.rds enhanced live lifecycle + live B1 re-plan (MS-7)** —
       Needs: valid `GEMINI_API_KEY` + AWS creds.
       Steps: (1) "create a mariadb database named orders-db, client cidr 10.20.0.0/16,
@@ -1605,6 +1620,27 @@ this section mirrors phase-level status only.
         (required set unchanged: identifier only). Evidence:
         `test_modseed_ms7_aws_rds.py` (8) + `test_scanner_waiver_guard.py` (2).
         Canary (B5) green. Live = **DLV-21**.
+  - [x] **MODSEED MS-8 azure-postgres → azure.db (`azure.db`)** (2026-07-12): multi-engine
+        postgresql/mysql/mssql, one family per instance, each `for_each`-gated —
+        postgresql IS the pre-enhancement family with **`moved` blocks** migrating the old
+        unkeyed addresses (`.this` → `.this["postgresql"]`) so real state re-plans as a
+        no-op rename; mysql flexible (storage_mb→size_gb, default 8.0.21); mssql logical
+        server + S0 database (TLS 1.2, lifecycle preconditions honestly rejecting HA /
+        delegated-subnet for mssql). Optional HA (ZoneRedundant), geo-redundant backup
+        (module default ON — kills the waiver; schema default OFF per B2), delegated
+        subnet + private DNS (flips public access off and removes the allow-azure
+        firewall rule). Generated `random_password` KEPT, shared by every engine.
+        **B1/B2 gate = committed native `terraform test`** (mock providers, offline;
+        azurerm acquires AAD tokens eagerly at configure so the MS-7-style fake-creds
+        plan is impossible): `tests/b1_backcompat.tftest.hcl`, 6 runs green. **B3 proven
+        end-to-end**: workspace dir UNCHANGED; `by_key("azure.postgres")` aliases to
+        azure.db; an old-shape inventory row destroy resolves via synonym, the runner
+        takes the ROW's workspace, old inputs validate at B2 defaults.
+        `AzurePostgresInputs` aliases `AzureDBInputs`. Routing/params test rows updated
+        deliberately (B4): azure postgres/database/db/sql/mysql/mssql/sqlserver →
+        azure.db. Waivers: CKV_AZURE_136 REMOVED; CKV2_AZURE_26/57 re-justified without
+        MS tags; 10 net-new mssql/mysql findings triaged (ledger). Scans green.
+        Evidence: `test_modseed_ms8_azure_db.py` (9). Canary (B5) green. Live = **DLV-22**.
 
 ### Scanner ledger (fix or waiver per finding — owner condition, 2026-07-12)
 
@@ -1679,8 +1715,15 @@ for the same reason — commit-hash pinning applies to git sources).
 | azure-keyvault | CKV_AZURE_109 / AVD-AZU-0013 + CKV_AZURE_189 + CKV2_AZURE_32 | Network posture is variable-driven and honestly STATED on the approval card when Allow (MS-5 design); AzureServices bypass + ACLs are the guard; private endpoint is an enterprise opt-in. |
 | azure-keyvault | CKV_AZURE_112 | Standard SKU (software-protected keys) is the module contract; premium/HSM is a cost decision. |
 | azure-keyvault | CKV_AZURE_40 | Expiration on the optional RSA keys: opt-in candidate; rotation semantics owner-decided. |
-| azure-postgres | CKV2_AZURE_26 + CKV2_AZURE_57 | Network hardening (delegated subnet / private DNS) arrives with MS-8 (B2 opt-in). |
-| azure-postgres | CKV_AZURE_136 | Geo-redundant backup arrives with MS-8 (B2 opt-in). |
+| azure-postgres | ~~CKV_AZURE_136~~ | **WAIVER REMOVED by MS-8 (2026-07-12)** — the module defaults geo-redundant backup ON (the platform schema keeps old behavior for existing resources per B2); checkov passes with zero skips. |
+| azure-postgres | CKV2_AZURE_26 | The 0.0.0.0–0.0.0.0 firewall rule is Azure's allow-azure-services sentinel, not world-open; the private path (`delegated_subnet_id`) removes the rule entirely. *(Re-justified without the MS tag when MS-8 shipped the private-access option.)* |
+| azure-postgres | CKV2_AZURE_57 + CKV2_AZURE_56 | Private access ships via `delegated_subnet_id` + `private_dns_zone_id` (postgresql/mysql); the default stays public for existing resources' re-plans (B1/B2) — a module cannot fabricate network identity. *(Re-justified when MS-8 shipped.)* |
+| azure-postgres | CKV_AZURE_113 + CKV2_AZURE_45 | mssql public network / private endpoint: the demo access path; SQL Server private connectivity is private-endpoint class, documented out of module scope (a lifecycle precondition says so). *(New with MS-8's mssql family.)* |
+| azure-postgres | CKV2_AZURE_34 | mssql firewall 0.0.0.0–0.0.0.0 is the allow-azure-services sentinel, not world-open. *(New with MS-8.)* |
+| azure-postgres | CKV2_AZURE_27 | mssql AAD auth needs a caller-supplied AAD admin identity; opt-in candidate. *(New with MS-8.)* |
+| azure-postgres | CKV_AZURE_23 + CKV_AZURE_24 + CKV2_AZURE_2 | mssql auditing / retention / vulnerability assessment all need a log storage-account (+ Defender) dependency; opt-in candidates, never forced. *(New with MS-8.)* |
+| azure-postgres | CKV_AZURE_224 | SQL Ledger: niche compliance feature; not part of the module contract. *(New with MS-8.)* |
+| azure-postgres | CKV_AZURE_229 | Zone-redundant database requires premium tiers; S0 is the sandbox sku. *(New with MS-8.)* |
 | azure-storage | CKV2_AZURE_1 | CMEK: platform-managed keys are the sandbox posture. |
 | azure-storage | CKV2_AZURE_33 | Private endpoint: sandbox posture. |
 | azure-storage | CKV2_AZURE_38 | Blob soft-delete: day-2 candidate; enabling now would alter existing accounts' re-plans. |
