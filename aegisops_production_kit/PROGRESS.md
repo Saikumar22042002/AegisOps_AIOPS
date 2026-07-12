@@ -441,6 +441,159 @@ explained instead of crashing).
 
 ---
 
+## Phase 8 — Test-first stabilization — 2026-07-05
+Method change: the Phase-A matrix suite (`Screenshots/03_TEST_MATRIX.md`) was built BEFORE fixing
+anything, run red (37 reds mapping 1:1 to N-01…N-08), then driven green — so every fixed class is
+now guarded by a test instead of waiting to resurface in manual UI testing. Suites after this pass:
+**backend pytest 377** (+93 over Phase 7; 1 skip = live-cloud flag), **vitest 25**, **Playwright 11**
+(+2 mobile-skips by design) — all green against the real stack.
+
+### N-08 — create/destroy swap (CRITICAL, destructive) — root-caused BOTH ways and killed as a class
+- **Direction 1 ("create deleted my previous instance") = Terraform state sharing, architecturally
+  certain:** every module had ONE local state, so a second create reconciled the same resource
+  addresses and destroyed/replaced the first. **Fix: per-resource state isolation** — every create
+  plans/applies in its own Terraform workspace (`TF_WORKSPACE=res-<name>`, race-free env-var
+  selection; `workspace new` ensured post-init; migration `0003_state_workspace` records the slug on
+  the inventory row; legacy rows keep the default workspace so they stay destroyable). A same-name
+  create is refused (it would re-share state) — "pick a new name or destroy it first".
+- **Direction 2 ("destroy started provisioning") = routing gap + destroy-flow design:** (a) new
+  MIRROR guard in `intent_guard` — an explicitly destructive message misclassified as `create` is
+  redirected to the destroy flow, never provisioning; (b) destroy no longer runs the create-style
+  param collection at all: `_destroy_resource` resolves its target from the INVENTORY (exact name /
+  unambiguous typed ref; fuzzy+multiple ⇒ ask; not-inventoried ⇒ honest refusal; bulk ⇒ refused),
+  confirms via the approval gate, and tears down that resource's OWN state workspace.
+- **Action-vs-operation HARD GUARD** (`agents/plan_guard.py`, pure): after every `show_plan`, the
+  plan must match the classified action — create ⇒ zero delete/replace; modify ⇒ update-in-place
+  only; destroy ⇒ deletes only; read ⇒ no plan at all. Violations block BEFORE the approval gate
+  with an explanation. Wired into create/modify/destroy paths.
+- _Proven: 60+ unit/integration tests (A1–A6 incl. a 25-phrasing read sweep and both swap
+  directions); state isolation on real terraform (`demo-null`); **live on AWS** (pytest tier:
+  create X → create Y with zero-destroy plan → both exist → destroy X → only X gone) and **live
+  through the product**: two buckets created via chat+approval in one session, destroy-by-name
+  removed exactly the named one (+0/-4 plan), the sibling survived._
+
+### N-03 — conversational memory (CRITICAL)
+Root cause: every agent called Gemini with ONLY the current message (`thread_id` is per-run; the
+transcript sat unused in `messages`). New `agents/memory.py` (deterministic, DB-backed): full
+transcript for short threads; recent-window + older-user-turn digest within a char budget for long
+ones (early facts survive); threaded into `general`, `knowledge`, and the router's classification
+context (reference resolution). _Live: the exact screenshot-16 prompt now answers "Your previous
+question was: '…'" verbatim; E2E journey (3 turns + "what have I asked?") green; 5 integration
+tests incl. a 40-turn budget test._
+
+### N-02 — usable VMs + in-product credential delivery
+`allowed_cidr` is now a decision-critical param on aws.ec2/azure.vm/gcp.vm (validated CIDR/bare-IP,
+`none` = explicitly closed); modules open SSH 22 / RDP 3389 to THAT CIDR only (never 0.0.0.0/0 for
+admin). One-time reveal: `POST /runs/{id}/credentials` — whitelisted to the run's real sensitive
+outputs, Redis NX one-shot (second attempt 410), read via raw `terraform output -raw` from the
+run's state workspace, never logged/persisted; chat success card gets a **Reveal credential**
+button with copy/download. _Reviewer catch: the GCP instance had no network tags, so its day-2
+firewall rules never attached — fixed._
+
+### N-01 — verification hang
+Root cause was FRONTEND: `approveRun` never cleared the message's `streaming` flag (sendText's
+finally deliberately skips interrupted messages), so `isLive` kept the LiveTimeline's spinner on
+"Verification" forever on apply runs (plan-only runs completed — exactly screenshots 4/5/19 vs 15).
+Fixed: `done` handling + defensive finally in the store. Backend hardened to the same contract:
+`verify()` is timeout-bounded (30s) with real SDK reconciliation (EC2 describe / S3 head) and warns
+instead of hanging; failed runs persist as failed. _Live: both apply journeys reached `done` with
+green verification checks._
+
+### N-06 / N-05 / N-04 / N-07
+- **N-06:** `agents/cards.py` — per-type success cards (VM→host/user/port/key-reveal;
+  S3→name/ARN/region/console; VPC→id/CIDR; DB→endpoint/secret-ref; generic fallback) emitted by
+  `verify()` as the run's answer. _Live: S3 card posted in chat with real ARN._
+- **N-05:** azure-vm module now genuinely supports **Windows Server 2022** (separate
+  `azurerm_windows_virtual_machine`, generated `random_password` as a sensitive output, RDP) plus
+  Ubuntu 22.04/24.04/Debian 12; B/D/E-series sizes; default-RG semantics kept. `terraform validate`
+  clean. _Live: a real Azure plan for windows-2022 + Standard_D2s_v5 → +9 resources incl. the
+  Windows VM + NSG (apply still gated by the sandbox SP's missing Contributor — known)._
+- **N-04:** assistant messages render full markdown (react-markdown + GFM, code blocks with copy,
+  links/tables/lists, design tokens); user messages stay plain text (no injection surface). 5 RTL
+  tests.
+- **N-07:** the timeline Finalize node shows a short status (≤140 chars), never a verbatim copy of
+  a long answer; read-path answers already concise/structured.
+
+### Environment defects found by the pass (fixed)
+- Root-run tests created `terraform.tfstate.d/` root-owned on the bind mount → the API container
+  (non-root) couldn't create state workspaces. Fixed live + the `api-test` service now restores
+  world-writable perms after every run (exit code preserved).
+- The api image's baked `alembic/` is stale (only `app/` is mounted) — migrations must run via
+  `api-test` (full backend mount): `docker compose --profile test run --rm api-test sh -lc
+  "alembic upgrade head"`.
+
+---
+
+## Observability + SSO fix pass — 2026-07-06
+Two independent "wired but broken" defects, both root-caused from the live stack before fixing.
+
+### Langfuse: dashboard showed 0 traces / $0.00 / 0 tokens (M6 claimed done)
+**Root causes (two, compounding):**
+1. **Wrong project keys.** The `.env` `LANGFUSE_PUBLIC_KEY` (`pk-lf-c4fa71a6…`) belonged to a
+   different project ("myproject") in the same instance — 272 traces had been ingested THERE
+   while the dashboard watched the `aegisops` project. Not flush, not network: the compose api
+   env already pointed at `http://langfuse:3000` and `runner.py` flushed in `finally`.
+2. **Instrumentation too shallow.** The `observations` table had **0 rows ever** — `runner.py`
+   posted one flat trace per run and nothing else (no spans, no generations ⇒ no tokens/cost
+   even in the wrong project).
+
+**Fixes:**
+- `.env` keys switched to the compose-provisioned `aegisops`-project keys (`pk/sk-lf-aegisops-local`);
+  `.env.example` + compose comments now state the keys MUST belong to the `aegisops` project.
+- Full span-tree instrumentation (`integrations/langfuse_client.py` rewritten):
+  * **One trace per run, trace id == run id** — the approval resume re-attaches to the SAME
+    trace; trace ↔ context-graph ↔ run are one id (graph already stored `trace_id`).
+  * **A span per graph node/sub-step** driven by `agents/timing.py` (zero per-agent changes):
+    deterministic span ids (`<run_id>:<step>`) let the resume close the **approval span across
+    the human interrupt** with the original start — the true wall-clock wait is on the span.
+  * **LLM generations** recorded at the Gemini chokepoints (`agenerate` + `stream_answer`,
+    including per-retry ERROR generations and truncation): model, prompt/response (redacted),
+    token usage from `usage_metadata`, latency, and **USD cost** computed from
+    `GEMINI_COST_PER_1M_INPUT/OUTPUT` (self-hosted Langfuse has no Gemini price table).
+  * **Tool spans** for terraform init/plan/apply/destroy, ServiceNow post/patch/get, RAG
+    retrieve, and the cloud availability SDK checks — inputs redacted, failures recorded ON
+    the span (level=ERROR + message) and re-raised, nested under their calling step (A→B→C).
+  * Trace name/tags/metadata: `<domain>-run`, user, session id, context id, agent/cloud/env/
+    intent tags; **all payloads pass the existing redaction layer** — secrets never leave.
+- _Live-verified (real requests, project `aegisops`):_ domain-named traces (`general-run`,
+  `knowledge-run`, `devops-run`, `cloudops-run`) each carrying the nested node tree
+  (router → agent → … → finalize → servicenow_update → notify), `rag.retrieve` tool spans,
+  and `gemini.generate`/`gemini.stream` generations with **real token counts and USD costs**
+  (e.g. 1215 prompt + 68 completion ⇒ $0.0005345) — the dashboard is no longer $0.00/0 tokens.
+  The error path was also live-verified: during a window where the Gemini key was rejected,
+  every retry appeared as an **ERROR generation on the trace** (status captured on the span,
+  not swallowed), and the trace still closed with the run's failure output.
+- **Tests:** `tests/test_langfuse_tracing.py` (18 incl. a live API round-trip that reads the
+  tree back via the Langfuse public API): trace-id identity across resume, span nesting,
+  approval-span-across-interrupt, error-on-span, usage+cost math, secret-never-survives,
+  disabled-noop. `test_stream_resilience.py`'s fake updated to the raw-chunk interface
+  `stream_answer` now consumes (it reads token usage off the final chunk).
+
+### Keycloak SSO: "Continue with Keycloak SSO" failed at the first redirect
+**Root causes (two layers, both the browser-vs-container host split):**
+1. `/auth/sso/login` built the authorization URL from discovery fetched over the container
+   network → `302 Location: http://keycloak:8080/…` — a docker service name the browser can't
+   resolve. (Redirect URIs, client config, PKCE S256, realm import all verified correct.)
+2. Once the browser leg worked, `/auth/callback` 500'd with `Invalid issuer`: Keycloak derives
+   a token's `iss` from the URL the auth request came through, so SSO tokens carry
+   `http://localhost:8080/realms/aegisops` while validation pinned the internal
+   `http://keycloak:8080/…` (which password-grant tokens carry).
+**Fixes:** new `KEYCLOAK_PUBLIC_URL` setting (compose api env defaults it to
+`http://localhost:8080`; empty ⇒ falls back to `KEYCLOAK_URL` for host-run dev);
+`build_auth_url` rewrites only the ORIGIN of the discovery authorization endpoint to the
+browser-facing host (token exchange + JWKS stay internal); `validate()` accepts exactly the
+two known realm issuer URLs (internal + browser-facing), nothing else.
+- _Live-verified (scripted browser-equivalent round-trip + real browser):_ SSO login →
+  Keycloak form → callback → session cookie → `/auth/me` 200 (`maya.okafor`,
+  `can_approve: true` — RBAC intact) → logout → 401 → fresh SSO login works again; the
+  password-grant form login unregressed.
+- **Tests:** `tests/test_auth_sso.py` (browser-host rewrite, PKCE params, dual-issuer accept/
+  reject, fallback, plus a host-gated live round-trip via `AEGISOPS_TEST_SSO_LIVE=1`);
+  Playwright `e2e/sso.spec.ts` — real-browser SSO round-trip, passing (runs unauthenticated,
+  one extra grant per suite run so the login rate limiter is not stampeded).
+
+---
+
 ## A. Foundation & ops
 - [x] `docker compose up -d` starts PG+pgvector, Redis, Neo4j, Keycloak, Langfuse(v2), OTel
       Collector, Prometheus, Grafana — pinned versions + healthchecks. _(verify with `make up`)_
@@ -560,7 +713,10 @@ explained instead of crashing).
       (state in PG/Redis/Neo4j); idempotency keys on tool exec; durable checkpoint resume; resilient
       degraded startup with /readyz truth.
 
-## O. Tests (real, green) — expanded in Phase 6 (2026-07-05); **284 backend after Phase 7**
+## O. Tests (real, green) — Phase 6: 210 → Phase 7: 284 → Phase 8: 377 → **2026-07-06: 394 backend / 25 vitest / 13 e2e** (adds Langfuse tracing + SSO suites, incl. a real-browser SSO round-trip)
+- [x] Phase 8 adds the full safety-invariant matrix (A1–A6 incl. live-cloud tier with teardown),
+      memory/continuity, run-lifecycle, usable-outputs, provider-accuracy, and markdown-rendering
+      suites per `Screenshots/03_TEST_MATRIX.md`.
 - [x] Backend pytest **284 passing** (Phase 7 adds ~74: intent-guard safety incl. the exact screenshot
       prompts, per-cloud machine shapes, broad/typed inventory recall, provider-error signatures,
       stream-truncation resilience, plan-parse integrity) — run **in-container** (`make test` → `api-test`) against
@@ -614,6 +770,19 @@ explained instead of crashing).
         402 passed / 2 skipped; vitest 25 passed. Note: existing dev Keycloak containers must
         be recreated to import the new groups/mapper; invalid-Gemini-key environments now seed
         with NULL embeddings + loud warning (keyword recall degrade, per invariant 7).
+  - [x] **O2 · C1 · D1 · D4** (2026-07-12):
+        **O2** — startup `assert_project` queries Langfuse `/api/public/projects` with the
+        configured keys and warns loudly if they don't belong to `LANGFUSE_EXPECTED_PROJECT`
+        (the "0 traces / wrong project" regression guard); best-effort, never blocks startup.
+        **C1** — `test_module_ingress.py` asserts per cloud that the admin port binds to
+        `allowed_cidr` only (never 0.0.0.0/0) and GCP firewalls attach via network tags (the
+        regressed defect); source-level so it runs without creds. **D1** — migration
+        `0005_hot_path_indexes` adds the four per-turn indexes; `test_indexes.py` verifies they
+        exist and the transcript query plans onto one. **D4** — purged 11 tracked `aegisops.tfplan`
+        files (they embed variable values) and gitignored `*.tfplan` + `terraform.tfstate.d/`;
+        0 tracked plan/state remain. Durable dev-state-off-OneDrive is A3 (Phase 2). Evidence:
+        `test_langfuse_tracing.py` (+3), `test_module_ingress.py` (6), `test_indexes.py` (2);
+        full backend suite 438 passed / 2 skipped.
   - [x] **Honesty labels (P7/P8/P9)** (2026-07-12): no surface claims what it didn't do.
         **P8** — policy checks that the module enforces but the engine doesn't yet verify against
         the plan are marked `evaluated=False`/`passed=None` ("not evaluated"), never a green pass;

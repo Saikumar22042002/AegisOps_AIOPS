@@ -11,6 +11,10 @@ infra/secrets/
 *.tfstate
 *.tfstate.*
 .terraform/
+# Plan files embed variable values (incl. anything sensitive) — never commit them (D4).
+*.tfplan
+aegisops*.tfplan
+terraform.tfstate.d/
 crash.log
 
 # Python
