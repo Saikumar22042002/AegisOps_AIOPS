@@ -1189,9 +1189,91 @@ provisioning routing + LLM extraction + embeddings degrade honestly and loudly �
 one blocker for the remaining live-UI variants of items 2/4); no AWS/Azure creds; no
 `GITHUB_TOKEN`; no K8s cluster.
 
+**Phase 2 signed off 2026-07-12** (gate accepted on the demos + 527 green).
+
+---
+
+## DEFERRED LIVE VERIFICATION (replay with fresh credentials — owner runs these with me)
+
+Sandbox creds expire hourly, so every live-cred demo is deferred here with its exact replay
+steps. Rules: each item names **Needs** (credentials), **Steps** (exact), **Expect** (pass
+criteria). Phase-3 items append their own entries as they land. Nothing here is ever reported
+as done without the live run; the code paths behind each are covered by tests with fakes.
+
+- [ ] **DLV-1 · Chat-driven failed-policy approval card** — Needs: valid `GEMINI_API_KEY`
+      (GCP SA already at `infra/secrets/gcp-sa.json`).
+      Steps: (1) set the key in `.env`, `docker compose restart api api-b`; (2) login UI as
+      `maya.okafor@northwind.com`; (3) send **"Create a Cloud SQL database in gcp,
+      name=gate-fail-demo, database_version=MYSQL_8_0"**; (4) wait for the approval card;
+      (5) **Reject** (never apply).
+      Expect: routed → cloudops · real `terraform plan` (+2) · card shows policy check
+      **"Approved engine (PostgreSQL)" FAILED (detail MYSQL_8_0)** with the other checks
+      honestly evaluated/pending · reject halts the run.
+- [ ] **DLV-2 · Live kill-mid-APPLY recovers once** — Needs: valid `GEMINI_API_KEY` (+ GCP SA
+      present).
+      Steps: (1) send **"Create a GCS bucket in gcp, bucket_name=aegisops-dlv2-<rand>"**;
+      (2) approve on the card; (3) while the apply streams to the console,
+      `docker compose kill api`; (4) watch from api-b (`GET /runs/{id}`): heartbeat expires
+      ≤45s, next reconciler sweep recovers; (5) verify with a day-2 read ("what's the state of
+      aegisops-dlv2-<rand>?"); (6) clean up via the gated destroy flow.
+      Expect: **exactly one** reconciler action in api-b logs · run terminal ≤ ~105s with an
+      HONEST outcome (applied-and-recorded, or aborted-no-double-apply via the A1 claim —
+      never a fake success) · inventory row matches the real bucket state · destroy gated +
+      applied.
+- [ ] **DLV-3 · Full warm-turn ≤15s** — Needs: valid `GEMINI_API_KEY` (+ GCP SA).
+      Steps: (1) run one GCS plan turn to warm init; (2) time message→approval-card for a
+      second identical request (`time curl … POST /chat` to the `interrupt` event).
+      Expect: **≤15s** (init≈0 measured 0.002s + cloud plan + LLM classify/extract).
+- [ ] **DLV-4 · Remote Terraform state backend (S3)** — Needs: AWS creds + an S3 bucket
+      (+ optional DynamoDB lock table).
+      Steps: (1) set `AEGISOPS_TF_BACKEND=s3` + bucket/table env per `.env.example`; (2) run an
+      apply; (3) `docker compose kill api` mid-run and let api-b recover it; (4) confirm state
+      objects in S3, not the local volume.
+      Expect: state in S3 · cross-worker recovery works against the remote backend ·
+      `test_terraform_backend.py` semantics hold live.
+- [ ] **DLV-5 · DevOps CI poll-to-completion (P16)** — Needs: `GITHUB_TOKEN` (+ `GITHUB_ORG`).
+      Steps: (1) send "deploy repo=<org>/aegisops-demo branch=main env=dev"; (2) approve;
+      (3) watch the console: `[ENSURE_CI_RUN] tracking run <id> → <url>`, then per-poll
+      `CI run <id>: queued/in_progress`.
+      Expect: polls the **dispatched run id** to completion · real conclusion drives the
+      outcome (`success` → deployed; `failure` → pipeline failed honestly).
+- [ ] **DLV-6 · SRE real K8s remediation (U2)** — Needs: kubeconfig to a live cluster +
+      Prometheus scraping kube-state-metrics.
+      Steps: (1) set `KUBECONFIG`; (2) send an incident ("orders-api is crashlooping");
+      (3) approve the proposed `restart`; (4) `kubectl get deploy orders-api -o yaml | grep
+      restartedAt`.
+      Expect: real rollout-restart annotation patched · outcome `remediated/applied:true` with
+      the real result · `recent_deploy` signal from the real generation-change query.
+- [ ] **DLV-7 · Semantic (paraphrase) recall (M2)** — Needs: valid `GEMINI_API_KEY`.
+      Steps: (1) in the seeded 100-turn session ask **"what did I note about the phoenix
+      cluster's maintenance window?"** (no positional phrasing).
+      Expect: embedding retrieval surfaces turn 20; the answer cites its content (pg_trgm
+      keyword fallback already proven without the key).
+- [ ] **DLV-8 · AWS/Azure template flows + plan-JSON policy checks live** — Needs: AWS and/or
+      Azure creds.
+      Steps: per cloud: plan→approve→apply→verify→gated destroy for one template (EC2 or S3;
+      azure-storage), watching the card's policy checks (IMDSv2, encryption, TLS…) evaluate
+      against the real plan JSON.
+      Expect: checks real (pass AND fail when inputs are weakened) · apply/verify/destroy real.
+- [ ] **DLV-9 · Cloud-level inventory orphan (D2 tail)** — Needs: a live TF backend (DLV-4).
+      Steps: apply done but worker killed BEFORE the same-txn persist (kill during the final
+      seconds of apply); after recovery, reconcile inventory from the Terraform state.
+      Expect: the resource is discoverable and never silently invisible.
+
 **STOPPED at the Phase-2 exit gate — awaiting owner sign-off before any Phase-3 work.**
+_(Sign-off received 2026-07-12; Phase 3 started — see section S below.)_
 
 Per-item status lives in the **`FIX.md §8` execution checklist** (the single progress tracker);
 this section mirrors phase-level status only.
+
+## S. Phase 3 — Intelligence layer (started 2026-07-12)
+
+- [~] **Phase 3 in progress.** Checklist order: D3 world model → DEP → U6 executive loop →
+      INV → MPP → M4 → U7 → MOD → COST → P17 → CLN-1 (final cleanup to the pure baked-image
+      production posture). Same discipline: one item at a time → tests (fakes where live clouds
+      are needed) → full suite green → FIX §8 + PROGRESS → commit. Live-cred demos go to the
+      DEFERRED LIVE VERIFICATION list above with exact replay steps — never a faked live
+      result. **STOP when all items are code-complete + suite green**, presenting the DLV list
+      as one ordered end-to-end acceptance script.
 
 _Legend: [x] done · [~] partial/scaffolded · [ ] pending._
