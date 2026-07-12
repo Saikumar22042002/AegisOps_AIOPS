@@ -29,13 +29,19 @@ log = structlog.get_logger(__name__)
 _ROLE_LABEL = {"user": "User", "assistant": "Assistant", "system": "System"}
 
 # M2: deterministic positional-recall detector. "what was my 20th question?", "the 3rd message",
-# "what did I ask first". Ordinal words + digits; maps to a 1-based turn index.
+# "what did I ask first", "what did I say in turn 20". Ordinal words + digits; maps to a
+# 1-based turn index.
 _ORDINAL_WORDS = {"first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5, "sixth": 6,
                   "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10, "last": -1}
 _RECALL_RE = re.compile(
     r"\b(?:my|the)\s+(\d+)(?:st|nd|rd|th)?\s+(question|message|prompt|request|thing)\b"
     r"|\b(?:the\s+)?(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|last)\s+"
-    r"(question|message|prompt|request|thing)\b",
+    r"(question|message|prompt|request|thing)\b"
+    # Noun-first numeric shape: "turn 20", "in turn 20", "message #7" (found at the Phase-2
+    # gate: the natural "what did I say in turn 20?" phrasing didn't match either noun-last
+    # form). Deliberately ONLY turn/message — "request 3"/"question 5" would false-positive on
+    # ordinary sentences ("I request 3 VMs").
+    r"|\b(turn|message)\s*#?\s*(\d+)\b",
     re.IGNORECASE,
 )
 
@@ -89,10 +95,12 @@ def detect_recall(message: str) -> tuple[int, str] | None:
     m = _RECALL_RE.search(message or "")
     if not m:
         return None
-    if m.group(1):  # numeric: "my 20th question"
+    if m.group(1):  # numeric, noun-last: "my 20th question"
         ordinal, noun = int(m.group(1)), m.group(2)
-    else:  # word: "the first message"
+    elif m.group(3):  # ordinal word: "the first message"
         ordinal, noun = _ORDINAL_WORDS.get(m.group(3).lower(), 0), m.group(4)
+    else:  # numeric, noun-first: "turn 20", "message #7"
+        ordinal, noun = int(m.group(6)), m.group(5)
     if not ordinal:
         return None
     role = "user" if noun.lower() in ("question", "prompt", "request") else None

@@ -999,6 +999,13 @@ two known realm issuer URLs (internal + browser-facing), nothing else.
         channel, `_force_terminal` (B5) backstop on exception. Evidence:
         `test_redrive_persists_the_result_and_second_sweep_is_a_noop` (redrive persists; second
         sweep is a no-op) + the live re-demo showing exactly ONE reconciler action.
+  - [x] **M2 amendment: "turn N" recall shape** (2026-07-12, found at the gate): the natural
+        "what did I say in **turn 20**?" phrasing matched neither noun-last form in `_RECALL_RE`
+        (it knew "my 20th question" / "the first message" but not noun-first "turn 20"). Added
+        the `turn N` / `message #N` alternative — deliberately NOT `request N`/`question N`,
+        which would false-positive on ordinary sentences ("I request 3 VMs", "question 5 of the
+        quiz"). Evidence: `test_detect_recall_parses_turn_n_shape` (+ false-positive guards);
+        all 14 memory tests green.
   - [x] **S0 multi-tenancy** (2026-07-11): principal→(org_id,user_id) via Keycloak org claim
         (group-membership mapper; realm defines northwind-financial + acme-industrial groups)
         with the `users` mirror (by keycloak_sub, username/email fallback for seeded rows)
@@ -1119,6 +1126,70 @@ two known realm issuer URLs (internal + browser-facing), nothing else.
       U6 Governed Executive Loop · read-only investigation agents · Module Promotion Pipeline ·
       M4 · U7 · modify-beyond-ports · cost estimation · P17). Exit gate: VPC→EC2 DAG demo e2e;
       drift notification; world-model destroy warning; module promotion flow.
+
+### Phase 2 — EXIT GATE EVIDENCE (2026-07-12) — all checklist items done; awaiting owner sign-off
+
+All Phase-2 items complete in checklist order (E2E-first → B1→B2→B3→B4→B5→A3→LAT→M1/M2/M3/M5→
+U1→U2→U3→O1→O3→D2→U5→U8→P16), each with acceptance tests + full suite green + its own commit.
+Gate demos ran on the **production posture: Redis event bus + reconciler on + two API workers**
+(`docker-compose.override.yml`: `api` :8000 + `api-b` :8001, `AEGISOPS_EVENT_BUS=redis`,
+`AEGISOPS_RECONCILER=on`).
+
+1. **Multi-worker streaming (B1) — live.** Run `6ad9e056` driven + streamed on `api`; a
+   reconnect to `GET /chat/stream/6ad9e056…` served by **`api-b` (a separate container)**
+   returned 200 with the full replay from Redis Streams (run/step/token/error/done, stream ids
+   `1783846428356-0`…), confirmed in api-b's access log. The `error` event is the honest
+   invalid-Gemini-key surfacing (`llm_unavailable`, retriable) — the run still terminated
+   cleanly. Contract parity: U8's full-vocabulary byte-identical-frames test.
+2. **Worker-kill recovery (B2/B3) — live, and it caught a real defect.** First demo: SIGKILL
+   `api` mid-run → worker B's reconciler logged `resumed` **and 60s later `marked_failed`** for
+   the same run — `_redrive` never persisted its result (a redriven apply's outcome would have
+   been overwritten). Fixed (redrive now persists via `_persist_result` + `done` + B5 backstop;
+   commit 82e99d4) and re-demoed: run `828be32f` SIGKILLed mid-run → **exactly one** reconciler
+   action (`reconciler.resumed` on api-b) → `completed` **with the persisted answer** (~91s:
+   45s heartbeat TTL + sweep cadence). Mid-APPLY single-execution:
+   `test_kill_mid_apply_recovers_once_without_reapply` (real PG/Redis: `applying` + claimed
+   idempotency key → terminal once, claim untouched — never re-applied) + A1 wait-or-abort
+   tests; a live chat-driven cloud apply is Gemini-key-gated at routing (see 8).
+3. **Turn-20-of-100 recall IN THE UI — live.** 100 real turns seeded sequentially through the
+   real `POST /chat` (session `6bec9355…`, every turn streamed to `done`); turn 20 = "Note for
+   the record: the phoenix cluster runs 17 nodes in Mumbai…". In the UI: "What did I say in
+   turn 20?" → **"Your 20th user in this conversation was:" + the verbatim sentence**
+   (deterministic pre-LLM path — answered in seconds despite the dead LLM key). Playwright
+   `e2e/gate-evidence.spec.ts` (assertion targets the answer's unique prefix, which cannot
+   match seeded content); screenshot `frontend/e2e/gate-out/recall-turn-20.png`. Gate finding
+   fixed en route: `_RECALL_RE` lacked the noun-first "turn N" shape (M2 amendment above).
+4. **Real failed policy check (U1) — live at the plan seam.** Real `terraform plan` against the
+   real Google provider (project `user-chlejclwsxdb`, `+2` resources, ~8s wall on warm init):
+   `gcp.cloudsql` with `database_version=MYSQL_8_0` → **`Approved engine (PostgreSQL)`:
+   `passed=false`, `detail=MYSQL_8_0`, `evaluated=true`** — and the unverifiable check honestly
+   `evaluated=false` (pending), never a fake pass. Plan-JSON-driven failing predicates:
+   `test_templates.py` (real captured `terraform show -json` fixture → `Public access blocked`
+   `passed=false`). The chat hop above this seam (router/LLM extraction) is Gemini-key-gated.
+5. **Real Traces tab (O1) — live in the UI.** Screenshot `gate-out/traces-tab.png`: the recall
+   run's tree — `general run 6.7s` → `router 4.1s`, `general 2.6s`, `finalize 18ms`,
+   `servicenow_update 6ms`, `notify 11ms` — real durations from `run_steps`, trace id, and the
+   "Open in Langfuse" deep-link.
+6. **Honest model menu (U3) — live.** Screenshot `gate-out/model-menu.png`: the menu lists
+   exactly `gemini-3.5-flash (default ✓)`, `gemini-flash-latest`, `gemini-2.5-flash` — no
+   phantom vendors. Live `GET /models` returns the same catalog; live `POST /chat` with
+   `model=gpt-4o` → **400** "Unknown model 'gpt-4o'. AegisOps serves: …".
+7. **Warm-turn latency (LAT) — measured.** Init cold **3.97s → warm 0.002s** (demo-null,
+   recorded at the LAT item; ~19s saved per warm turn for real cloud providers per the prior
+   audit). Live corroboration at the gate: the real GCP CloudSQL plan turn completed in **~8s**
+   wall on a warm init. The full ≤15s cloud-provisioning turn end-to-end (LLM classify/extract +
+   plan) still needs a valid Gemini key — the LLM hops currently ADD retry latency (honest
+   degradation), so an end-to-end number today would measure the broken key, not the system.
+8. **Suites.** Backend **527 passed / 2 skipped / exit 0** (final run, workers stopped during
+   the suite); frontend vitest 28; Playwright: core-flow 5 + gate-evidence 4 (+ the 22-green
+   browser suite recorded at Phase-2 entry).
+
+**Environment-gated (recorded, never faked):** invalid `GEMINI_API_KEY` (chat-driven
+provisioning routing + LLM extraction + embeddings degrade honestly and loudly — this is the
+one blocker for the remaining live-UI variants of items 2/4); no AWS/Azure creds; no
+`GITHUB_TOKEN`; no K8s cluster.
+
+**STOPPED at the Phase-2 exit gate — awaiting owner sign-off before any Phase-3 work.**
 
 Per-item status lives in the **`FIX.md §8` execution checklist** (the single progress tracker);
 this section mirrors phase-level status only.

@@ -157,6 +157,17 @@ def test_detect_recall_parses_positional_queries():
     assert memory.detect_recall("provision an EC2 instance") is None  # not a recall
 
 
+def test_detect_recall_parses_turn_n_shape():
+    """Gate finding (2026-07-12): the natural 'turn 20' phrasing matched neither noun-last form."""
+    from app.agents import memory
+    assert memory.detect_recall("What did I say in turn 20?") == (20, "user")
+    assert memory.detect_recall("turn 7") == (7, "user")
+    assert memory.detect_recall("show me message #7") == (7, "user")
+    # Guard against noun-first false positives on ordinary sentences.
+    assert memory.detect_recall("I request 3 VMs") is None
+    assert memory.detect_recall("question 5 of the quiz is hard") is None
+
+
 async def test_build_context_includes_the_20th_turn_verbatim(big_convo):
     from app.agents import memory
     ctx = await memory.build_context(big_convo, purpose="general",
