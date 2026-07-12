@@ -215,6 +215,30 @@ class GCPGCSInputs(WorkflowInputs):
     storage_class: str = "STANDARD"
 
 
+class GCPVPCInputs(WorkflowInputs):
+    """MODSEED MS-1 - gcp.vpc: custom-mode network + subnets (+pods/services secondary
+    ranges) + NAT. Only `name` is decision-critical; the project is auto-filled."""
+
+    name: str
+    project: str = ""
+    region: str = "us-central1"
+    subnet_cidrs: list[str] = Field(default_factory=lambda: ["10.10.0.0/20", "10.10.16.0/20"])
+    enable_nat: bool = True
+    enable_flow_logs: bool = False
+
+    @field_validator("subnet_cidrs")
+    @classmethod
+    def _valid_cidrs(cls, v: list[str]) -> list[str]:
+        import ipaddress
+        if not v:
+            raise ValueError("at least one subnet CIDR is required")
+        for c in v:
+            net = ipaddress.ip_network(c, strict=True)  # raises on malformed input
+            if not net.is_private:
+                raise ValueError(f"subnet CIDR {c} must be RFC1918 private space")
+        return v
+
+
 # ── Azure (Phase 5) ──
 AZURE_OS_CHOICES = ("ubuntu-22.04", "ubuntu-24.04", "debian-12", "windows-2022")
 

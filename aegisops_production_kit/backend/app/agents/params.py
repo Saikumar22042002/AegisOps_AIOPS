@@ -161,6 +161,11 @@ PARAMS: dict[str, list[ParamSpec]] = {
         ParamSpec("node_count", "Node count", kind="int", default=2),
         ParamSpec("machine_type", "Node machine type", default="e2-medium"),
     ],
+    "gcp.vpc": [
+        ParamSpec("name", "Network name", required=True, help="e.g. prod-network"),
+        ParamSpec("region", "Region", default="us-central1"),
+        ParamSpec("enable_nat", "Cloud NAT for private egress", kind="bool", default=True),
+    ],
     "gcp.cloudsql": [
         ParamSpec("name", "Instance name", required=True, help="e.g. payments-sql (globally-unique)"),
         ParamSpec("project", "GCP project id", help="defaults to the configured project"),

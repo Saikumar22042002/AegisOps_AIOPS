@@ -109,7 +109,7 @@ def test_ambiguous_cloud_asks_never_defaults_to_aws(resource):
     ("aws", "storage"),          # "storage" is Azure-branded — no aws.storage module
     ("aws", "module"),           # generic runtime-HCL escape hatch was removed (2.3)
     ("gcp", "resource_group"),   # Azure concept
-    ("gcp", "vpc"),              # no curated gcp network module
+    ("gcp", "lambda"),           # serverless concept — never a curated module here
     ("azure", "gcs"),            # GCP concept
     ("aws", "aks"),              # Azure k8s on AWS — nonsense
 ])

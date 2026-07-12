@@ -1283,6 +1283,14 @@ as done without the live run; the code paths behind each are covered by tests wi
       promote succeeds only now.
       Expect: promotion is impossible while the scan is failed/unavailable (fail closed); the
       finding text appears in the proposal's scan detail.
+- [ ] **DLV-15 · MODSEED gcp.vpc live lifecycle (MS-1)** — Needs: valid `GEMINI_API_KEY`
+      (+ GCP SA present).
+      Steps: (1) UI: "create a vpc named prod-net in gcp" (or `name=prod-net`); (2) approve on
+      the card (checks: custom-mode PASS, ≥1 subnet PASS); (3) after apply: "what subnets does
+      prod-net have" (day-2 read from recorded outputs incl. secondary range names);
+      (4) "destroy prod-net" → gated destroy, impact_of consulted.
+      Expect: full lifecycle through the governed pipeline; NAT + internal firewall visible in
+      the GCP console; zero admin-ingress rules.
 - [ ] **DLV-12 · VPC→EC2 goal-DAG e2e in the UI (DEP+U6 — Phase-3 exit-gate headline)** —
       Needs: valid `GEMINI_API_KEY` + AWS creds; `AEGISOPS_EXEC_LOOP=on`.
       Steps: (1) send **"Create an EC2 named web in a new vpc"**; (2) inspect the goal-DAG
@@ -1417,6 +1425,25 @@ this section mirrors phase-level status only.
         had been written into the region-swap regex (invisible in code review) — found by the
         smoke test, fixed byte-level. Evidence: `test_retry_undo.py` (12). Live one-click
         retry + undo through the UI ride the existing DLV cloud items.
+  - [x] **MODSEED MS-1 gcp-vpc (`gcp.vpc`)** (2026-07-12): first of the six MODSEED modules —
+        custom-mode network + regional subnets (secondary pods/services ranges recorded in
+        outputs for future GKE placement) + private_ip_google_access + optional flow logs +
+        Cloud Router/NAT (ERRORS_ONLY logging) + an internal firewall scoped to the subnet
+        CIDRs ONLY (no admin/SSH rules — the VM module owns admin ingress). Multi-file module
+        (main/variables/outputs), no backend block, google `~> 5.40` (no bump), region from
+        var. FULL registration in this one commit: template + `network` synonym,
+        `GCPVPCInputs` (RFC1918-validated CIDRs), params (asks only `name`),
+        `_gcp_vpc_policy` — REAL plan-JSON predicate (custom-mode on, ≥1 subnet; pending
+        without a plan). Added the MODSEED **registry↔disk consistency test** (binds every
+        module both directions). Evidence: `test_modseed_ms1_gcp_vpc.py` (9) incl. real
+        fmt/validate on the dir + the seamless-contract integration (faked runner, live
+        datastores): plan → real checks on the approval card → apply → inventory row +
+        world-model node. Canary (B5): full suite + Playwright core-flow green. **Deliberate
+        test update (recorded per B4 discipline):**
+        `test_unsupported_combo_returns_none…[gcp-vpc]` pinned `("gcp","vpc")` as unsupported —
+        MS-1 makes it supported BY DESIGN; the parametrize entry now uses `("gcp","lambda")`
+        (permanently uncurated). Behavior change: a GCP network request no longer falls to the
+        honest-catalog clarification — it provisions through the governed pipeline.
 
 
 _Legend: [x] done · [~] partial/scaffolded · [ ] pending._

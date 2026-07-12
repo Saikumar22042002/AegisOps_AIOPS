@@ -192,6 +192,26 @@ def _azure_aks_policy(i: dict, resources=None) -> list[dict]:
     ]
 
 
+def _gcp_vpc_policy(i: dict, resources=None) -> list[dict]:
+    """MODSEED MS-1: over the real plan — the network must be custom-mode (no auto subnets)
+    and carry at least one explicit subnet."""
+    net = _after(resources, "google_compute_network")
+    checks: list[dict] = []
+    if net is not None:
+        auto = net.get("auto_create_subnetworks")
+        checks.append(_ck("Custom-mode network (no auto subnets)", auto is False,
+                          "custom mode" if auto is False else "AUTO subnet mode"))
+        subnet_count = sum(1 for r in (resources or []) if r.get("type") == "google_compute_subnetwork")
+        checks.append(_ck("At least one explicit subnet", subnet_count >= 1,
+                          f"{subnet_count} subnet(s) in the plan"))
+    else:
+        checks.append(_todo("Custom-mode network (no auto subnets)"))
+        checks.append(_ck("At least one explicit subnet", len(i.get("subnet_cidrs", [])) >= 1,
+                          f"{len(i.get('subnet_cidrs', []))} requested"))
+    checks.append(_todo("Internal firewall scoped to subnet CIDRs (no admin ingress here)"))
+    return checks
+
+
 def _gcp_gce_policy(i: dict, resources=None) -> list[dict]:
     return [
         _todo("SSH key auth (no password)"),
@@ -230,6 +250,7 @@ TEMPLATES: list[WorkflowTemplate] = [
     WorkflowTemplate("azure.postgres", "azure", "postgres", "v1", "azure-postgres", wf.AzurePostgresInputs, "Provision an Azure PostgreSQL Flexible Server", _azure_pg_policy),
     WorkflowTemplate("azure.aks", "azure", "aks", "v1", "azure-aks", wf.AzureAKSInputs, "Provision an Azure Kubernetes Service (AKS) cluster", _azure_aks_policy),
     WorkflowTemplate("gcp.gcs", "gcp", "gcs", "v1", "gcp-gcs", wf.GCPGCSInputs, "Provision a GCS bucket (uniform access, versioned)", _gcs_policy),
+    WorkflowTemplate("gcp.vpc", "gcp", "vpc", "v1", "gcp-vpc", wf.GCPVPCInputs, "Provision a custom-mode GCP VPC (subnets + secondary ranges, NAT, internal firewall)", _gcp_vpc_policy),
     WorkflowTemplate("gcp.vm", "gcp", "vm", "v1", "gcp-gce", wf.GCPComputeInputs, "Provision a GCP Compute Engine VM (generated SSH key)", _gcp_gce_policy),
     WorkflowTemplate("gcp.gke", "gcp", "gke", "v1", "gcp-gke", wf.GCPGKEInputs, "Provision a GKE cluster", _gcp_gke_policy),
     WorkflowTemplate("gcp.cloudsql", "gcp", "cloudsql", "v1", "gcp-cloudsql", wf.GCPCloudSQLInputs, "Provision a Cloud SQL for PostgreSQL instance", _gcp_cloudsql_policy),
@@ -250,6 +271,7 @@ _SYNONYMS: dict[str, dict[str, str]] = {
               "k8s": "aks", "kubernetes": "aks", "cluster": "aks", "blob": "storage", "bucket": "storage",
               "object_storage": "storage", "storage_account": "storage", "rg": "resource_group"},
     "gcp": {"instance": "vm", "server": "vm", "compute": "vm", "gce": "vm", "ec2": "vm",
+            "network": "vpc",
             "database": "cloudsql", "db": "cloudsql", "postgres": "cloudsql", "postgresql": "cloudsql",
             "sql": "cloudsql", "mysql": "cloudsql", "k8s": "gke", "kubernetes": "gke", "cluster": "gke",
             "bucket": "gcs", "blob": "gcs", "object_storage": "gcs"},
