@@ -1315,6 +1315,13 @@ as done without the live run; the code paths behind each are covered by tests wi
       (3) "destroy app-secrets" → the card states the scheduled-deletion window → approve →
       verify the key shows "Pending deletion" in the console (not gone).
       Expect: alias visible; key policy carries root + service statements only.
+- [ ] **DLV-19 · MODSEED azure.keyvault live lifecycle (MS-5)** — Needs: valid
+      `GEMINI_API_KEY` + Azure creds.
+      Steps: (1) "create a key vault named app-vault in azure" → the card states the Allow
+      network action + checks PASS → approve → apply; (2) day-2 "what's app-vault's uri";
+      (3) gated destroy → card states soft-delete/purge semantics → verify the vault is
+      soft-deleted (recoverable), not purged.
+      Expect: AzureServices bypass + current-SP policy visible in the portal.
 - [ ] **DLV-12 · VPC→EC2 goal-DAG e2e in the UI (DEP+U6 — Phase-3 exit-gate headline)** —
       Needs: valid `GEMINI_API_KEY` + AWS creds; `AEGISOPS_EXEC_LOOP=on`.
       Steps: (1) send **"Create an EC2 named web in a new vpc"**; (2) inspect the goal-DAG
@@ -1507,6 +1514,18 @@ this section mirrors phase-level status only.
         **secrets→kms**. Policy (plan-JSON): rotation on + window ≥7, failing on rotation-off/
         short-window plans. Evidence: `test_modseed_ms4_aws_kms.py` (9) incl. the day-2
         rotation answer recorded in inventory attributes. Canary (B5) green. Live = **DLV-18**.
+  - [x] **MODSEED MS-5 azure-keyvault (`azure.keyvault`)** (2026-07-12): vault (standard SKU,
+        soft-delete 7–90 bounded in schema AND module, purge protection default ON,
+        network_acls with AzureServices bypass) + current-SP access policy from the REAL
+        client config + optional additional policies + optional RSA-2048 keys. **The vault,
+        never secrets** — no secret_value / azurerm_key_vault_secret anywhere (asserted). RG
+        via the same slot pattern as azure-vm/vnet. **network_default_action=Allow is STATED
+        on the approval card** through the defaults hook ("accepts traffic from ALL
+        networks"); Deny stays silent. destroy_note: soft-delete retention + "CANNOT be
+        permanently purged until the window elapses". Policy (plan-JSON): soft-delete ≥7,
+        purge-protection-as-approved, AzureServices bypass — all failing on violating plans.
+        Evidence: `test_modseed_ms5_azure_keyvault.py` (10). Canary (B5) green. Live =
+        **DLV-19**.
 
 
 _Legend: [x] done · [~] partial/scaffolded · [ ] pending._

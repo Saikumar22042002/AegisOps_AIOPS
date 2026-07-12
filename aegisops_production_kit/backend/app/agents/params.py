@@ -161,6 +161,11 @@ PARAMS: dict[str, list[ParamSpec]] = {
         ParamSpec("node_count", "Node count", kind="int", default=2),
         ParamSpec("machine_type", "Node machine type", default="e2-medium"),
     ],
+    "azure.keyvault": [
+        ParamSpec("name", "Vault name", required=True, help="globally unique, 3-24 chars"),
+        ParamSpec("location", "Region", default="eastus"),
+        ParamSpec("purge_protection", "Purge protection", kind="bool", default=True),
+    ],
     "aws.kms": [
         ParamSpec("name", "Key name", required=True, help="e.g. app-secrets (alias becomes alias/<name>)"),
         ParamSpec("deletion_window", "Deletion window (days)", kind="int", default=30),

@@ -204,6 +204,30 @@ def _azure_storage_policy(i: dict, resources=None) -> list[dict]:
     ]
 
 
+def _azure_keyvault_policy(i: dict, resources=None) -> list[dict]:
+    """MODSEED MS-5: over the real plan - soft-delete >=7, purge protection as requested,
+    AzureServices bypass on the network ACLs. No secret values ever pass through here."""
+    kv = _after(resources, "azurerm_key_vault")
+    checks: list[dict] = []
+    if kv is not None:
+        days = kv.get("soft_delete_retention_days")
+        checks.append(_ck("Soft delete >= 7 days", isinstance(days, int) and days >= 7,
+                          f"{days} days"))
+        want_pp = bool(i.get("purge_protection", True))
+        checks.append(_ck("Purge protection as approved",
+                          bool(kv.get("purge_protection_enabled")) == want_pp,
+                          f"planned {'on' if kv.get('purge_protection_enabled') else 'off'}"))
+        acls = _block0(kv, "network_acls")
+        checks.append(_ck("AzureServices bypass on network ACLs",
+                          acls.get("bypass") == "AzureServices", str(acls.get("bypass"))))
+    else:
+        checks.append(_ck("Soft delete >= 7 days", int(i.get("soft_delete_days", 90)) >= 7,
+                          f"{i.get('soft_delete_days', 90)} days requested"))
+        checks.append(_todo("Purge protection as approved"))
+        checks.append(_todo("AzureServices bypass on network ACLs"))
+    return checks
+
+
 def _azure_rg_policy(i: dict, resources=None) -> list[dict]:
     return [_todo("Tagging policy applied"), _todo("Approved region")]
 
@@ -330,6 +354,8 @@ TEMPLATES: list[WorkflowTemplate] = [
                      destroy_note="A destroyed KMS key enters its scheduled-deletion window (the module's deletion_window, 7-30 days) - it is NOT removed immediately and remains recoverable until the window elapses."),
     WorkflowTemplate("azure.storage", "azure", "storage", "v1", "azure-storage", wf.AzureStorageInputs, "Provision an Azure Storage Account", _azure_storage_policy),
     WorkflowTemplate("azure.vnet", "azure", "vnet", "v1", "azure-vnet", wf.AzureVNetInputs, "Provision an Azure VNet (subnets, NAT gateway, route tables)", _azure_vnet_policy),
+    WorkflowTemplate("azure.keyvault", "azure", "keyvault", "v1", "azure-keyvault", wf.AzureKeyVaultInputs, "Provision an Azure Key Vault (soft delete, purge protection, optional RSA keys)", _azure_keyvault_policy,
+                     destroy_note="A destroyed Key Vault enters soft-delete retention (the module's soft_delete_days) - with purge protection ON it CANNOT be permanently purged until the window elapses; the name stays reserved meanwhile."),
     WorkflowTemplate("azure.resource_group", "azure", "resource_group", "v1", "azure-resource-group", wf.AzureResourceGroupInputs, "Provision an Azure Resource Group", _azure_rg_policy),
     WorkflowTemplate("azure.vm", "azure", "vm", "v1", "azure-vm", wf.AzureVMInputs, "Provision an Azure Linux VM (generated SSH key)", _azure_vm_policy),
     WorkflowTemplate("azure.postgres", "azure", "postgres", "v1", "azure-postgres", wf.AzurePostgresInputs, "Provision an Azure PostgreSQL Flexible Server", _azure_pg_policy),
@@ -356,7 +382,8 @@ _SYNONYMS: dict[str, dict[str, str]] = {
     "azure": {"instance": "vm", "server": "vm", "compute": "vm", "ec2": "vm", "database": "postgres",
               "db": "postgres", "postgresql": "postgres", "sql": "postgres", "mysql": "postgres",
               "k8s": "aks", "kubernetes": "aks", "cluster": "aks", "blob": "storage", "bucket": "storage",
-              "object_storage": "storage", "storage_account": "storage", "rg": "resource_group", "network": "vnet"},
+              "object_storage": "storage", "storage_account": "storage", "rg": "resource_group", "network": "vnet",
+              "key_vault": "keyvault", "kv": "keyvault", "vault": "keyvault"},
     "gcp": {"instance": "vm", "server": "vm", "compute": "vm", "gce": "vm", "ec2": "vm",
             "network": "vpc",
             "database": "cloudsql", "db": "cloudsql", "postgres": "cloudsql", "postgresql": "cloudsql",
@@ -383,6 +410,9 @@ def apply_env_defaults(key: str, validated: dict, env: str | None) -> list[str]:
     approval card (never silent). Returns the note lines. Only fields the user left unset
     (None) are touched - an explicit choice always wins."""
     notes: list[str] = []
+    if key == "azure.keyvault" and validated.get("network_default_action") == "Allow":
+        notes.append("network_default_action: Allow - the vault accepts traffic from ALL "
+                     "networks (AzureServices bypass is always on); set Deny to lock down")
     if key == "aws.nlb" and validated.get("deletion_protection") is None:
         on = (env or "").lower() == "production"
         validated["deletion_protection"] = on

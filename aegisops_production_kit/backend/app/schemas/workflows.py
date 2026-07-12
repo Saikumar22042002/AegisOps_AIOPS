@@ -275,6 +275,26 @@ class GCPVPCInputs(WorkflowInputs):
         return v
 
 
+class AzureKeyVaultInputs(WorkflowInputs):
+    """MODSEED MS-5 - azure.keyvault: vault + optional keys. Secret VALUES are permanently
+    out of scope. network_default_action=Allow is STATED on the approval card."""
+
+    name: str = Field(min_length=3, max_length=24)
+    location: str = "eastus"
+    resource_group: str = ""
+    soft_delete_days: int = Field(default=90, ge=7, le=90)
+    purge_protection: bool = True
+    network_default_action: str = "Allow"
+    keys: list[str] = Field(default_factory=list)
+
+    @field_validator("network_default_action")
+    @classmethod
+    def _valid_action(cls, v: str) -> str:
+        if v not in ("Allow", "Deny"):
+            raise ValueError("network_default_action must be Allow or Deny")
+        return v
+
+
 class AzureVNetInputs(WorkflowInputs):
     """MODSEED MS-2 - azure.vnet: VNet + subnets + NAT + route tables. Only `name` is
     decision-critical; the RG defaults to a module-created '<name>-rg' (like azure-vm)."""
