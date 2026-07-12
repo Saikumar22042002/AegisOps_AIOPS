@@ -1,7 +1,7 @@
 # AegisOps scanner waivers - documented in the PROGRESS.md scanner ledger.
 # tfsec v1.28 config excludes match legacy IDs; the AVD id is in each comment.
 exclude:
-  - aws-rds-specify-backup-retention  # AVD-AWS-0077 | backup retention: MS-7/day-2 candidate; sandbox cost posture
+  - aws-rds-specify-backup-retention  # AVD-AWS-0077 | backup retention: day-2 candidate; changing it would alter existing instances' re-plans (B1); sandbox cost posture
   - aws-rds-enable-performance-insights  # AVD-AWS-0133 | performance insights: cost posture
   - aws-rds-enable-iam-auth  # AVD-AWS-0176 | IAM auth: opt-in candidate (AWS-managed master password today)
   - aws-rds-enable-deletion-protection  # AVD-AWS-0177 | TF-level deletion protection would fail governed destroy runs; destroys are approval-gated

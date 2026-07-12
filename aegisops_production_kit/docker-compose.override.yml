@@ -90,6 +90,9 @@ services:
       - "./backend:/app"
       - "./infra/secrets:/secrets:ro"
       - "./infra/terraform-workspaces:/app/infra/terraform-workspaces"
+      # Single source of truth for the stale-waiver guard test: a scanner waiver may not
+      # reference an MS item that FIX.md §8 marks done.
+      - "../FIX.md:/app/FIX.md:ro"
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }

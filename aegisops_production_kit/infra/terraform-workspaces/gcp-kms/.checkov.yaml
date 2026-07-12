@@ -2,4 +2,4 @@
 # PROGRESS.md scanner ledger. New checks fail the scan until triaged.
 skip-check:
   - CKV_GCP_43  # rotation_period is derived from var.rotation_days (default 90d); checkov cannot evaluate the expression - the _gcp_kms_policy plan-JSON check enforces rotation at approval time
-  - CKV_GCP_82  # lifecycle prevent_destroy would break the governed destroy flow; ring permanence is stated on the destroy card (MS-6)
+  - CKV_GCP_82  # lifecycle prevent_destroy would break the governed destroy flow; ring permanence is stated on the destroy card (module design)

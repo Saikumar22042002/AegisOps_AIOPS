@@ -1,4 +1,4 @@
 # AegisOps scanner waivers - documented in the PROGRESS.md scanner ledger.
 # tfsec v1.28 config excludes match legacy IDs; the AVD id is in each comment.
 exclude:
-  - google-compute-enable-vpc-flow-logs  # AVD-GCP-0029 | subnet flow logs: cost posture; opt-in candidate (MS-1 module ships NAT + internal firewall)
+  - google-compute-enable-vpc-flow-logs  # AVD-GCP-0029 | subnet flow logs: cost posture; opt-in candidate (the module ships NAT + internal firewall)

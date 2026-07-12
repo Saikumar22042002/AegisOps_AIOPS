@@ -118,11 +118,20 @@ class AWSEKSInputs(WorkflowInputs):
 
 
 class AWSRDSInputs(WorkflowInputs):
+    """MS-7 multi-engine RDS. BACKCOMPAT B2: every plan-shape-changing option defaults to
+    the OLD behavior HERE (the module's own defaults are the secure ones for bare use) —
+    the platform always passes these fields explicitly, so stored pre-enhancement inputs
+    re-plan to zero changes (B1)."""
+
     identifier: str
     engine: str = "postgres"
+    engine_version: str = ""            # "" = provider default (old) · "latest" · explicit pin
     instance_class: str = "db.t3.medium"
     allocated_storage: int = Field(default=20, ge=20, le=4096)
     region: str = "us-east-1"
+    allowed_cidr: str = ""              # dedicated SG only when set; MANDATORY for that path
+    subnet_ids: list[str] = Field(default_factory=list)
+    enable_log_exports: bool = False    # engine-aware exports + query-logging param group
 
     @field_validator("instance_class")
     @classmethod
@@ -130,6 +139,26 @@ class AWSRDSInputs(WorkflowInputs):
         if not re.fullmatch(r"db\.[a-z0-9]+\.[a-z0-9]+", v.strip()):
             raise ValueError(f"'{v}' is not a valid RDS instance class — expected e.g. db.t3.medium")
         return v.strip()
+
+    @field_validator("engine")
+    @classmethod
+    def _valid_engine(cls, v: str) -> str:
+        allowed = ("postgres", "mysql", "mariadb")
+        if v.strip().lower() not in allowed:
+            raise ValueError(f"engine must be one of {allowed} — got '{v}'")
+        return v.strip().lower()
+
+    @field_validator("allowed_cidr")
+    @classmethod
+    def _never_world_open(cls, v: str) -> str:
+        v = v.strip()
+        if v == "":
+            return v
+        if v.endswith("/0"):
+            raise ValueError("allowed_cidr must never be world-open — a /0 CIDR is rejected outright")
+        if not re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}/\d{1,2}", v):
+            raise ValueError(f"'{v}' is not a valid IPv4 CIDR (e.g. 10.0.0.0/16)")
+        return v
 
 
 EC2_OS_CHOICES = ("amazon-linux-2023", "ubuntu-22.04", "ubuntu-24.04", "windows-2022")

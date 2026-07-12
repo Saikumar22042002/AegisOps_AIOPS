@@ -1322,6 +1322,21 @@ as done without the live run; the code paths behind each are covered by tests wi
       (3) gated destroy → card states soft-delete/purge semantics → verify the vault is
       soft-deleted (recoverable), not purged.
       Expect: AzureServices bypass + current-SP policy visible in the portal.
+- [ ] **DLV-21 · MODSEED aws.rds enhanced live lifecycle + live B1 re-plan (MS-7)** —
+      Needs: valid `GEMINI_API_KEY` + AWS creds.
+      Steps: (1) "create a mariadb database named orders-db, client cidr 10.20.0.0/16,
+      with log exports" → the card shows port 3306, "DB security group scoped (no /0)"
+      PASS, "Engine-aware log exports" stated → approve → apply; (2) day-2: "what's the
+      connection string for orders-db" (sensitive output, no password — RDS-managed);
+      (3) verify in the console: dedicated SG (only 10.20.0.0/16 on 3306), the
+      `orders-db-logging-*` parameter group (slow_query_log), CloudWatch log groups;
+      (4) **live B1**: `terraform plan` an instance created pre-enhancement from its
+      stored inputs → "No changes." (the suite already proves the rendered-shape
+      equivalence credential-lessly; this is the state-attached confirmation);
+      (5) "create a postgres db named ledger, latest version" → the engine-version data
+      source resolves the newest postgres; (6) gated destroys.
+      Expect: multi-engine ports/exports correct per engine; the /0 rejection blocks a
+      world-open request at BOTH schema and module validation.
 - [ ] **DLV-20 · MODSEED gcp.kms live lifecycle (MS-6)** — Needs: valid `GEMINI_API_KEY`
       + the working GCP SA (`infra/secrets/gcp-sa.json`, Cloud KMS API enabled).
       Steps: (1) "create a kms keyring named app-ring in gcp" → approve (rotation/SOFTWARE/
@@ -1563,6 +1578,33 @@ this section mirrors phase-level status only.
         `_scan_command → None`) — a deliberate test change: the environment can no longer
         prove that path since the image always has a scanner (B4-style, recorded here).
         Both sweeps green with waivers applied: **checkov 0 / tfsec 0 across all 21**.
+  - [x] **MODSEED MS-7 aws-rds enhanced (`aws.rds`)** (2026-07-12): multi-engine
+        postgres/mysql/mariadb (validated at schema AND module), engine-aware port map
+        (5432/3306/3306), engine-aware CloudWatch log exports + a query-logging parameter
+        group (`for_each`, not `count` — checkov's graph follows for_each nodes, which is
+        what lets CKV2_AWS_30 pass instead of being waived), `aws_rds_engine_version`
+        data source count-gated to the "latest" pin or the logging family (credential-less
+        plans never touch it), dedicated SG gated on MANDATORY `allowed_cidr` (`/0`
+        rejected at schema and module; **`0.0.0.0/0` appears nowhere in the source**,
+        test-pinned), optional subnet group, sensitive credential-free connection string
+        (master password stays RDS-managed). **B1 gate is a REAL `terraform plan`**:
+        old-shape stored inputs → schema-validated (every new field explicit at its B2
+        old-behavior default) → exactly `{aws_db_instance.this: [create]}`, all new
+        capability rendered null, every old attribute equal — via a test-only
+        `*_override.tf` (fake creds + skip flags) removed in finally. **B2 pattern
+        locked for MS-8..13: the SCHEMA defaults old behavior, the MODULE defaults
+        secure** (checkov evaluates module defaults — that is exactly what lets waivers
+        die without breaking B1). **Owner-binding first proof: the rds log-export
+        waivers (CKV_AWS_129, CKV2_AWS_30) are REMOVED** — aws-rds checkov: 17 passed /
+        0 failed with six non-MS skips; tfsec clean. **Stale-waiver guard shipped**:
+        `test_scanner_waiver_guard.py` (FIX.md §8 done-rows vs every scanner config;
+        api-test now ro-mounts `../FIX.md`) + an MS-1..13-range typo check; all
+        shipped-design citations (MS-1/3/5/6) reworded to stand alone. Policy additions:
+        "DB security group scoped (no /0)" (plan-aware + input fallback), "Engine-aware
+        log exports". Params now offer engine_version/allowed_cidr/enable_log_exports
+        (required set unchanged: identifier only). Evidence:
+        `test_modseed_ms7_aws_rds.py` (8) + `test_scanner_waiver_guard.py` (2).
+        Canary (B5) green. Live = **DLV-21**.
 
 ### Scanner ledger (fix or waiver per finding — owner condition, 2026-07-12)
 
@@ -1606,13 +1648,13 @@ for the same reason — commit-hash pinning applies to git sources).
 | aws-nlb | CKV_AWS_91 | Access logging needs an S3 bucket dependency; opt-in candidate, never forced. |
 | aws-nlb | CKV_AWS_382 / AVD-AWS-0104 | Egress-only SG by design; zero ingress rules (MS-3 source invariant). |
 | aws-nlb | AVD-AWS-0053 | Internet-facing is the module's purpose; `internal = true` is variable-driven. |
-| aws-rds | CKV2_AWS_30 + CKV_AWS_129 | Engine-aware log exports arrive with MS-7 (B2 opt-in). |
-| aws-rds | CKV2_AWS_60 | Copy-tags-to-snapshot: MS-7 enhancement candidate. |
+| aws-rds | ~~CKV2_AWS_30 + CKV_AWS_129~~ | **WAIVER REMOVED by MS-7 (2026-07-12, owner-binding first proof)** — the module ships engine-aware log exports + a query-logging parameter group, secure-by-default at module level; checkov passes both checks with zero skips. |
+| aws-rds | CKV2_AWS_60 | Copy-tags-to-snapshot: day-2 candidate; enabling would alter existing instances' re-plans (B1). *(Re-justified without the MS tag when MS-7 shipped.)* |
 | aws-rds | CKV_AWS_118 + CKV_AWS_353 / AVD-AWS-0133 | Enhanced monitoring / performance insights: sandbox cost posture. |
 | aws-rds | CKV_AWS_157 | Multi-AZ: sandbox cost posture; opt-in candidate. |
 | aws-rds | CKV_AWS_161 / AVD-AWS-0176 | IAM auth: opt-in candidate; master credentials are AWS-managed (`manage_master_user_password`). |
 | aws-rds | CKV_AWS_293 / AVD-AWS-0177 | TF-level deletion protection would fail governed destroy runs mid-apply; destroys are approval-gated by the platform instead (same reasoning as gcp-kms CKV_GCP_82 and gke's explicit `deletion_protection = false`). |
-| aws-rds | AVD-AWS-0077 | Backup retention: MS-7/day-2 candidate; sandbox cost posture. |
+| aws-rds | AVD-AWS-0077 | Backup retention: day-2 candidate; changing it would alter existing instances' re-plans (B1); sandbox cost posture. *(Re-justified without the MS tag when MS-7 shipped.)* |
 | aws-s3 | CKV2_AWS_61 | Lifecycle rules: demo bucket posture; day-2 candidate. |
 | aws-s3 | CKV2_AWS_62 | Event notifications: no consumer exists in the platform's flows. |
 | aws-s3 | CKV_AWS_144 | Cross-region replication: not in any binding scope (explicitly out of MODSEED). |

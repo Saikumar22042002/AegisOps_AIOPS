@@ -2,6 +2,6 @@
 # PROGRESS.md scanner ledger. New checks fail the scan until triaged.
 skip-check:
   - CKV2_AWS_20  # HTTP->HTTPS redirect is an ALB-listener concept; this is a network (TCP) LB
-  - CKV_AWS_150  # deletion protection is variable-driven; Production env-default ON + deletion-protection-as-approved policy check (MS-3)
+  - CKV_AWS_150  # deletion protection is variable-driven; Production env-default ON + deletion-protection-as-approved policy check (module design)
   - CKV_AWS_91  # access logging needs an S3 bucket dependency; opt-in candidate, never forced
-  - CKV_AWS_382  # egress-only SG by design; zero ingress rules (MS-3 source invariant)
+  - CKV_AWS_382  # egress-only SG by design; zero ingress rules (source invariant, test-pinned)

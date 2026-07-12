@@ -126,6 +126,20 @@ def _rds_policy(i: dict, resources=None) -> list[dict]:
         checks.append(_todo("Not publicly accessible"))
     checks.append(_todo("RDS-managed master password"))
     checks.append(_ck("Approved engine", i.get("engine", "postgres") in {"postgres", "mysql", "mariadb"}, i.get("engine", "")))
+    # MS-7: the dedicated DB SG must never be world-open (the module rejects /0 outright;
+    # this check re-proves it on the REAL plan when the SG path is used).
+    sg = _after(resources, "aws_security_group")
+    if sg is not None:
+        cidrs = [c for rule in (sg.get("ingress") or []) for c in (rule.get("cidr_blocks") or [])]
+        world_open = any(str(c).endswith("/0") for c in cidrs)
+        checks.append(_ck("DB security group scoped (no /0)", not world_open,
+                          ", ".join(map(str, cidrs)) or "no ingress"))
+    elif i.get("allowed_cidr"):
+        checks.append(_ck("DB security group scoped (no /0)",
+                          not str(i["allowed_cidr"]).endswith("/0"), str(i["allowed_cidr"])))
+    if i.get("enable_log_exports"):
+        checks.append(_ck("Engine-aware log exports", True,
+                          f"CloudWatch exports + query-logging parameter group ({i.get('engine', 'postgres')})"))
     return checks
 
 

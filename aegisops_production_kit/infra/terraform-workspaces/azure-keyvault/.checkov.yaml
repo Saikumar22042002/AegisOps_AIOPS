@@ -1,8 +1,8 @@
 # AegisOps scanner waivers - every skip is documented here AND in the
 # PROGRESS.md scanner ledger. New checks fail the scan until triaged.
 skip-check:
-  - CKV2_AZURE_32  # private endpoint: sandbox posture; network reachability stated honestly on the card (MS-5)
-  - CKV_AZURE_109  # default_action is variable-driven; Allow is STATED on the approval card (MS-5 design)
+  - CKV2_AZURE_32  # private endpoint: sandbox posture; network reachability stated honestly on the card (module design)
+  - CKV_AZURE_109  # default_action is variable-driven; Allow is STATED on the approval card (module design)
   - CKV_AZURE_112  # standard SKU (software-protected keys) is the module contract; premium/HSM is a cost decision
-  - CKV_AZURE_189  # public network access stated on the card; AzureServices bypass + ACLs are the guard (MS-5)
+  - CKV_AZURE_189  # public network access stated on the card; AzureServices bypass + ACLs are the guard (module design)
   - CKV_AZURE_40  # expiration on optional RSA keys: opt-in candidate; rotation semantics owner-decided

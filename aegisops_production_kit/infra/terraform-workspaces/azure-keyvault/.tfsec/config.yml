@@ -1,4 +1,4 @@
 # AegisOps scanner waivers - documented in the PROGRESS.md scanner ledger.
 # tfsec v1.28 config excludes match legacy IDs; the AVD id is in each comment.
 exclude:
-  - azure-keyvault-specify-network-acl  # AVD-AZU-0013 | default_action variable-driven; Allow is STATED on the approval card (MS-5 design)
+  - azure-keyvault-specify-network-acl  # AVD-AZU-0013 | default_action variable-driven; Allow is STATED on the approval card (module design)
