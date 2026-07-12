@@ -895,6 +895,12 @@ two known realm issuer URLs (internal + browser-facing), nothing else.
         force_destroy are real pass/fail; a plan with a control DISABLED renders a genuine FAILED
         check. Controls not extractable from the plan stay honest "not evaluated" (P8 label).
         Evidence: `test_policy_real.py` (7) + `test_templates.py` (7) green.
+  - [x] **DEF defaults honesty** (2026-07-12): `_defaulted_dependencies` computes the
+        silently-defaulted dependency placements (AWS EC2 → account default VPC/subnet, GCP VM →
+        project default network, Azure VM → auto-created `<name>-rg`) and adds them to the plan
+        JSON + interrupt payload; the approval card renders an amber "Defaults applied" section so
+        there is no invisible placement. The resolved subnet id is named when the plan reveals it.
+        Evidence: `test_defaults_honesty.py` (6); vitest 28; tsc clean.
   - [x] **S0 multi-tenancy** (2026-07-11): principal→(org_id,user_id) via Keycloak org claim
         (group-membership mapper; realm defines northwind-financial + acme-industrial groups)
         with the `users` mirror (by keycloak_sub, username/email fallback for seeded rows)

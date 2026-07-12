@@ -200,6 +200,18 @@ function Terraform({ data }: { data: any }) {
           {failed > 0 ? <Icon kind="x" color="#f87171" /> : <Icon kind="check" color="#34d399" />}
           {passed}/{evaluated.length} evaluated{pending > 0 ? ` · ${pending} pending` : ""}</span></Card>
       </div>
+      {/* DEF: silently-defaulted dependency placements, stated explicitly — no invisible placement. */}
+      {(data.defaults ?? []).length > 0 && (
+        <div style={{ border: "1px solid rgba(251,191,36,.25)", borderRadius: 12, background: "rgba(251,191,36,.04)", padding: "11px 14px", marginBottom: 16 }}>
+          <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em", color: "var(--amber)", fontWeight: 600, marginBottom: 7 }}>Defaults applied</div>
+          {(data.defaults ?? []).map((d: any, i: number) => (
+            <div key={i} style={{ fontSize: 12.5, color: "var(--text-2)", marginBottom: 3 }}>
+              <span style={{ fontWeight: 500 }}>{d.name}:</span> <span style={{ fontFamily: "'IBM Plex Mono',monospace" }}>{d.value}</span>
+              {d.note ? <span style={{ color: "var(--text-4)" }}> — {d.note}</span> : null}
+            </div>
+          ))}
+        </div>
+      )}
       <div style={{ border: "1px solid var(--border-2)", borderRadius: 12, background: "var(--code-bg)", marginBottom: 16, padding: "14px 15px", fontFamily: "'IBM Plex Mono',monospace", fontSize: 11.5, lineHeight: 1.7, overflowX: "auto" }}>
         {(data.diff ?? []).length === 0 ? <span style={{ color: "var(--text-4)" }}>No resource changes.</span> :
           (data.diff ?? []).map((d: any, i: number) => (

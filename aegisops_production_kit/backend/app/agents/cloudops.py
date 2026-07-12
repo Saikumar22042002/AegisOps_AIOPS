@@ -95,6 +95,28 @@ _RESOURCE_CLOUD = {"s3": "aws", "rds": "aws", "vpc": "aws", "eks": "aws",
                    "resource_group": "azure", "storage": "azure", "gcs": "gcp"}
 
 
+def _defaulted_dependencies(cloud: str, resource: str, validated: dict, resources: list | None) -> list[dict]:
+    """DEF: dependency placements that were NOT user-specified and got a default — stated
+    explicitly for the approval card so there is no invisible placement decision. The value is the
+    resolved id from the plan where available, else an honest description of the default."""
+    out: list[dict] = []
+    r = (resource or "").lower()
+    if cloud == "aws" and r in ("ec2", "vm", "instance", "server"):
+        if not validated.get("vpc_id"):
+            inst = next((x.get("after", {}) for x in (resources or []) if x.get("type") == "aws_instance"), {})
+            sub = inst.get("subnet_id")
+            out.append({"name": "VPC / subnet", "value": sub or "account default VPC + subnet",
+                        "note": "no VPC specified — placing in the account's default VPC"})
+    elif cloud == "gcp" and r in ("vm", "instance", "gce", "server"):
+        out.append({"name": "Network", "value": "default",
+                    "note": "no network specified — placing in the project's 'default' VPC network"})
+    elif cloud == "azure" and r in ("vm", "instance", "server"):
+        if not validated.get("resource_group"):
+            out.append({"name": "Resource group", "value": f"{validated.get('name', '')}-rg (auto-created)",
+                        "note": "no resource group specified — a dedicated one is auto-created"})
+    return out
+
+
 def resolve_cloud(state: AgentState) -> tuple[str | None, str]:
     """Resolve the target cloud with explicit priority (2.1):
 
@@ -384,8 +406,11 @@ async def cloudops_plan(state: AgentState, config) -> dict:
     policy_checks = template.policy_fn(validated, runner.planned_resources())  # U1: over the real plan
     await timing.end_step(run_id, "policy_evaluation", status="done",
                           result={"passed": sum(1 for p in policy_checks if p["passed"]), "total": len(policy_checks)})
+    # DEF: surface any silently-defaulted dependency placement on the approval card.
+    defaults = _defaulted_dependencies(cloud, template.resource, validated, runner.planned_resources())
     plan_json = {"summary": plan["summary"], "diff": plan["diff"], "workspace": template.workspace,
-                 "policy_checks": policy_checks, "mode": mode, "state_workspace": tf_state_ws}
+                 "policy_checks": policy_checks, "mode": mode, "state_workspace": tf_state_ws,
+                 "defaults": defaults}
 
     # Confidentiality over the plan + inputs.
     c = classify(json.dumps({"inputs": validated, "plan": plan["summary"]}))
@@ -414,7 +439,7 @@ async def cloudops_plan(state: AgentState, config) -> dict:
     interrupt_payload = {
         "kind": "approval", "runId": state["run_id"], "workflow": template.key,
         "plan": plan_json, "diff": plan["diff"], "policyChecks": policy_checks,
-        "mode": mode, "cloud": cloud, "resource": template.resource,
+        "mode": mode, "cloud": cloud, "resource": template.resource, "defaults": defaults,
     }
     await emitter.step(9, "Awaiting approval")
     await emitter.interrupt(interrupt_payload)
