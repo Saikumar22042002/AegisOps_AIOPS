@@ -106,19 +106,30 @@ class KeycloakOIDC:
         raise AuthError("No matching JWKS key for token")
 
     async def validate(self, access_token: str) -> dict[str, Any]:
-        """Verify signature, issuer, and expiry; return claims."""
+        """Verify signature, issuer, and expiry; return claims.
+
+        Keycloak derives the token's `iss` from the URL the AUTH REQUEST came through, so a
+        password-grant token (API → http://keycloak:8080) and an SSO token (browser →
+        http://localhost:8080) carry different issuer strings for the SAME realm and are both
+        signed by the same JWKS keys. Accept exactly those two known realm URLs — nothing else.
+        """
+        allowed_issuers = {
+            self.s.keycloak_realm_url,
+            f"{self.s.keycloak_browser_url}/realms/{self.s.keycloak_realm}",
+        }
         try:
             key = await self._signing_key(access_token)
             claims = jwt.decode(
                 access_token,
                 key,
                 algorithms=["RS256"],
-                issuer=self.s.keycloak_realm_url,
                 options={"verify_aud": False, "require": ["exp", "iat", "iss"]},
             )
-            return claims
         except jwt.PyJWTError as exc:
             raise AuthError(f"Invalid token: {exc}") from exc
+        if claims.get("iss") not in allowed_issuers:
+            raise AuthError(f"Invalid token: issuer {claims.get('iss')!r} is not this realm")
+        return claims
 
     # ── token acquisition ──
     async def _token_request(self, data: dict[str, str]) -> TokenSet:
@@ -160,7 +171,16 @@ class KeycloakOIDC:
 
     async def build_auth_url(self, redirect_uri: str, state: str, code_challenge: str) -> str:
         disc = await self.discovery()
-        from urllib.parse import urlencode
+        from urllib.parse import urlencode, urlsplit, urlunsplit
+
+        # Discovery is fetched over the API's network (in docker: http://keycloak:8080), so
+        # its authorization_endpoint carries a host the USER'S BROWSER cannot resolve. The
+        # browser is the one following this URL — rewrite the origin to the browser-facing
+        # Keycloak host. The code exchange + JWKS keep using the internal host.
+        auth_ep = disc["authorization_endpoint"]
+        browser = urlsplit(self.s.keycloak_browser_url)
+        ep = urlsplit(auth_ep)
+        auth_ep = urlunsplit((browser.scheme, browser.netloc, ep.path, ep.query, ep.fragment))
 
         params = {
             "client_id": self.s.keycloak_client_id,
@@ -171,7 +191,7 @@ class KeycloakOIDC:
             "code_challenge": code_challenge,
             "code_challenge_method": "S256",
         }
-        return f"{disc['authorization_endpoint']}?{urlencode(params)}"
+        return f"{auth_ep}?{urlencode(params)}"
 
     async def logout(self, refresh_token: str) -> None:
         disc = await self.discovery()

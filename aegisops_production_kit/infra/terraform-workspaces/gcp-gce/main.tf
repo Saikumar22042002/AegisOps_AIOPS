@@ -36,6 +36,11 @@ variable "ingress_ports" {
   type    = list(number)
   default = []
 }
+# Source CIDR allowed to reach SSH (22) — e.g. requester's IP as x.x.x.x/32. Empty = closed (N-02).
+variable "allowed_cidr" {
+  type    = string
+  default = ""
+}
 
 provider "google" {
   project = var.project
@@ -76,6 +81,10 @@ resource "google_compute_instance" "this" {
     ssh-keys = "${var.ssh_user}:${tls_private_key.ssh.public_key_openssh}"
   }
 
+  # Network tags MUST match the firewall rules' target_tags — without this the firewalls
+  # never attached to the instance (pre-existing defect found in the Phase-8 review).
+  tags = [var.name]
+
   labels = { managed_by = "aegisops" }
 }
 
@@ -91,6 +100,19 @@ resource "google_compute_firewall" "ingress" {
   target_tags   = ["${var.name}"]
 }
 
+# Admin SSH access — ONLY from the user's declared CIDR; no rule when closed (N-02).
+resource "google_compute_firewall" "admin" {
+  count   = var.allowed_cidr != "" ? 1 : 0
+  name    = "${var.name}-aegisops-admin"
+  network = "default"
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+  source_ranges = [var.allowed_cidr]
+  target_tags   = ["${var.name}"]
+}
+
 output "instance_id" { value = google_compute_instance.this.instance_id }
 output "self_link" { value = google_compute_instance.this.self_link }
 output "public_ip" { value = google_compute_instance.this.network_interface[0].access_config[0].nat_ip }
@@ -98,6 +120,8 @@ output "private_ip" { value = google_compute_instance.this.network_interface[0].
 output "login_user" { value = var.ssh_user }
 output "zone" { value = var.zone }
 output "ingress_ports" { value = var.ingress_ports }
+output "allowed_cidr" { value = var.allowed_cidr }
+output "admin_port" { value = var.allowed_cidr != "" ? 22 : null }
 output "private_key_pem" {
   value     = tls_private_key.ssh.private_key_pem
   sensitive = true

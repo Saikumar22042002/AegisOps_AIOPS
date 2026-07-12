@@ -61,9 +61,12 @@ def test_azure_storage_requires_resource_group():
 
 
 def test_azure_vm_os_choices():
+    # Phase 8 / N-05: windows-2022 is now genuinely supported by the module (the platform
+    # allows it — screenshot 7); only OSes Azure itself wouldn't create are rejected.
     assert wf.AzureVMInputs(name="vm", os="ubuntu-24.04").os == "ubuntu-24.04"
+    assert wf.AzureVMInputs(name="vm", os="windows-2022").os == "windows-2022"
     with pytest.raises(ValidationError):
-        wf.AzureVMInputs(name="vm", os="windows-2022")  # not offered on the Azure VM module
+        wf.AzureVMInputs(name="vm", os="templeos")
 
 
 def test_azure_postgres_storage_floor():
@@ -150,6 +153,34 @@ def test_azure_size_rejects_foreign_shapes(bad):
 @pytest.mark.parametrize("good", ["Standard_B1s", "Standard_B2s", "Standard_D2s_v5", "Basic_A0"])
 def test_azure_size_accepts_real_shapes(good):
     assert wf.AzureVMInputs(name="vm", size=good).size == good
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# Phase 8 / N-05 — provider accuracy: the module must accept what the platform actually
+# allows (screenshot 6 rejected Windows; screenshot 7 shows the same sandbox creating a
+# Windows D-series VM with a default resource group in the portal).
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+
+@pytest.mark.parametrize("os_", ["ubuntu-22.04", "ubuntu-24.04", "debian-12", "windows-2022"])
+def test_azure_vm_accepts_provider_supported_os(os_):
+    assert wf.AzureVMInputs(name="vm", os=os_).os == os_
+
+
+@pytest.mark.parametrize("size", ["Standard_B1s", "Standard_B2s", "Standard_D2s_v5",
+                                  "Standard_D4s_v5", "Standard_E2s_v5", "Standard_DS1_v2"])
+def test_azure_vm_accepts_bde_series(size):
+    assert wf.AzureVMInputs(name="vm", size=size).size == size
+
+
+def test_azure_vm_still_rejects_genuinely_invalid_os():
+    with pytest.raises(ValidationError):
+        wf.AzureVMInputs(name="vm", os="freebsd-14")
+
+
+def test_azure_vm_default_resource_group_semantics():
+    # Empty resource_group ⇒ module creates/uses a default one (like the portal) — the schema
+    # must accept empty; the module handles create-or-use.
+    assert wf.AzureVMInputs(name="vm").resource_group == ""
 
 
 def test_rds_class_and_cloudsql_tier_shapes():

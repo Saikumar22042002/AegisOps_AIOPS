@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     gemini_embedding_model: str = "gemini-embedding-001"
     gemini_embed_dim: int = 768  # output dimensionality requested; must match models.EMBED_DIM
     stream_word_delay_ms: int = 24
+    # USD per 1M tokens, used to report cost on Langfuse generations (self-hosted Langfuse
+    # has no built-in price table for Gemini models).
+    gemini_cost_per_1m_input: float = 0.30
+    gemini_cost_per_1m_output: float = 2.50
 
     # ── PostgreSQL + pgvector ──
     postgres_host: str = "localhost"
@@ -67,6 +71,11 @@ class Settings(BaseSettings):
 
     # ── Keycloak ──
     keycloak_url: str = "http://localhost:8080"
+    # Browser-facing Keycloak origin for the SSO redirect. Inside docker the API reaches
+    # Keycloak as http://keycloak:8080, but the USER'S BROWSER cannot resolve that service
+    # name — the authorization redirect must use a host the browser can reach. Empty ⇒ same
+    # as keycloak_url (correct for host-run dev where both are localhost:8080).
+    keycloak_public_url: str = ""
     keycloak_realm: str = "aegisops"
     keycloak_client_id: str = "aegisops-backend"
     keycloak_client_secret: str = ""
@@ -159,6 +168,11 @@ class Settings(BaseSettings):
     @property
     def keycloak_realm_url(self) -> str:
         return f"{self.keycloak_url.rstrip('/')}/realms/{self.keycloak_realm}"
+
+    @property
+    def keycloak_browser_url(self) -> str:
+        """Keycloak origin the user's browser is sent to (falls back to keycloak_url)."""
+        return (self.keycloak_public_url or self.keycloak_url).rstrip("/")
 
     @property
     def keycloak_jwks_url(self) -> str:

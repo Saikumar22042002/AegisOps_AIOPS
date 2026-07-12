@@ -22,8 +22,8 @@ from ..settings import get_settings
 from ..tools import aws as aws_tool
 from ..tools import azure as azure_tool
 from ..tools import gcp as gcp_tool
-from ..tools.terraform import TerraformError, TerraformRunner
-from . import intent_guard, inventory, llm, params, provider_errors, templates, timing
+from ..tools.terraform import TerraformError, TerraformRunner, state_slug
+from . import intent_guard, inventory, llm, params, plan_guard, provider_errors, templates, timing
 from .runtime import emitter_of
 from .state import AgentState
 
@@ -66,7 +66,8 @@ async def _extract_inputs(settings, template, message: str) -> dict:
             "Respond with ONLY a JSON object; omit any field not present in the message. "
             "Normalize OS synonyms: 'ubuntu'->'ubuntu-22.04', 'amazon linux'/'al2023'->'amazon-linux-2023', "
             "'windows'->'windows-2022'. If the user asks to create/generate a key pair, use \"create\". "
-            "Lists as JSON arrays."
+            "For allowed_cidr: an IP the user wants access from (bare IP is fine, e.g. 203.0.113.7); "
+            "'none'/'closed'/'keep it closed'/'skip' -> \"none\". Lists as JSON arrays."
         )
         try:
             extracted = await llm.classify_json(settings, system, message)
@@ -115,6 +116,16 @@ def resolve_cloud(state: AgentState) -> tuple[str | None, str]:
 
 async def _availability(settings, cloud: str, region: str, emitter) -> dict:
     """Real read-only availability/connectivity pre-check via the matching cloud SDK."""
+    from ..integrations.langfuse_client import get_tracer
+
+    async with get_tracer(settings).tool(f"{cloud}.availability",
+                                         input={"cloud": cloud, "region": region}) as t:
+        result = await _availability_inner(settings, cloud, region)
+        t.output = result
+    return result
+
+
+async def _availability_inner(settings, cloud: str, region: str) -> dict:
     try:
         if cloud == "aws":
             r = aws_tool.get_aws(settings)
@@ -157,6 +168,12 @@ async def cloudops_plan(state: AgentState, config) -> dict:
         return await _read_resource(state, config, target)
     if action == "modify":
         return await _modify_resource(state, config, target)
+    # Destroy is a DAY-2 operation on an inventoried resource — it resolves its target from
+    # the inventory, confirms it via the approval gate, and tears down that resource's OWN
+    # state workspace. It never enters the create-style parameter collection (Phase 8 / N-08:
+    # the old path collected create-params and destroyed whatever shared state contained).
+    if action == "destroy":
+        return await _destroy_resource(state, config, target)
 
     # ── Read path: discovery only, no Terraform. Runs BEFORE cloud resolution because a
     # read-only question must never hard-fail on cloud ambiguity — it can answer across every
@@ -191,38 +208,19 @@ async def cloudops_plan(state: AgentState, config) -> dict:
 
     await emitter.step(3, f"Selected workflow · {template.key} {template.version}")
 
-    # ── Interactive parameter collection (3.1–3.3) ──
-    # Ask ONLY for decision-critical params with no safe default; default the rest (region/VPC/subnet).
-    # Collection spans chat turns via a Redis pending record keyed by session.
+    # ── Interactive parameter collection (3.1–3.3) — CREATE only: read/modify/destroy have
+    # all returned above, so this flow can only ever produce a create plan (Phase 8 / N-08).
     session_id = state.get("session_id")
     pending_rec: dict = {}
     if state.get("collecting") and session_id:
         pending_rec = await params.load_pending(session_id) or {}
 
-    # Belt-and-suspenders destructive gate (Phase 7 / BUG-01): a destroy plan requires the user's
-    # own explicit destructive verb — in this message, or in the turn that legitimately armed this
-    # pending collection (`destructive_ok`, stamped below). Whatever the classifier said, a
-    # read-shaped message can never reach `terraform plan -destroy`.
-    destroy_confirmed = (intent_guard.explicitly_destructive(state.get("message", ""))
-                         or bool(pending_rec.get("destructive_ok")))
-    if action == "destroy" and not destroy_confirmed:
-        await emitter.step(3, "Destructive request not explicitly confirmed — stopping")
-        log.warning("cloudops.destroy_blocked", run_id=run_id, intent=state.get("intent"))
-        return {"needs_clarification": True, "needs_change": False, "cloud": cloud,
-                "clarification": "This came through as a **destroy** operation, but nothing in your "
-                                 "request explicitly asks to tear anything down, so I stopped — nothing "
-                                 "was changed. If you do want it destroyed, say so explicitly (e.g. "
-                                 "“destroy the VPC named prod-network”)."}
-
     await timing.start_step(run_id, "cloudops_agent")
 
     def _pending_record(collected: dict) -> dict:
-        return {"template": template.key, "cloud": cloud, "resource": resource, "action": action,
+        return {"template": template.key, "cloud": cloud, "resource": resource, "action": "create",
                 "intent": state.get("intent"), "collected": collected,
-                "snow_id": state.get("snow_id"), "context_id": context_id,
-                # Only a turn whose own words were explicitly destructive can arm a destroy
-                # continuation — a stale/legacy record without this flag can never resume one.
-                "destructive_ok": action == "destroy" and destroy_confirmed}
+                "snow_id": state.get("snow_id"), "context_id": context_id}
 
     prior: dict = pending_rec.get("collected", {})
     extracted = await _extract_inputs(settings, template, state["message"])
@@ -305,17 +303,47 @@ async def cloudops_plan(state: AgentState, config) -> dict:
     workspace = template.workspace
     tf_vars = validated
 
-    mode = "destroy" if action == "destroy" else "apply"
-    await emitter.step(4, "Ran terraform plan")
+    # Per-resource state isolation (Phase 8 / N-08): every create plans/applies inside its
+    # OWN Terraform workspace, so it can never reconcile — and destroy/replace — a resource
+    # created earlier in the same module ("create deleted my previous instance").
+    res_name = inventory.name_from_inputs(validated, template.resource)
+    tf_state_ws = state_slug(res_name)
+
+    # Same-name loophole (Senior Reviewer): an identical name would map to the SAME state
+    # workspace and re-share state. A create never reuses an active resource's name.
+    dup = [m for m in await inventory.list_active(state["org_id"])
+           if m["name"] == res_name and m["workspace"] == template.workspace]
+    if dup:
+        collected.pop(next((p.name for p in params.specs_for(template.key)
+                            if p.name in ("name", "bucket_name", "identifier", "cluster_name",
+                                          "account_name")), "name"), None)
+        if session_id:
+            await params.save_pending(session_id, _pending_record(collected))
+        msg = (f"You already have an active resource named **{res_name}** (created "
+               f"{(dup[0].get('created_at') or '')[:16]}). A create never touches an existing "
+               "resource — pick a different name, or say "
+               f"“destroy {res_name}” first if you want to replace it.")
+        await emitter.step(4, f"Name “{res_name}” already active — asking for another")
+        await emitter.params(params.request_payload(template.key, collected))
+        await emitter.token(msg)
+        cc = classify(msg)
+        await emitter.confidentiality(cc.level, cc.score)
+        await timing.end_step(run_id, "cloudops_agent", status="done")
+        return {"needs_change": False, "approval_status": "not_required", "collecting": True,
+                "cloud": cloud, "resource": resource, "answer": msg, "parsed_inputs": collected,
+                "confidentiality": {"level": cc.level, "score": cc.score}}
+
+    mode = "apply"
+    await emitter.step(4, f"Ran terraform plan · state {tf_state_ws}")
     await timing.start_step(run_id, "planner", tool="terraform")
-    runner = TerraformRunner(workspace, settings)
+    runner = TerraformRunner(workspace, settings, state_workspace=tf_state_ws)
 
     async def on_line(stream: str, line: str) -> None:
         await emitter.console(stream, line)
 
     try:
         await runner.init(on_line)
-        await runner.plan(tf_vars, destroy=(action == "destroy"), on_line=on_line)
+        await runner.plan(tf_vars, on_line=on_line)
         plan = await runner.show_plan()
     except TerraformError as e:
         await timing.end_step(run_id, "planner", status="failed", error=str(e))
@@ -335,12 +363,29 @@ async def cloudops_plan(state: AgentState, config) -> dict:
                             "failure": failure.__dict__ if failure else None}}
     await timing.end_step(run_id, "planner", status="done", result=plan["summary"])
 
+    # Action-vs-operation HARD GUARD (Phase 8 / N-08): the plan about to reach the approval
+    # gate must be a pure create. Any destroy/replace in a create plan is blocked here —
+    # whatever the classifier or Terraform state did.
+    violation = plan_guard.check_plan_actions("create", plan["diff"])
+    if violation:
+        log.error("cloudops.plan_guard_blocked", run_id=run_id, action="create",
+                  summary=plan["summary"])
+        await emitter.step(9, "Safety guard · create plan contained destroys — blocked")
+        await emitter.error(violation, code="plan_guard", retriable=False)
+        await emitter.token(violation)
+        cc = classify(violation)
+        await emitter.confidentiality(cc.level, cc.score)
+        await cg.add_step(order=2, name="plan_guard", agent="cloudops", tool="plan_guard", status="failed")
+        return {"needs_change": False, "approval_status": "not_required", "answer": violation,
+                "confidentiality": {"level": cc.level, "score": cc.score},
+                "outcome": {"status": "blocked_by_guard", "error": violation}}
+
     await timing.start_step(run_id, "policy_evaluation")
     policy_checks = template.policy_fn(validated)
     await timing.end_step(run_id, "policy_evaluation", status="done",
                           result={"passed": sum(1 for p in policy_checks if p["passed"]), "total": len(policy_checks)})
     plan_json = {"summary": plan["summary"], "diff": plan["diff"], "workspace": template.workspace,
-                 "policy_checks": policy_checks, "mode": mode}
+                 "policy_checks": policy_checks, "mode": mode, "state_workspace": tf_state_ws}
 
     # Confidentiality over the plan + inputs.
     c = classify(json.dumps({"inputs": validated, "plan": plan["summary"]}))
@@ -376,7 +421,7 @@ async def cloudops_plan(state: AgentState, config) -> dict:
 
     return {
         "workflow": template.key, "workflow_version": template.version,
-        "cloud": cloud, "resource": resource,
+        "cloud": cloud, "resource": resource, "state_workspace": tf_state_ws,
         "parsed_inputs": validated, "plan_json": plan_json, "diff": plan["diff"],
         "policy_checks": policy_checks, "dependencies": avail["checks"],
         "execution_mode": mode, "needs_change": True, "approval_status": "pending",
@@ -626,6 +671,136 @@ async def _read_resource(state: AgentState, config, target: str) -> dict:
             "confidentiality": {"level": cc.level, "score": cc.score}}
 
 
+async def _destroy_resource(state: AgentState, config, target: str | None) -> dict:
+    """Day-2 DESTROY (Phase 8 / N-08): resolve the target from the INVENTORY, confirm it via
+    the approval gate, and tear down that resource's OWN Terraform state workspace.
+
+    Never enters parameter collection, never plans in a shared state, and the plan is hard-
+    guarded to contain only delete actions. Resources AegisOps didn't create are refused
+    honestly (we won't guess at infrastructure we don't own)."""
+    emitter = emitter_of(config)
+    settings = get_settings()
+    run_id = state.get("run_id")
+    org_id = state["org_id"]
+    message = state.get("message", "")
+
+    async def _say(msg: str) -> dict:
+        await emitter.token(msg)
+        cc = classify(msg)
+        await emitter.confidentiality(cc.level, cc.score)
+        return {"needs_change": False, "approval_status": "not_required", "answer": msg,
+                "confidentiality": {"level": cc.level, "score": cc.score}}
+
+    # Destroy always requires the user's own destructive wording — belt-and-suspenders under
+    # the router guard (a mirror-redirected destroy carries the verb by construction).
+    if not intent_guard.explicitly_destructive(message):
+        return await _say("This came through as a **destroy**, but your message doesn't explicitly "
+                          "ask to tear anything down, so I stopped — nothing was changed. If you do "
+                          "want it destroyed, say so explicitly (e.g. “destroy the VM sai-test”).")
+
+    ref = (target or "").strip()
+    await emitter.step(2, f"Resolving “{ref or state.get('resource') or 'resource'}” for destruction")
+    matches, kind = await inventory.resolve(org_id, ref or (state.get("resource") or ""))
+    if kind == "all":
+        names = ", ".join(m["name"] for m in matches[:8]) or "none recorded"
+        return await _say("I don't bulk-destroy in one shot — that's how accidents happen. "
+                          f"Tell me exactly which resource to tear down. Active: {names}.")
+    if not matches:
+        return await _say(f"I couldn't find “{ref or 'that resource'}” among the resources I've "
+                          "provisioned, so there's nothing I can safely destroy. I only tear down "
+                          "infrastructure I created (it's tracked in my inventory with its own "
+                          "Terraform state).")
+    if len(matches) > 1:
+        return await _say("More than one resource matches: "
+                          f"{', '.join(m['name'] for m in matches)}. Which one should I destroy?")
+    res = matches[0]
+    if kind == "recent":
+        # Fuzzy reference ("the vm I created") — only proceed when it's genuinely unambiguous.
+        same_type = [m for m in await inventory.list_active(org_id)
+                     if m["resource_type"] == res["resource_type"]]
+        if len(same_type) > 1:
+            return await _say(f"You have {len(same_type)} {res['resource_type']} resources: "
+                              f"{', '.join(m['name'] for m in same_type)}. "
+                              "Name the one to destroy — I won't guess on a teardown.")
+
+    template = templates.select(res["cloud"], res["resource_type"])
+    if template is None:
+        return await _say(f"I can't destroy {res['name']} — its module ({res['cloud']}/"
+                          f"{res['resource_type']}) is no longer in the approved catalog.")
+
+    await emitter.step(3, f"Planning teardown of {res['name']}"
+                          + (f" · state {res['state_workspace']}" if res.get("state_workspace") else ""))
+    await timing.start_step(run_id, "cloudops_agent")
+    await timing.end_step(run_id, "cloudops_agent", status="done")
+    await timing.start_step(run_id, "planner", tool="terraform")
+    runner = TerraformRunner(res["workspace"] or template.workspace, settings,
+                             state_workspace=res.get("state_workspace"))
+    base = dict(res.get("inputs") or {})
+    try:
+        tf_vars = template.schema(**base).model_dump()
+    except Exception:  # noqa: BLE001 - schema drift must never block a teardown
+        tf_vars = base
+
+    async def on_line(stream: str, line: str) -> None:
+        await emitter.console(stream, line)
+
+    try:
+        await runner.init(on_line)
+        await runner.plan(tf_vars, destroy=True, on_line=on_line)
+        plan = await runner.show_plan()
+    except TerraformError as e:
+        await timing.end_step(run_id, "planner", status="failed", error=str(e))
+        failure = provider_errors.classify_provider_error(str(e))
+        friendly = provider_errors.failure_message(failure, str(e), mode="destroy plan")
+        await emitter.error(f"terraform plan failed: {e}", code="terraform_error", retriable=True)
+        await emitter.token(friendly)
+        cc = classify(friendly)
+        await emitter.confidentiality(cc.level, cc.score)
+        return {"needs_change": False, "approval_status": "not_required", "answer": friendly,
+                "confidentiality": {"level": cc.level, "score": cc.score},
+                "outcome": {"status": "plan_failed", "error": str(e)[:500],
+                            "failure": failure.__dict__ if failure else None}}
+    await timing.end_step(run_id, "planner", status="done", result=plan["summary"])
+
+    # HARD GUARD: a destroy plan may contain only deletes (Phase 8 / N-08).
+    violation = plan_guard.check_plan_actions("destroy", plan["diff"])
+    if violation:
+        log.error("cloudops.plan_guard_blocked", run_id=run_id, action="destroy", summary=plan["summary"])
+        await emitter.step(9, "Safety guard · destroy plan contained creates — blocked")
+        await emitter.error(violation, code="plan_guard", retriable=False)
+        return await _say(violation)
+    if plan["summary"]["destroy"] == 0:
+        return await _say(f"Terraform found nothing to tear down for **{res['name']}** — its state "
+                          "is already empty (it may have been destroyed outside AegisOps). I've left "
+                          "everything untouched; say “is it created?” to reconcile its status.")
+
+    plan_json = {"summary": plan["summary"], "diff": plan["diff"],
+                 "workspace": res["workspace"] or template.workspace,
+                 "state_workspace": res.get("state_workspace"),
+                 "policy_checks": [], "mode": "destroy"}
+    cc = classify(f"destroy {res['name']}")
+    await emitter.confidentiality(cc.level, cc.score)
+    reasoning = [{"title": "Teardown target", "conf": "",
+                  "body": f"{res['name']} · {res['cloud']} {res['resource_type']} · "
+                          f"{res.get('provider_id') or 'no provider id'} — resolved from the inventory; "
+                          f"plan destroys {plan['summary']['destroy']} resource(s), creates none."}]
+    await emitter.analysis(summary=f"Planned the teardown of {res['name']}; awaiting approval.", cards=reasoning)
+    interrupt_payload = {"kind": "approval", "runId": state["run_id"], "workflow": template.key,
+                         "plan": plan_json, "diff": plan["diff"], "policyChecks": [],
+                         "mode": "destroy", "cloud": res["cloud"], "resource": res["resource_type"]}
+    await emitter.step(9, "Awaiting approval")
+    await emitter.interrupt(interrupt_payload)
+    return {"workflow": template.key, "workflow_version": template.version, "cloud": res["cloud"],
+            "resource": res["resource_type"], "state_workspace": res.get("state_workspace"),
+            "parsed_inputs": tf_vars, "plan_json": plan_json, "diff": plan["diff"],
+            "policy_checks": [], "execution_mode": "destroy", "needs_change": True,
+            "approval_status": "pending", "reasoning_cards": reasoning,
+            "interrupt_payload": interrupt_payload,
+            "confidentiality": {"level": cc.level, "score": cc.score},
+            "answer": f"Planned the teardown of **{res['name']}** ({plan['summary']['destroy']} resource(s) "
+                      "to destroy, nothing else touched). Review and approve to proceed."}
+
+
 async def _modify_resource(state: AgentState, config, target: str | None) -> dict:
     """Day-2 MODIFY: change an inventoried resource via its module + variables + approval gate."""
     emitter = emitter_of(config)
@@ -670,7 +845,9 @@ async def _modify_resource(state: AgentState, config, target: str | None) -> dic
     await timing.start_step(run_id, "cloudops_agent")
     await timing.end_step(run_id, "cloudops_agent", status="done")
     await timing.start_step(run_id, "planner", tool="terraform")
-    runner = TerraformRunner(res["workspace"] or template.workspace, settings)
+    # Modify runs against the resource's OWN state workspace (Phase 8 / N-08).
+    runner = TerraformRunner(res["workspace"] or template.workspace, settings,
+                             state_workspace=res.get("state_workspace"))
 
     async def on_line(stream: str, line: str) -> None:
         await emitter.console(stream, line)
@@ -692,12 +869,24 @@ async def _modify_resource(state: AgentState, config, target: str | None) -> dic
                 "outcome": {"status": "plan_failed", "error": str(e)[:500],
                             "failure": failure.__dict__ if failure else None}}
     await timing.end_step(run_id, "planner", status="done", result=plan["summary"])
+
+    # HARD GUARD: a modify must update in place — a delete/replace here would silently
+    # destroy the instance (Phase 8 / N-08).
+    violation = plan_guard.check_plan_actions("modify", plan["diff"])
+    if violation:
+        log.error("cloudops.plan_guard_blocked", run_id=run_id, action="modify", summary=plan["summary"])
+        await emitter.step(9, "Safety guard · modify plan would replace/destroy — blocked")
+        await emitter.error(violation, code="plan_guard", retriable=False)
+        return await _say(violation)
+
     await timing.start_step(run_id, "policy_evaluation")
     policy_checks = template.policy_fn(validated)
     await timing.end_step(run_id, "policy_evaluation", status="done")
 
     plan_json = {"summary": plan["summary"], "diff": plan["diff"],
-                 "workspace": res["workspace"] or template.workspace, "policy_checks": policy_checks, "mode": "apply"}
+                 "workspace": res["workspace"] or template.workspace,
+                 "state_workspace": res.get("state_workspace"),
+                 "policy_checks": policy_checks, "mode": "apply"}
     cc = classify(json.dumps({"modify": res["name"], "ports": ports}))
     await emitter.confidentiality(cc.level, cc.score)
     reasoning = [
@@ -713,7 +902,8 @@ async def _modify_resource(state: AgentState, config, target: str | None) -> dic
     await emitter.step(9, "Awaiting approval")
     await emitter.interrupt(interrupt_payload)
     return {"workflow": template.key, "workflow_version": template.version, "cloud": res["cloud"],
-            "resource": res["resource_type"], "parsed_inputs": validated, "plan_json": plan_json,
+            "resource": res["resource_type"], "state_workspace": res.get("state_workspace"),
+            "parsed_inputs": validated, "plan_json": plan_json,
             "diff": plan["diff"], "policy_checks": policy_checks, "execution_mode": "apply",
             "needs_change": True, "approval_status": "pending", "reasoning_cards": reasoning,
             "interrupt_payload": interrupt_payload, "confidentiality": {"level": cc.level, "score": cc.score},

@@ -173,4 +173,19 @@ def guard_classification(message: str, cls: dict) -> dict | None:
             ),
             "guard_note": f"destroy without an explicit destructive verb (LLM said {intent or 'destroy'})",
         }
+
+    # Mirror guard (Phase 8 / N-08): an explicitly destructive message misclassified as CREATE
+    # must never enter a provisioning flow ("destroy the VM" started provisioning in manual
+    # testing). Redirect to the destroy flow when the message is unambiguous, never to create.
+    # (Deliberately NOT applied to modify: "remove port 8002 from sai-test" is a legitimate
+    # modify that contains a destructive verb.)
+    if action == "create" and explicitly_destructive(message):
+        return {
+            "action": "destroy",
+            "intent": intent if intent.lower().startswith(("destroy_", "delete_", "terminate_"))
+            else f"destroy_{resource}",
+            "routing_reason": ((cls.get("routing_reason") or "").strip()
+                               + " [safety guard: destructive wording ⇒ destroy flow, never create]").strip(),
+            "guard_note": f"destructive message classified as create (LLM said {intent or 'create'})",
+        }
     return None

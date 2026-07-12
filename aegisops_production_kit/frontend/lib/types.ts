@@ -100,6 +100,8 @@ export interface ChatMessage {
   consoleLines?: { stream: string; line: string }[];
   error?: string | null;
   done?: boolean;
+  // Names of sensitive Terraform outputs revealable ONCE via POST /runs/{id}/credentials (N-02).
+  sensitiveOutputs?: string[];
   tab?: "conversation" | "analysis";
 }
 

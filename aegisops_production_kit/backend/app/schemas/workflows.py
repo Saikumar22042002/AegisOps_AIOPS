@@ -57,6 +57,22 @@ def _validate_gcp_machine_type(v: str) -> str:
     return v
 
 
+def _validate_cidr(v: str) -> str:
+    """Allowed-source CIDR for VM admin access (Phase 8 / N-02). Accepts a CIDR or bare IP
+    (normalized to /32); ''/'none'/'skip'/'closed' mean default-closed — an explicit choice."""
+    import ipaddress
+    v = (v or "").strip()
+    if v.lower() in ("", "none", "skip", "closed", "no"):
+        return ""
+    bare = v if "/" in v else f"{v}/32"
+    try:
+        ipaddress.ip_network(bare, strict=False)
+    except ValueError as e:
+        raise ValueError(f"'{v}' is not a valid CIDR — send your public IP (e.g. 203.0.113.7 "
+                         "or 203.0.113.7/32), or 'none' to keep remote access closed") from e
+    return bare
+
+
 def _validate_azure_size(v: str) -> str:
     v = v.strip()
     if _AWS_INSTANCE_SHAPE.fullmatch(v) or _GCP_MACHINE_SHAPE.fullmatch(v):
@@ -132,6 +148,12 @@ class AWSEC2Inputs(WorkflowInputs):
     root_volume_size: int = Field(default=0, ge=0, le=16384)
     root_volume_type: str = "gp3"
     ingress_ports: list[int] = Field(default_factory=list)  # inbound TCP ports on the managed SG (day-2)
+    allowed_cidr: str = ""  # admin access (22/3389) source CIDR; "" = closed (N-02)
+
+    @field_validator("allowed_cidr")
+    @classmethod
+    def _valid_cidr(cls, v: str) -> str:
+        return _validate_cidr(v)
 
     @field_validator("ingress_ports", mode="before")
     @classmethod
@@ -194,14 +216,18 @@ class GCPGCSInputs(WorkflowInputs):
 
 
 # ── Azure (Phase 5) ──
+AZURE_OS_CHOICES = ("ubuntu-22.04", "ubuntu-24.04", "debian-12", "windows-2022")
+
+
 class AzureVMInputs(WorkflowInputs):
     name: str
     location: str = "eastus"
     size: str = "Standard_B1s"
-    os: str = "ubuntu-22.04"           # ubuntu-22.04 | ubuntu-24.04
+    os: str = "ubuntu-22.04"           # ubuntu-22.04 | ubuntu-24.04 | debian-12 | windows-2022
     admin_username: str = "azureuser"
     resource_group: str = ""
     ingress_ports: list[int] = Field(default_factory=list)
+    allowed_cidr: str = ""             # admin access (22/3389) source CIDR; "" = closed (N-02)
 
     @field_validator("size")
     @classmethod
@@ -211,9 +237,16 @@ class AzureVMInputs(WorkflowInputs):
     @field_validator("os")
     @classmethod
     def _valid_os(cls, v: str) -> str:
-        if v not in ("ubuntu-22.04", "ubuntu-24.04"):
-            raise ValueError("os must be ubuntu-22.04 or ubuntu-24.04")
+        # Provider-accurate (Phase 8 / N-05): the platform genuinely offers Windows Server
+        # and Debian alongside Ubuntu — reject only what Azure itself wouldn't create.
+        if v not in AZURE_OS_CHOICES:
+            raise ValueError(f"os must be one of {list(AZURE_OS_CHOICES)}")
         return v
+
+    @field_validator("allowed_cidr")
+    @classmethod
+    def _valid_cidr(cls, v: str) -> str:
+        return _validate_cidr(v)
 
     @field_validator("ingress_ports", mode="before")
     @classmethod
@@ -257,11 +290,17 @@ class GCPComputeInputs(WorkflowInputs):
     os: str = "debian-12"              # debian-12 | ubuntu-22.04 | ubuntu-24.04
     ssh_user: str = "aegis"
     ingress_ports: list[int] = Field(default_factory=list)
+    allowed_cidr: str = ""             # SSH (22) source CIDR; "" = closed (N-02)
 
     @field_validator("machine_type")
     @classmethod
     def _valid_machine_type(cls, v: str) -> str:
         return _validate_gcp_machine_type(v)
+
+    @field_validator("allowed_cidr")
+    @classmethod
+    def _valid_cidr(cls, v: str) -> str:
+        return _validate_cidr(v)
 
     @field_validator("ingress_ports", mode="before")
     @classmethod

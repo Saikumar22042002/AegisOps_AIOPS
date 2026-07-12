@@ -15,6 +15,7 @@ import structlog
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from ..settings import Settings
+from .langfuse_client import get_tracer
 
 log = structlog.get_logger(__name__)
 
@@ -25,10 +26,16 @@ class ServiceNowError(Exception):
 
 class ServiceNowClient:
     def __init__(self, settings: Settings) -> None:
+        self.settings = settings
         self.base = settings.servicenow_instance.rstrip("/")
         self.user = settings.servicenow_user
         self.password = settings.servicenow_password
         self.enabled = bool(self.base and self.user and self.password)
+
+    def _span(self, op: str, **extra: Any):
+        """Langfuse tool span per ServiceNow call — payloads redacted, HTTP failures
+        recorded ON the span and re-raised."""
+        return get_tracer(self.settings).tool(f"servicenow.{op}", input=extra)
 
     def _client(self) -> httpx.AsyncClient:
         if not self.enabled:
@@ -42,26 +49,35 @@ class ServiceNowClient:
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=0.5, max=8), reraise=True)
     async def _post(self, table: str, payload: dict[str, Any]) -> dict[str, Any]:
-        async with self._client() as client:
-            resp = await client.post(f"/api/now/table/{table}", json=payload)
-        if resp.status_code >= 300:
-            raise ServiceNowError(f"ServiceNow POST {table} failed: {resp.status_code} {resp.text[:300]}")
-        return resp.json()["result"]
+        async with self._span("post", table=table, payload=payload) as t:
+            async with self._client() as client:
+                resp = await client.post(f"/api/now/table/{table}", json=payload)
+            if resp.status_code >= 300:
+                raise ServiceNowError(f"ServiceNow POST {table} failed: {resp.status_code} {resp.text[:300]}")
+            result = resp.json()["result"]
+            t.output = {"sys_id": result.get("sys_id"), "number": result.get("number")}
+        return result
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=0.5, max=8), reraise=True)
     async def _patch(self, table: str, sys_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        async with self._client() as client:
-            resp = await client.patch(f"/api/now/table/{table}/{sys_id}", json=payload)
-        if resp.status_code >= 300:
-            raise ServiceNowError(f"ServiceNow PATCH {table}/{sys_id} failed: {resp.status_code} {resp.text[:300]}")
-        return resp.json()["result"]
+        async with self._span("patch", table=table, sys_id=sys_id, payload=payload) as t:
+            async with self._client() as client:
+                resp = await client.patch(f"/api/now/table/{table}/{sys_id}", json=payload)
+            if resp.status_code >= 300:
+                raise ServiceNowError(f"ServiceNow PATCH {table}/{sys_id} failed: {resp.status_code} {resp.text[:300]}")
+            result = resp.json()["result"]
+            t.output = {"sys_id": result.get("sys_id"), "state": result.get("state")}
+        return result
 
     async def get(self, table: str, sys_id: str) -> dict[str, Any]:
-        async with self._client() as client:
-            resp = await client.get(f"/api/now/table/{table}/{sys_id}")
-        if resp.status_code >= 300:
-            raise ServiceNowError(f"ServiceNow GET {table}/{sys_id} failed: {resp.status_code}")
-        return resp.json()["result"]
+        async with self._span("get", table=table, sys_id=sys_id) as t:
+            async with self._client() as client:
+                resp = await client.get(f"/api/now/table/{table}/{sys_id}")
+            if resp.status_code >= 300:
+                raise ServiceNowError(f"ServiceNow GET {table}/{sys_id} failed: {resp.status_code}")
+            result = resp.json()["result"]
+            t.output = {"sys_id": result.get("sys_id")}
+        return result
 
     # ── Incidents (SRE) ──
     async def create_incident(self, short_description: str, description: str = "", urgency: str = "2",

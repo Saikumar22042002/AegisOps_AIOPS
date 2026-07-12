@@ -16,6 +16,8 @@ from typing import Any
 
 import structlog
 
+from ..integrations.langfuse_client import get_tracer
+from ..security.redaction import redact_dict
 from ..settings import Settings
 from .console import CommandConsole, LineCallback
 
@@ -34,15 +36,35 @@ def _var_args(variables: dict[str, Any]) -> list[str]:
     return args
 
 
+def state_slug(name: str) -> str:
+    """Stable, filesystem/Terraform-safe state-workspace slug for a resource name."""
+    import re as _re
+    slug = _re.sub(r"[^a-z0-9-]+", "-", (name or "").lower()).strip("-") or "unnamed"
+    return ("res-" + slug)[:60]
+
+
 class TerraformRunner:
-    def __init__(self, workspace: str, settings: Settings) -> None:
+    """Runs terraform in a module directory. `state_workspace` (Phase 8 / N-08) selects a
+    PER-RESOURCE Terraform workspace via the TF_WORKSPACE env var, giving every provisioned
+    resource its own state file (terraform.tfstate.d/<slug>/terraform.tfstate). Without it,
+    every apply in a module shared ONE local state, so a second create reconciled the same
+    resource addresses and destroyed/replaced the previous resource — the confirmed
+    "create deleted my instance" defect. Env-var selection (not `workspace select`) keeps
+    concurrent runs race-free: nothing mutates .terraform/environment.
+    None ⇒ the default workspace (legacy resources created before isolation)."""
+
+    def __init__(self, workspace: str, settings: Settings, state_workspace: str | None = None) -> None:
         self.bin = settings.terraform_bin
         self.workdir = os.path.join(settings.terraform_workspaces_dir, workspace)
         self.settings = settings
-        self.plan_file = "aegisops.tfplan"
+        self.state_workspace = state_workspace or None
+        self.plan_file = "aegisops.tfplan" if not self.state_workspace \
+            else f"aegisops-{self.state_workspace}.tfplan"  # per-resource plan file too
 
-    def _env(self) -> dict[str, str]:
+    def _env(self, include_ws: bool = True) -> dict[str, str]:
         env = {"TF_IN_AUTOMATION": "1", "TF_INPUT": "0", "TF_CLI_ARGS": "-no-color"}
+        if self.state_workspace and include_ws:
+            env["TF_WORKSPACE"] = self.state_workspace
         s = self.settings
         if s.aws_access_key_id:
             env["AWS_ACCESS_KEY_ID"] = s.aws_access_key_id
@@ -63,16 +85,51 @@ class TerraformRunner:
             env["GOOGLE_APPLICATION_CREDENTIALS"] = s.google_application_credentials
         return env
 
-    def _console(self) -> CommandConsole:
+    def _console(self, include_ws: bool = True) -> CommandConsole:
         if not os.path.isdir(self.workdir):
             raise TerraformError(f"Terraform workspace not found: {self.workdir}")
-        return CommandConsole(cwd=self.workdir, env=self._env())
+        return CommandConsole(cwd=self.workdir, env=self._env(include_ws))
+
+    def _span(self, op: str, **extra: Any):
+        """Langfuse tool span for one terraform operation — inputs are redacted; a raised
+        TerraformError is recorded ON the span (level=ERROR) and still propagates."""
+        return get_tracer(self.settings).tool(
+            f"terraform.{op}",
+            input={"workdir": self.workdir, "state_workspace": self.state_workspace,
+                   **redact_dict(extra)})
 
     async def init(self, on_line: LineCallback | None = None) -> dict[str, Any]:
-        res = await self._console().run([self.bin, "init", "-input=false"], on_line)
-        if res.returncode != 0:
-            raise TerraformError("terraform init failed:\n" + "\n".join(res.stderr[-15:]))
+        # init runs WITHOUT the TF_WORKSPACE override: terraform refuses to init while the
+        # selected workspace doesn't exist yet. The workspace is ensured right after, and every
+        # subsequent command carries TF_WORKSPACE.
+        async with self._span("init") as t:
+            res = await self._console(include_ws=False).run([self.bin, "init", "-input=false"], on_line)
+            if res.returncode != 0:
+                raise TerraformError("terraform init failed:\n" + "\n".join(res.stderr[-15:]))
+            if self.state_workspace:
+                await self.ensure_state_workspace()
+            t.output = {"ok": True}
         return {"ok": True}
+
+    async def ensure_state_workspace(self) -> None:
+        """Create this runner's Terraform workspace if it doesn't exist yet (idempotent).
+
+        Runs `terraform workspace new` WITHOUT TF_WORKSPACE in the env — terraform refuses
+        workspace commands while the override variable is set. "already exists" is success.
+        """
+        if not self.state_workspace:
+            return
+        if not os.path.isdir(self.workdir):
+            raise TerraformError(f"Terraform workspace not found: {self.workdir}")
+        env = {**os.environ, **self._env()}
+        env.pop("TF_WORKSPACE", None)
+        proc = await asyncio.create_subprocess_exec(
+            self.bin, "workspace", "new", self.state_workspace, cwd=self.workdir, env=env,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        _out, err = await proc.communicate()
+        if proc.returncode != 0 and b"already exists" not in err:
+            raise TerraformError(f"could not create state workspace {self.state_workspace}:\n"
+                                 + err.decode(errors="replace")[-800:])
 
     async def validate(self, on_line: LineCallback | None = None) -> dict[str, Any]:
         res = await self._console().run([self.bin, "validate", "-json"], on_line)
@@ -81,14 +138,17 @@ class TerraformRunner:
 
     async def plan(self, variables: dict[str, Any] | None = None, destroy: bool = False,
                    on_line: LineCallback | None = None) -> dict[str, Any]:
-        args = [self.bin, "plan", "-input=false", f"-out={self.plan_file}"]
-        if destroy:
-            args.append("-destroy")
-        args += _var_args(variables or {})
-        res = await self._console().run(args, on_line)
-        if res.returncode not in (0, 2):  # 0 = no changes, 2 = changes present (with -detailed-exitcode); plain plan returns 0
-            raise TerraformError("terraform plan failed:\n" + "\n".join(res.stderr[-15:]))
-        return await self.show_plan()
+        async with self._span("plan", variables=variables or {}, destroy=destroy) as t:
+            args = [self.bin, "plan", "-input=false", f"-out={self.plan_file}"]
+            if destroy:
+                args.append("-destroy")
+            args += _var_args(variables or {})
+            res = await self._console().run(args, on_line)
+            if res.returncode not in (0, 2):  # 0 = no changes, 2 = changes present (with -detailed-exitcode); plain plan returns 0
+                raise TerraformError("terraform plan failed:\n" + "\n".join(res.stderr[-15:]))
+            plan = await self.show_plan()
+            t.output = plan.get("summary")
+        return plan
 
     async def _capture_json(self, args: list[str]) -> tuple[int, str, str]:
         """Run a JSON-emitting terraform command capturing stdout RAW (no line pump, no
@@ -120,6 +180,15 @@ class TerraformRunner:
                                  "zero-change summary for an unparsed plan") from e
         return _summarize_plan(data)
 
+    async def output_raw(self, name: str) -> str:
+        """A single output's raw value — used ONLY by the one-time credential reveal (N-02).
+        Raw capture: the value must not pass through the redacting console (it would be
+        masked) nor be logged anywhere. The API layer enforces the one-shot semantics."""
+        rc, out, err = await self._capture_json([self.bin, "output", "-raw", name])
+        if rc != 0:
+            raise TerraformError(f"terraform output -raw {name} failed:\n" + err[-400:])
+        return out
+
     async def state_list(self) -> list[str]:
         """Resource addresses currently in this workspace's state (read-only; for honest
         partial-failure reporting)."""
@@ -130,21 +199,27 @@ class TerraformRunner:
 
     async def apply(self, on_line: LineCallback | None = None) -> dict[str, Any]:
         """Apply the previously-saved, human-approved plan."""
-        res = await self._console().run(
-            [self.bin, "apply", "-input=false", "-auto-approve", self.plan_file], on_line
-        )
-        if res.returncode != 0:
-            raise TerraformError("terraform apply failed:\n" + "\n".join(res.stderr[-15:]))
-        return {"applied": True, **(await self.output())}
+        async with self._span("apply") as t:
+            res = await self._console().run(
+                [self.bin, "apply", "-input=false", "-auto-approve", self.plan_file], on_line
+            )
+            if res.returncode != 0:
+                raise TerraformError("terraform apply failed:\n" + "\n".join(res.stderr[-15:]))
+            result = {"applied": True, **(await self.output())}
+            t.output = {"applied": True, "outputs": sorted(result.get("outputs", {}).keys()),
+                        "sensitive_outputs": result.get("sensitive_outputs", [])}
+        return result
 
     async def destroy(self, variables: dict[str, Any] | None = None,
                       on_line: LineCallback | None = None) -> dict[str, Any]:
-        await self.plan(variables, destroy=True, on_line=on_line)
-        res = await self._console().run(
-            [self.bin, "apply", "-input=false", "-auto-approve", self.plan_file], on_line
-        )
-        if res.returncode != 0:
-            raise TerraformError("terraform destroy failed:\n" + "\n".join(res.stderr[-15:]))
+        async with self._span("destroy", variables=variables or {}) as t:
+            await self.plan(variables, destroy=True, on_line=on_line)
+            res = await self._console().run(
+                [self.bin, "apply", "-input=false", "-auto-approve", self.plan_file], on_line
+            )
+            if res.returncode != 0:
+                raise TerraformError("terraform destroy failed:\n" + "\n".join(res.stderr[-15:]))
+            t.output = {"destroyed": True}
         return {"destroyed": True}
 
     async def output(self) -> dict[str, Any]:

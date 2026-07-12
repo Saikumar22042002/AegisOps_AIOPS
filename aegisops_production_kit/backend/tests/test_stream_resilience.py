@@ -12,8 +12,18 @@ from app.integrations.gemini import GeminiError
 from app.settings import get_settings
 
 
+class _Chunk:
+    """Shape of a google-genai stream chunk: `.text` + `.usage_metadata`."""
+
+    def __init__(self, text: str):
+        self.text = text
+        self.usage_metadata = None
+
+
 class _TruncatingGemini:
-    """Fake Gemini whose stream dies mid-response (or immediately) N times, then succeeds."""
+    """Fake Gemini whose stream dies mid-response (or immediately) N times, then succeeds.
+    Implements `astream` (raw chunks) — the interface `stream_answer` consumes since the
+    tracing fix, which reads token usage off the final chunk."""
 
     def __init__(self, fail_times: int, chunks_before_fail: list[str], good_chunks: list[str]):
         self.enabled = True
@@ -23,16 +33,16 @@ class _TruncatingGemini:
         self.good_chunks = good_chunks
         self.calls = 0
 
-    async def astream_text(self, system, prompt, tools=None):
+    async def astream(self, system, prompt, tools=None):
         self.calls += 1
         if self.calls <= self.fail_times:
             for c in self.chunks_before_fail:
-                yield c
+                yield _Chunk(c)
             # The exact upstream failure observed live (aiohttp ClientPayloadError text).
             raise RuntimeError("Response payload is not completed: <TransferEncodingError: 400, "
                                "'Not enough data to satisfy transfer length header.'>")
         for c in self.good_chunks:
-            yield c
+            yield _Chunk(c)
 
 
 def _events(ch: RunChannel) -> list[tuple[str, dict]]:

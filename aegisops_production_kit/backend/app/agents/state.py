@@ -33,6 +33,7 @@ class AgentState(TypedDict, total=False):
     resource: str
     action: Literal["create", "modify", "destroy", "read"]
     target: str                   # reference to an EXISTING resource for day-2 ops (name/context)
+    state_workspace: str          # per-resource Terraform state workspace (N-08 isolation)
     raw_inputs: str
     parsed_inputs: dict[str, Any]
     validation_errors: list

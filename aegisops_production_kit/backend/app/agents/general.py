@@ -7,7 +7,7 @@ import structlog
 from ..integrations.gemini import GeminiError
 from ..security.confidentiality import classify
 from ..settings import get_settings
-from . import llm
+from . import llm, memory
 from .runtime import emitter_of
 from .state import AgentState
 
@@ -16,7 +16,10 @@ log = structlog.get_logger(__name__)
 _SYSTEM = (
     "You are AegisOps, an AI-native CloudOps/DevOps/SRE assistant. Be precise and concise. "
     "You can explain infrastructure, cloud, deployments, and incidents. You never invent "
-    "resource state; if you lack data, say so and suggest the action that would fetch it."
+    "resource state; if you lack data, say so and suggest the action that would fetch it. "
+    "When a conversation transcript is provided, it is the REAL history of this session — "
+    "use it to answer questions like “what did I ask earlier?” accurately, and never claim "
+    "the conversation has no history when a transcript is present."
 )
 
 
@@ -39,8 +42,15 @@ async def general(state: AgentState, config) -> dict:
         await emitter.confidentiality(c.level, c.score)
         return {"answer": msg, "confidentiality": {"level": c.level, "score": c.score}}
 
+    # Conversational memory (Phase 8 / N-03): thread the real session transcript into the
+    # call. Without this, every turn was answered blind — "my context window is blank".
+    transcript = await memory.build_transcript(state.get("session_id", ""),
+                                               exclude_last_user=state["message"])
+    prompt = (f"Conversation so far in this session:\n{transcript}\n\n"
+              f"User's current message: {state['message']}") if transcript else state["message"]
+
     try:
-        answer = await llm.stream_answer(settings, _SYSTEM, state["message"], emitter)
+        answer = await llm.stream_answer(settings, _SYSTEM, prompt, emitter)
     except GeminiError as e:
         # Honest failure, clean run: the graph completes with a real message instead of
         # crashing and persisting an empty "completed" state (Phase 7 / BUG-03).

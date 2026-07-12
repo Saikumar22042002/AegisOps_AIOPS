@@ -1,11 +1,14 @@
-# Azure Linux VM (org-approved template: azure/vm). Self-contained: resource group + network +
-# NSG + public IP + VM. A usable SSH key is guaranteed (generated here; private key surfaced as a
-# sensitive output, never logged). Day-2-modifiable inbound ports via the NSG.
+# Azure VM (org-approved template: azure/vm). Self-contained: resource group + network + NSG +
+# public IP + VM. Linux (Ubuntu/Debian, generated SSH key) AND Windows Server (generated admin
+# password) are supported — matching what the platform actually allows (Phase 8 / N-05).
+# Admin access (SSH 22 / RDP 3389) is opened ONLY to var.allowed_cidr; empty = closed (N-02).
+# All credentials are sensitive outputs — revealed once via the product UI, never logged.
 terraform {
   required_version = ">= 1.6"
   required_providers {
     azurerm = { source = "hashicorp/azurerm", version = "~> 3.110" }
     tls     = { source = "hashicorp/tls", version = "~> 4.0" }
+    random  = { source = "hashicorp/random", version = "~> 3.6" }
   }
   backend "local" {}
 }
@@ -21,6 +24,7 @@ variable "location" {
   type    = string
   default = "eastus"
 }
+# B/D/E-series and other sizes the subscription allows (validated upstream as Standard_*/Basic_*).
 variable "size" {
   type    = string
   default = "Standard_B1s"
@@ -29,32 +33,54 @@ variable "admin_username" {
   type    = string
   default = "azureuser"
 }
-# ubuntu-22.04 | ubuntu-24.04
+# ubuntu-22.04 | ubuntu-24.04 | debian-12 | windows-2022
 variable "os" {
   type    = string
   default = "ubuntu-22.04"
 }
 variable "resource_group" {
   type    = string
-  default = "" # created as "<name>-rg" when empty
+  default = "" # created as "<name>-rg" when empty (default-RG semantics, like the portal)
 }
 variable "ingress_ports" {
   type    = list(number)
   default = []
 }
+# Source CIDR allowed to reach SSH/RDP (e.g. requester's IP as x.x.x.x/32). Empty = closed.
+variable "allowed_cidr" {
+  type    = string
+  default = ""
+}
 
 locals {
-  rg_name = var.resource_group != "" ? var.resource_group : "${var.name}-rg"
+  rg_name    = var.resource_group != "" ? var.resource_group : "${var.name}-rg"
+  is_windows = var.os == "windows-2022"
+  admin_port = local.is_windows ? 3389 : 22
   images = {
     "ubuntu-22.04" = { publisher = "Canonical", offer = "0001-com-ubuntu-server-jammy", sku = "22_04-lts-gen2" }
     "ubuntu-24.04" = { publisher = "Canonical", offer = "ubuntu-24_04-lts", sku = "server" }
+    "debian-12"    = { publisher = "Debian", offer = "debian-12", sku = "12-gen2" }
+    "windows-2022" = { publisher = "MicrosoftWindowsServer", offer = "WindowsServer", sku = "2022-datacenter-g2" }
   }
   img = lookup(local.images, var.os, local.images["ubuntu-22.04"])
 }
 
+# Linux credential: generated SSH key (sensitive). Windows credential: generated password (sensitive).
 resource "tls_private_key" "ssh" {
+  count     = local.is_windows ? 0 : 1
   algorithm = "RSA"
   rsa_bits  = 4096
+}
+
+resource "random_password" "windows_admin" {
+  count            = local.is_windows ? 1 : 0
+  length           = 20
+  special          = true
+  override_special = "!@#%*-_=+"
+  min_upper        = 2
+  min_lower        = 2
+  min_numeric      = 2
+  min_special      = 1
 }
 
 resource "azurerm_resource_group" "this" {
@@ -90,16 +116,20 @@ resource "azurerm_network_security_group" "this" {
   resource_group_name = azurerm_resource_group.this.name
   location            = var.location
 
-  security_rule {
-    name                       = "SSH"
-    priority                   = 1001
-    direction                  = "Inbound"
-    access                     = "Allow"
-    protocol                   = "Tcp"
-    source_port_range          = "*"
-    destination_port_range     = "22"
-    source_address_prefix      = "*"
-    destination_address_prefix = "*"
+  # Admin access (SSH/RDP) — ONLY from the user's declared CIDR; no rule when closed (N-02).
+  dynamic "security_rule" {
+    for_each = var.allowed_cidr != "" ? [var.allowed_cidr] : []
+    content {
+      name                       = "aegisops-admin-${local.admin_port}"
+      priority                   = 1001
+      direction                  = "Inbound"
+      access                     = "Allow"
+      protocol                   = "Tcp"
+      source_port_range          = "*"
+      destination_port_range     = tostring(local.admin_port)
+      source_address_prefix      = security_rule.value
+      destination_address_prefix = "*"
+    }
   }
 
   dynamic "security_rule" {
@@ -137,6 +167,7 @@ resource "azurerm_network_interface_security_group_association" "this" {
 }
 
 resource "azurerm_linux_virtual_machine" "this" {
+  count                 = local.is_windows ? 0 : 1
   name                  = var.name
   resource_group_name   = azurerm_resource_group.this.name
   location              = var.location
@@ -146,7 +177,7 @@ resource "azurerm_linux_virtual_machine" "this" {
 
   admin_ssh_key {
     username   = var.admin_username
-    public_key = tls_private_key.ssh.public_key_openssh
+    public_key = tls_private_key.ssh[0].public_key_openssh
   }
 
   os_disk {
@@ -164,14 +195,49 @@ resource "azurerm_linux_virtual_machine" "this" {
   tags = { ManagedBy = "AegisOps" }
 }
 
-output "vm_id" { value = azurerm_linux_virtual_machine.this.id }
+resource "azurerm_windows_virtual_machine" "this" {
+  count                 = local.is_windows ? 1 : 0
+  name                  = var.name
+  resource_group_name   = azurerm_resource_group.this.name
+  location              = var.location
+  size                  = var.size
+  admin_username        = var.admin_username
+  admin_password        = random_password.windows_admin[0].result
+  network_interface_ids = [azurerm_network_interface.this.id]
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Standard_LRS"
+  }
+
+  source_image_reference {
+    publisher = local.img.publisher
+    offer     = local.img.offer
+    sku       = local.img.sku
+    version   = "latest"
+  }
+
+  tags = { ManagedBy = "AegisOps" }
+}
+
+output "vm_id" {
+  value = local.is_windows ? azurerm_windows_virtual_machine.this[0].id : azurerm_linux_virtual_machine.this[0].id
+}
 output "public_ip" { value = azurerm_public_ip.this.ip_address }
 output "private_ip" { value = azurerm_network_interface.this.private_ip_address }
 output "login_user" { value = var.admin_username }
-output "key_name" { value = "${var.name}-ssh (generated)" }
+output "os_kind" { value = local.is_windows ? "windows" : "linux" }
+output "admin_port" { value = var.allowed_cidr != "" ? local.admin_port : null }
+output "allowed_cidr" { value = var.allowed_cidr }
+output "key_name" { value = local.is_windows ? null : "${var.name}-ssh (generated)" }
 output "resource_group" { value = azurerm_resource_group.this.name }
 output "ingress_ports" { value = var.ingress_ports }
+# Sensitive credentials — revealed once via the product UI, never logged or persisted plaintext.
 output "private_key_pem" {
-  value     = tls_private_key.ssh.private_key_pem
+  value     = local.is_windows ? null : tls_private_key.ssh[0].private_key_pem
+  sensitive = true
+}
+output "admin_password" {
+  value     = local.is_windows ? random_password.windows_admin[0].result : null
   sensitive = true
 }

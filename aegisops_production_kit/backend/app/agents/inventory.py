@@ -94,6 +94,7 @@ def _provider_id(outputs: dict) -> str | None:
 def _dump(r: Resource) -> dict:
     return {"id": str(r.id), "name": r.name, "cloud": r.cloud, "region": r.region,
             "resource_type": r.resource_type, "provider_id": r.provider_id, "workspace": r.workspace,
+            "state_workspace": r.state_workspace,
             "status": r.status, "attributes": r.attributes or {}, "inputs": r.inputs or {},
             "created_at": r.created_at.isoformat() if r.created_at else None}
 
@@ -119,6 +120,7 @@ async def record_from_apply(state: dict, template, outputs: dict) -> None:
             row.provider_id = _provider_id(outputs)
             row.attributes = outputs
             row.inputs = inputs
+            row.state_workspace = state.get("state_workspace") or row.state_workspace
             row.status = "active"
         log.info("inventory.recorded", name=name, provider_id=_provider_id(outputs), workspace=template.workspace)
     except Exception as e:  # noqa: BLE001 - inventory write must never fail a real apply

@@ -64,6 +64,13 @@ variable "ingress_ports" {
   type    = list(number)
   default = []
 }
+# Source CIDR allowed to reach the instance's admin port (SSH 22, or RDP 3389 on Windows) —
+# e.g. the requester's public IP as x.x.x.x/32. Empty = closed (default-deny): the VM applies
+# but is not remotely reachable until a CIDR is granted (N-02).
+variable "allowed_cidr" {
+  type    = string
+  default = ""
+}
 
 # ── OS → AMI resolution (owners + name filters per OS) ──
 data "aws_ami" "al2023" {
@@ -145,6 +152,7 @@ locals {
   }
   ami_id     = var.ami != "" ? var.ami : lookup(local.ami_by_os, var.os, data.aws_ami.al2023.id)
   login_user = lookup(local.login_user_by_os, var.os, "ec2-user")
+  admin_port = var.os == "windows-2022" ? 3389 : 22
   subnet_id  = var.subnet_id != "" ? var.subnet_id : data.aws_subnets.default.ids[0]
   # Effective key pair: created one wins, else the supplied existing name, else null (no key).
   key_name = var.create_key_pair ? aws_key_pair.generated[0].key_name : (var.key_name != "" ? var.key_name : null)
@@ -168,6 +176,17 @@ resource "aws_security_group" "this" {
       to_port     = ingress.value
       protocol    = "tcp"
       cidr_blocks = ["0.0.0.0/0"]
+    }
+  }
+  # Admin access (SSH/RDP) — scoped to the user's declared CIDR only, never 0.0.0.0/0 (N-02).
+  dynamic "ingress" {
+    for_each = var.allowed_cidr != "" ? [var.allowed_cidr] : []
+    content {
+      description = "AegisOps admin access (${local.admin_port})"
+      from_port   = local.admin_port
+      to_port     = local.admin_port
+      protocol    = "tcp"
+      cidr_blocks = [ingress.value]
     }
   }
   egress {
@@ -223,6 +242,8 @@ output "vpc_id" { value = data.aws_subnet.selected.vpc_id }
 output "subnet_id" { value = local.subnet_id }
 output "security_group_id" { value = aws_security_group.this.id }
 output "ingress_ports" { value = var.ingress_ports }
+output "allowed_cidr" { value = var.allowed_cidr }
+output "admin_port" { value = var.allowed_cidr != "" ? local.admin_port : null }
 output "ami_used" { value = local.ami_id }
 output "login_user" { value = local.login_user }
 output "key_name" { value = local.key_name }

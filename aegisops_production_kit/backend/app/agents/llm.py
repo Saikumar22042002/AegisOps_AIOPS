@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime, timezone
 from typing import Any
 
 import structlog
 
-from ..integrations.gemini import GeminiError, get_gemini
+from ..integrations.gemini import GeminiError, get_gemini, usage_of
+from ..integrations.langfuse_client import get_tracer
 from ..metrics import LLM_LATENCY
 from ..settings import Settings
 from .events import Emitter
@@ -71,13 +73,30 @@ async def stream_answer(settings: Settings, system: str, prompt: str, emitter: E
         raise GeminiError("GEMINI_API_KEY is not configured")
     full: list[str] = []
     attempt = 0
+    usage: dict | None = None
+
+    def _record(output: str | None, error: str | None, t0: datetime) -> None:
+        # One Langfuse generation per streamed answer (or per failed attempt), with the token
+        # usage the final stream chunk reported. Best-effort — never breaks the stream.
+        try:
+            get_tracer(settings).generation(
+                name="gemini.stream", model=gemini.model,
+                input={"system": system, "prompt": prompt},
+                output=output, usage=usage, start_time=t0, error=error)
+        except Exception:  # noqa: BLE001
+            pass
+
     with LLM_LATENCY.labels(model=gemini.model, operation="stream").time():
         while True:
             attempt += 1
+            t0 = datetime.now(timezone.utc)
             try:
-                async for chunk in gemini.astream_text(system, prompt):
-                    full.append(chunk)
-                    await emitter.token(chunk)
+                async for chunk in gemini.astream(system, prompt):
+                    usage = usage_of(chunk) or usage  # totals arrive on the final chunk
+                    if getattr(chunk, "text", None):
+                        full.append(chunk.text)
+                        await emitter.token(chunk.text)
+                _record("".join(full), None, t0)
                 return "".join(full)
             except GeminiError:
                 raise  # configuration problem — not transient
@@ -85,10 +104,13 @@ async def stream_answer(settings: Settings, system: str, prompt: str, emitter: E
                 log.warning("llm.stream_interrupted", error=str(e), attempt=attempt,
                             emitted_chars=sum(len(c) for c in full))
                 if not full and attempt < max_attempts:
+                    _record(None, f"stream interrupted, retrying: {e}", t0)
                     continue  # user saw nothing yet — retry with a fresh stream
                 if full:
+                    _record("".join(full), f"stream truncated: {e}", t0)
                     await emitter.token(_TRUNCATION_NOTE)
                     await emitter.error(f"upstream stream interrupted: {e}",
                                         code="stream_truncated", retriable=True)
                     return "".join(full) + _TRUNCATION_NOTE
+                _record(None, str(e), t0)
                 raise GeminiError(f"model stream failed after {attempt} attempt(s): {e}") from e

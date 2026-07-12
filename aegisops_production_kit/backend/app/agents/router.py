@@ -17,7 +17,7 @@ from ..integrations.gemini import get_gemini
 from ..integrations.servicenow import get_servicenow
 from ..metrics import AGENT_RUNS
 from ..settings import get_settings
-from . import intent_guard, llm, params, templates
+from . import intent_guard, llm, memory, params, templates
 from .runtime import emitter_of
 from .state import AgentState
 
@@ -93,8 +93,13 @@ async def router(state: AgentState, config) -> dict:
                 "intent_confidence": 0.0, "routing_reason": "LLM not configured"}
 
     system = _SYSTEM.format(catalog=json.dumps(templates.catalog(), indent=0))
+    # Session memory (Phase 8 / N-03): recent turns let the classifier resolve references
+    # ("do that again", "the previous one", "same but in gcp") against what was actually said.
+    ctx = await memory.classification_context(session_id or "")
+    classify_input = (f"Recent conversation (context for resolving references — classify ONLY "
+                      f"the current message):\n{ctx}\n\nCurrent message: {message}") if ctx else message
     try:
-        cls = await llm.classify_json(settings, system, message)
+        cls = await llm.classify_json(settings, system, classify_input)
     except Exception as e:  # noqa: BLE001
         log.warning("router.classify_failed", error=str(e))
         return {"domain": "general", "intent": "general", "intent_confidence": 0.3,

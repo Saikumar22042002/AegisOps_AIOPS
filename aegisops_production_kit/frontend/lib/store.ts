@@ -323,11 +323,14 @@ export const useUI = create<UIState>((set, get) => ({
             patchMsg(set, aiId, { error: String(ev.data.message), streaming: false });
             set({ runError: String(ev.data.message) });
             break;
-          case "done":
+          case "done": {
+            const sens = ((ev.data.outcome as any)?.sensitive_outputs as string[]) ?? [];
             patchMsg(set, aiId, { streaming: false, done: true, runId: String(ev.data.runId),
-                                  messageId: String(ev.data.messageId) });
+                                  messageId: String(ev.data.messageId),
+                                  sensitiveOutputs: sens.length ? sens : undefined });
             set((s) => ({ activeRunId: String(ev.data.runId), artifactNonce: s.artifactNonce + 1 }));
             break;
+          }
         }
       });
     } catch (e) {
@@ -359,12 +362,22 @@ export const useUI = create<UIState>((set, get) => ({
           patchMsg(set, aiId, { text: (m.text ?? "") + String(ev.data.text ?? "") });
         else if (ev.event === "step")
           patchMsg(set, aiId, { steps: [...(m.steps ?? []), { label: String(ev.data.label) }] });
+        else if (ev.event === "done") {
+          // Terminal: clear the MESSAGE's streaming flag so the artifact panel hands off from
+          // the live spinner to the persisted timeline (N-01 — the "Verification" hang was this
+          // flag never clearing on approval continuations), and surface revealable credentials.
+          const sens = ((ev.data.outcome as any)?.sensitive_outputs as string[]) ?? [];
+          patchMsg(set, aiId, { streaming: false, done: true, showTimeline: false,
+                                sensitiveOutputs: sens.length ? sens : undefined });
+        }
         else if (ev.event === "error")
           set({ runError: String(ev.data.message) });
       });
     } catch (e) {
       set({ runError: e instanceof Error ? e.message : "approval failed" });
     } finally {
+      // Defensive: even if `done` was missed (disconnect), never leave the live spinner up.
+      if (aiId) patchMsg(set, aiId, { streaming: false });
       // Refetch the artifact tabs (timeline/logs/approvals) and badges for the resolved run.
       set((s) => ({ streaming: false, artifactNonce: s.artifactNonce + 1 }));
       void get().loadSidebar();

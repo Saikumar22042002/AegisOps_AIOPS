@@ -7,6 +7,11 @@ hardcoded values. Timings survive the run, so past messages render their real ti
 `start_step` is upsert-by-(run_id, name): on a resume re-entry (e.g. the approval node runs
 again after the human decision) the original `started_at` is preserved, so the recorded
 duration of "Human Approval" is the true wall-clock wait for the human.
+
+Every step also opens/closes a Langfuse span (deterministic id `<run_id>:<name>`), so the
+run's trace carries the same node tree — including the approval span across the interrupt
+and failed steps recorded as ERROR spans. Both sinks are best-effort: neither DB timing nor
+tracing can break a run.
 """
 
 from __future__ import annotations
@@ -19,6 +24,8 @@ from sqlalchemy import select
 
 from ..db.models import RunStep
 from ..db.session import session_scope
+from ..integrations.langfuse_client import get_tracer
+from ..settings import get_settings
 
 log = structlog.get_logger(__name__)
 
@@ -39,6 +46,7 @@ async def start_step(run_id: str, name: str, *, tool: str | None = None, human_v
     """Mark a step started. Idempotent: preserves the first start across resume re-entries."""
     if not run_id:
         return
+    started_at = _now()
     try:
         async with session_scope() as s:
             row = (await s.execute(
@@ -46,11 +54,16 @@ async def start_step(run_id: str, name: str, *, tool: str | None = None, human_v
             )).scalar_one_or_none()
             if row is None:
                 s.add(RunStep(run_id=uuid.UUID(run_id), name=name, status="running", tool=tool,
-                              human_vs_auto=human_vs_auto, started_at=_now(), order_index=ORDER.get(name, 50)))
+                              human_vs_auto=human_vs_auto, started_at=started_at, order_index=ORDER.get(name, 50)))
             elif row.ended_at is None:
                 row.status = "running"  # re-entry before completion — keep original started_at
+                started_at = row.started_at
     except Exception as e:  # noqa: BLE001 - timing is best-effort, never breaks a run
         log.warning("timing.start_failed", name=name, error=str(e))
+    try:
+        get_tracer(get_settings()).step_started(run_id, name, tool=tool, started_at=started_at)
+    except Exception as e:  # noqa: BLE001
+        log.warning("timing.trace_start_failed", name=name, error=str(e))
 
 
 async def end_step(run_id: str, name: str, *, status: str = "done", error: str | None = None,
@@ -58,17 +71,25 @@ async def end_step(run_id: str, name: str, *, status: str = "done", error: str |
     """Mark a step ended (sets ended_at + final status)."""
     if not run_id:
         return
+    started_at: datetime | None = None
+    ended_at = _now()
     try:
         async with session_scope() as s:
             row = (await s.execute(
                 select(RunStep).where(RunStep.run_id == uuid.UUID(run_id), RunStep.name == name)
             )).scalar_one_or_none()
             if row is not None:
-                row.ended_at = _now()
+                row.ended_at = ended_at
                 row.status = status
                 if error:
                     row.error = error[:2000]
                 if result is not None:
                     row.result = result
+                started_at = row.started_at
     except Exception as e:  # noqa: BLE001
         log.warning("timing.end_failed", name=name, error=str(e))
+    try:
+        get_tracer(get_settings()).step_ended(run_id, name, status=status, error=error,
+                                              result=result, started_at=started_at, ended_at=ended_at)
+    except Exception as e:  # noqa: BLE001
+        log.warning("timing.trace_end_failed", name=name, error=str(e))

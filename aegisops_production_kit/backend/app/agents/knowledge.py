@@ -12,7 +12,7 @@ from ..metrics import RAG_LATENCY
 from ..rag import retriever
 from ..security.confidentiality import classify
 from ..settings import get_settings
-from . import llm
+from . import llm, memory
 from .runtime import emitter_of
 from .state import AgentState
 
@@ -41,7 +41,11 @@ async def knowledge(state: AgentState, config) -> dict:
 
     await emitter.step(5, "Composed response")
     context_block = "\n\n".join(f"[{i + 1}] {r['title']}\n{r['chunk']}" for i, r in enumerate(refs))
-    prompt = f"Context passages:\n{context_block}\n\nQuestion: {state['message']}"
+    # Session memory (Phase 8 / N-03): follow-ups like "expand on that" need the real thread.
+    transcript = await memory.build_transcript(state.get("session_id", ""), max_chars=4000,
+                                               exclude_last_user=state["message"])
+    convo = f"Conversation so far:\n{transcript}\n\n" if transcript else ""
+    prompt = f"{convo}Context passages:\n{context_block}\n\nQuestion: {state['message']}"
 
     try:
         answer = await llm.stream_answer(settings, _SYSTEM, prompt, emitter)

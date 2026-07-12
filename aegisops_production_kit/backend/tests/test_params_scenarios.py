@@ -9,19 +9,21 @@ import pytest
 from app.agents import params, templates
 
 # template key → the EXACT set of params that must be asked (required, no safe default).
+# Phase 8 / N-02: VM modules also ask for the allowed source CIDR (default-closed is a
+# decision the USER makes, so it must be asked).
 _REQUIRED = {
-    "aws.ec2": {"name", "instance_type", "os", "key_pair"},
+    "aws.ec2": {"name", "instance_type", "os", "key_pair", "allowed_cidr"},
     "aws.s3": {"bucket_name"},
     "aws.rds": {"identifier"},
     "aws.vpc": {"name"},
     "aws.eks": {"cluster_name", "vpc_id", "subnet_ids"},
     "azure.resource_group": {"name"},
     "azure.storage": {"account_name", "resource_group"},
-    "azure.vm": {"name", "size", "os"},
+    "azure.vm": {"name", "size", "os", "allowed_cidr"},
     "azure.postgres": {"name"},
     "azure.aks": {"name"},
     "gcp.gcs": {"bucket_name"},
-    "gcp.vm": {"name", "machine_type", "os"},
+    "gcp.vm": {"name", "machine_type", "os", "allowed_cidr"},
     "gcp.gke": {"name"},
     "gcp.cloudsql": {"name"},
 }
@@ -52,10 +54,10 @@ def test_nothing_missing_once_required_supplied(key, expected):
 
 
 def test_request_payload_only_lists_missing():
-    collected = {"name": "web-01", "instance_type": "t3.micro"}  # 2 of 4 supplied
+    collected = {"name": "web-01", "instance_type": "t3.micro"}  # 2 of 5 supplied
     payload = params.request_payload("aws.ec2", collected)
     names = {i["name"] for i in payload["items"]}
-    assert names == {"os", "key_pair"}
+    assert names == {"os", "key_pair", "allowed_cidr"}
     assert payload["collected"] == collected
     assert "**Operating system**" in params.summary_text("aws.ec2", collected)
 
@@ -93,4 +95,5 @@ def _sample(name: str):
         "vpc_id": "vpc-123",
         "account_name": "mystorage123",
         "resource_group": "rg-app",
+        "allowed_cidr": "203.0.113.7/32",
     }.get(name, f"val-{name}")

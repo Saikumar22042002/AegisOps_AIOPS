@@ -248,7 +248,10 @@ class Resource(Base):
     region: Mapped[str | None] = mapped_column(String(40), nullable=True)
     resource_type: Mapped[str] = mapped_column(String(60), nullable=False)  # aws_instance | vpc | s3_bucket | ...
     provider_id: Mapped[str | None] = mapped_column(String(200), nullable=True)  # i-…, vpc-…
-    workspace: Mapped[str | None] = mapped_column(String(120), nullable=True)  # TF workspace/state ref
+    workspace: Mapped[str | None] = mapped_column(String(120), nullable=True)  # TF module dir (aws-ec2, …)
+    # Per-resource Terraform state workspace slug (Phase 8 / N-08 isolation). NULL = legacy
+    # resource in the module's default workspace.
+    state_workspace: Mapped[str | None] = mapped_column(String(80), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="active")  # active | terminated | destroyed
     attributes: Mapped[dict | None] = mapped_column(JSONB, nullable=True)  # ips, vpc_id, subnet_id, sgs, tags, key_name…
     inputs: Mapped[dict | None] = mapped_column(JSONB, nullable=True)  # validated TF vars (to rebuild a modify plan)

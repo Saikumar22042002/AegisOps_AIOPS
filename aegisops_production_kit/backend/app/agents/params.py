@@ -46,6 +46,9 @@ PARAMS: dict[str, list[ParamSpec]] = {
                   help="Amazon Linux 2023, Ubuntu 22.04/24.04, or Windows 2022"),
         ParamSpec("key_pair", "SSH key pair", required=True,
                   help="an existing EC2 key pair name, or say 'create' to have one generated"),
+        ParamSpec("allowed_cidr", "Allowed source IP/CIDR", required=True,
+                  help="your public IP (e.g. 203.0.113.7) to open SSH/RDP for it, or 'none' to keep "
+                       "remote access closed"),
         # Defaulted / overridable — never asked:
         ParamSpec("region", "Region", help="defaults to the selected region"),
         ParamSpec("vpc_id", "VPC", help="defaults to the account's default VPC"),
@@ -108,9 +111,16 @@ PARAMS: dict[str, list[ParamSpec]] = {
     # ── Azure (Phase 5) ──
     "azure.vm": [
         ParamSpec("name", "VM name", required=True, help="e.g. web-vm-01"),
-        ParamSpec("size", "VM size", required=True, help="e.g. Standard_B1s, Standard_B2s, Standard_D2s_v5"),
+        ParamSpec("size", "VM size", required=True,
+                  help="B/D/E-series the subscription allows — e.g. Standard_B1s, Standard_B2s, "
+                       "Standard_D2s_v5, Standard_E2s_v5"),
         ParamSpec("os", "Operating system", kind="choice", required=True,
-                  choices=["ubuntu-22.04", "ubuntu-24.04"], help="Ubuntu 22.04 or 24.04 (SSH key auto-generated)"),
+                  choices=["ubuntu-22.04", "ubuntu-24.04", "debian-12", "windows-2022"],
+                  help="Ubuntu/Debian (SSH key auto-generated) or Windows Server 2022 "
+                       "(admin password auto-generated)"),
+        ParamSpec("allowed_cidr", "Allowed source IP/CIDR", required=True,
+                  help="your public IP (e.g. 203.0.113.7) to open SSH/RDP for it, or 'none' to keep "
+                       "remote access closed"),
         ParamSpec("location", "Location", default="eastus"),
         ParamSpec("admin_username", "Admin username", default="azureuser"),
         ParamSpec("resource_group", "Resource group", help="created as <name>-rg if omitted"),
@@ -135,6 +145,9 @@ PARAMS: dict[str, list[ParamSpec]] = {
         ParamSpec("machine_type", "Machine type", required=True, help="e.g. e2-micro, e2-medium, n2-standard-2"),
         ParamSpec("os", "Operating system", kind="choice", required=True,
                   choices=["debian-12", "ubuntu-22.04", "ubuntu-24.04"], help="SSH key auto-generated"),
+        ParamSpec("allowed_cidr", "Allowed source IP/CIDR", required=True,
+                  help="your public IP (e.g. 203.0.113.7) to open SSH for it, or 'none' to keep "
+                       "remote access closed"),
         ParamSpec("project", "GCP project id", help="defaults to the configured project"),
         ParamSpec("region", "Region", default="us-central1"),
         ParamSpec("zone", "Zone", default="us-central1-a"),

@@ -28,6 +28,13 @@ function renderWorkspace() {
   );
 }
 
+// The markdown renderer rebuilds its element tree when AuthProvider's async probe settles, so
+// elements captured across that boundary can be detached. Wait, then RE-QUERY fresh.
+async function findFresh(text: string) {
+  await screen.findByText(text);
+  return screen.getByText(text);
+}
+
 describe("Workspace message rendering", () => {
   it("renders a completed AI message with its confidentiality badge and feedback controls", async () => {
     useUI.setState({
@@ -39,7 +46,7 @@ describe("Workspace message rendering", () => {
     });
     renderWorkspace();
 
-    expect(await screen.findByText("Provisioned the bucket.")).toBeInTheDocument();
+    expect(await findFresh("Provisioned the bucket.")).toBeInTheDocument();
     expect(screen.getByText("High")).toBeInTheDocument();          // confidentiality badge
     expect(screen.getByText("Was this helpful?")).toBeInTheDocument();  // feedback controls (done)
     expect(screen.getByText(/ctx/)).toBeInTheDocument();           // run id chip
@@ -51,7 +58,7 @@ describe("Workspace message rendering", () => {
                    showTimeline: false, references: [], steps: [], tab: "conversation" }],
     });
     renderWorkspace();
-    expect(await screen.findByText("Working")).toBeInTheDocument();
+    expect(await findFresh("Working")).toBeInTheDocument();
     expect(screen.queryByText("Was this helpful?")).not.toBeInTheDocument();
   });
 
@@ -81,7 +88,7 @@ describe("Workspace message rendering", () => {
       selectedMessageId: "ai-a",
     });
     renderWorkspace();
-    fireEvent.click(await screen.findByText("answer B"));
+    fireEvent.click(await findFresh("answer B"));
     expect(useUI.getState().selectedMessageId).toBe("ai-b");
     expect(useUI.getState().artifactOpen).toBe(true);
   });
