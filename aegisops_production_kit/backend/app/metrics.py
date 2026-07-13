@@ -69,3 +69,23 @@ DEP_UP = Gauge(
     labelnames=("dependency",),
     registry=REGISTRY,
 )
+
+# ── PR-6: operator-alert signals, set by the reconciler each sweep ──
+STRANDED_RUNS = Gauge(
+    "aegisops_stranded_runs",
+    "Runs recovered/marked-failed by the last reconcile sweep (stranded after a crash).",
+    registry=REGISTRY,
+)
+
+RECONCILER_SWEEP_FAILURES = Counter(
+    "aegisops_reconciler_sweep_failures_total",
+    "Reconcile sweeps that raised (the loop caught + logged; count trends operator attention).",
+    registry=REGISTRY,
+)
+
+DRIFT_FINDINGS = Gauge(
+    "aegisops_drift_findings",
+    "Drift/orphan findings from the last reader-seam sweep.",
+    labelnames=("kind",),  # drift | orphan
+    registry=REGISTRY,
+)

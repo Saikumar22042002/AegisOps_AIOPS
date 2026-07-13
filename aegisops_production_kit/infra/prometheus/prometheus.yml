@@ -4,6 +4,11 @@ global:
   external_labels:
     monitor: aegisops
 
+# PR-6: operator alert rules. Each rule carries a runbook annotation; Alertmanager wiring
+# is documented in docs/RESTORE_RUNBOOK.md. Lint: promtool check rules alerts.yml
+rule_files:
+  - alerts.yml
+
 scrape_configs:
   - job_name: prometheus
     static_configs:

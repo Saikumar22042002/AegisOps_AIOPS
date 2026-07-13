@@ -1,0 +1,65 @@
+# PR-6 ALERTS — AegisOps operator alerting. Loaded by prometheus.yml (rule_files) and
+# routed by Alertmanager. Every rule carries a `runbook` annotation ("what to check first").
+# Lint: `promtool check rules infra/prometheus/alerts.yml`.
+groups:
+  - name: aegisops
+    rules:
+      - alert: StrandedRuns
+        expr: aegisops_stranded_runs > 0
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $value }} run(s) stranded and recovered by the reconciler"
+          runbook: "Check reconciler logs (reconciler.resumed/marked_failed). Persistent >0 means workers are crashing mid-run — check API/worker restarts and heartbeat TTLs."
+
+      - alert: ReconcilerSweepFailing
+        expr: increase(aegisops_reconciler_sweep_failures_total[15m]) > 0
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "Reconciler sweep raised in the last 15m"
+          runbook: "The recovery loop cannot reconcile stranded runs. Check DB/Redis reachability from the API; grep logs for reconciler.sweep_failed."
+
+      - alert: DriftOrphanFindings
+        expr: sum(aegisops_drift_findings) > 0
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $value }} drift/orphan finding(s) from the reader-seam sweep"
+          runbook: "Someone changed managed infra out-of-band, or an inventory row lost its cloud resource. Review the Notifications bell + the drift sweep log."
+
+      - alert: ApiHigh5xxRate
+        expr: |
+          sum(rate(aegisops_api_requests_total{status=~"5.."}[5m]))
+            / clamp_min(sum(rate(aegisops_api_requests_total[5m])), 0.001) > 0.05
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "API 5xx rate above 5% for 5m"
+          runbook: "Check the API logs for tracebacks; verify Postgres/Redis/Neo4j are up (aegisops_dependency_up)."
+
+      - alert: RunFailureSpike
+        expr: |
+          sum(rate(aegisops_agent_runs_total{status="failed"}[10m]))
+            / clamp_min(sum(rate(aegisops_agent_runs_total[10m])), 0.001) > 0.3
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Run failure rate above 30% for 10m"
+          runbook: "A provider/credential outage or a bad module. Inspect recent failed runs' outcomes; check provider_errors classifications."
+
+      - alert: DependencyDown
+        expr: aegisops_dependency_up == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "Backing dependency {{ $labels.dependency }} is down"
+          runbook: "Postgres down = full outage. Redis down = no run coordination. Neo4j down = world-model reads degrade. Restart the named service; see docs/07_SETUP_AND_RUN.md."
+
+      - alert: EventBusPublishErrors
+        expr: increase(aegisops_api_requests_total{path="/chat",status=~"5.."}[10m]) > 3
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Repeated /chat 5xx — event-bus publish or run-driver errors"
+          runbook: "Check Redis Streams reachability (AEGISOPS_EVENT_BUS=redis) and the run driver logs."
