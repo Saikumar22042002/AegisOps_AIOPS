@@ -1322,6 +1322,17 @@ as done without the live run; the code paths behind each are covered by tests wi
       (3) gated destroy → card states soft-delete/purge semantics → verify the vault is
       soft-deleted (recoverable), not purged.
       Expect: AzureServices bypass + current-SP policy visible in the portal.
+- [ ] **DLV-38 · COMP honest compound/attach/OS-change in the UI (COMP)** — Needs
+      `GEMINI_API_KEY`.
+      Steps (all three live in the chatbot): (1) "create an ubuntu vm and a gcs bucket" →
+      the honest one-at-a-time offer naming the order (never a silent single pick), and on
+      "yes" it starts the first; (2) "create a gcs bucket and attach it to my vm" → creates
+      the bucket, states mounting is in-guest with the gcsfuse/s3fs/blobfuse hint, no fake
+      attachment; (3) "change the OS of <an existing vm> to windows" → guarded refusal +
+      gated destroy→recreate offer (Windows-on-azure/aws note for a gcp target). Confirm
+      the flagship "create a VPC and an EC2 inside it" STILL runs as the one-approval DAG
+      (DLV-12) — COMP must not have broken it.
+      Expect: none of the three ever routes to destroy.
 - [ ] **DLV-33 · PR-3 run cancellation (PR-3)** — Needs `GEMINI_API_KEY`.
       Steps: (1) send a slow provisioning request; while it plans, POST
       `/runs/<id>/cancel` (or the UI Cancel) → the run goes terminal `cancelled`

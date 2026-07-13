@@ -296,6 +296,114 @@ async def _availability_inner(settings, cloud: str, region: str) -> dict:
     return {"available": True, "checks": []}
 
 
+# ── COMP: honest handling of compound / attach-mount / OS-change asks (Phase-3 exit item).
+# The chatbot must NEVER silently pick one resource from a multi-resource ask, pretend to
+# mount storage it can't configure in-guest, or fake an in-place OS swap.
+_COMP_CATEGORIES: dict[str, tuple[str, ...]] = {
+    "compute": ("virtual machine", "ubuntu vm", "windows vm", "linux vm", " vm", "vm ",
+                "instance", "ec2", "gce", "compute engine"),
+    "storage": ("gcs bucket", "s3 bucket", " bucket", "blob", "object storage",
+                "storage account", "storage bucket"),
+    "network": ("vpc", "vnet", "virtual network", "subnet"),
+    "database": ("database", " rds", "cloud sql", "cloudsql", "postgres", "mysql",
+                 "mariadb", "sql server", "mssql"),
+    "kms": ("kms", "key ring", "keyring", "key vault", "keyvault", " vault", "crypto key"),
+    "loadbalancer": ("load balancer", "load-balancer", "loadbalancer", " nlb", " alb", " elb"),
+    "kubernetes": (" eks", " aks", " gke", "kubernetes", "k8s", " cluster"),
+    "resource_group": ("resource group",),
+}
+# Dependency linkage → the DEP create-first DAG owns it (e.g. "an EC2 inside a new VPC",
+# DLV-12). COMP compound-refuse must NEVER fire on these.
+_DEP_LINK = re.compile(
+    r"\b(inside|within|into|attached to|attach to|connected to)\b"
+    r"|\bin (?:a|an|the|my|its?|this|that|new|existing)\b", re.IGNORECASE)
+_ATTACH = re.compile(r"\b(attach|mount|connect)\b", re.IGNORECASE)
+_OS_CHANGE = re.compile(
+    r"\b(change|switch|convert|swap|migrate|make|reinstall|set)\b[^.]*\b"
+    r"(os|operating system|image|to (?:windows|ubuntu|debian|amazon[- ]linux|rhel|centos))\b",
+    re.IGNORECASE)
+_OS_TOKENS = re.compile(r"\b(windows|ubuntu|debian|amazon[- ]linux|rhel|centos)\b", re.IGNORECASE)
+
+
+def _detected_categories(message: str) -> list[str]:
+    low = f" {message.lower()} "
+    hits: list[str] = []
+    for cat, kws in _COMP_CATEGORIES.items():
+        if any(k in low for k in kws):
+            hits.append(cat)
+    return hits
+
+
+def _comp_intercept(state: AgentState) -> dict | None:
+    """Return an honest answer dict for a compound / attach / OS-change ask, else None to
+    fall through to the normal single-resource flow (which includes the DEP DAG path)."""
+    import re as _re
+
+    message = state.get("message", "") or ""
+    action = (state.get("action") or "create").lower()
+
+    def _answer(msg: str, *, clarify: bool = False) -> dict:
+        cc = classify(msg)
+        base = {"needs_change": False, "answer": msg,
+                "confidentiality": {"level": cc.level, "score": cc.score}}
+        if clarify:
+            base.update({"needs_clarification": True, "clarification": msg})
+        else:
+            base["approval_status"] = "not_required"
+        return base
+
+    # (c) OS change on an existing VM — a modify that would REPLACE, not update in place.
+    if action == "modify" and _OS_CHANGE.search(message):
+        target = state.get("target") or "that instance"
+        cloud = (state.get("cloud") or "").lower()
+        note = ("  Note: this Linux module (gcp.vm) has no Windows image — Windows VMs live "
+                "on **azure.vm** or **aws.ec2**.\n" if cloud == "gcp"
+                or "gcp" in message.lower() or "gce" in message.lower() else "")
+        return _answer(
+            f"I can't change the operating system of **{target}** in place — swapping the OS "
+            "replaces the instance (a new boot disk + machine), which my safety guard treats "
+            "as a destroy, not a modify. Honest path: I can **destroy** it (gated approval) "
+            "and **create a fresh VM** on the OS you want, reusing the same name and network.\n"
+            f"{note}Want me to start the gated destroy + recreate?")
+
+    # (b) attach / mount storage onto a VM — creation is offered, but MOUNTING is in-guest
+    # configuration AegisOps does not perform. Never a pretend attach, never cross-cloud wiring.
+    if _ATTACH.search(message) and any(
+            k in f" {message.lower()} " for k in _COMP_CATEGORIES["storage"]):
+        return _answer(
+            "I can **create** the storage (a bucket/blob container) as its own governed "
+            "resource, but I can't **attach/mount** it onto a VM for you — mounting object "
+            "storage is *in-guest* configuration that runs on the instance itself, outside "
+            "AegisOps' Terraform-only mutation scope. After I create it, mount it on the VM "
+            "with a one-liner:\n"
+            "• GCS → `gcsfuse <bucket> /mnt/<dir>`\n"
+            "• S3 → `s3fs <bucket> /mnt/<dir> -o iam_role=auto`\n"
+            "• Azure Blob → `blobfuse2 mount /mnt/<dir> --container-name=<c>`\n"
+            "Want me to create the bucket now? I won't wire a fake attachment.")
+
+    # (a) compound INDEPENDENT resources (no dependency linkage → not a DEP DAG). Offer to do
+    # them one at a time; never silently pick one.
+    if action == "create" and not _DEP_LINK.search(message):
+        cats = _detected_categories(message)
+        has_conj = bool(_re.search(r"\band\b|,|\bplus\b|\balso\b|&", message, _re.IGNORECASE))
+        if len(cats) >= 2 and has_conj:
+            pretty = {"compute": "the VM", "storage": "the storage bucket", "network": "the network",
+                      "database": "the database", "kms": "the key", "loadbalancer": "the load balancer",
+                      "kubernetes": "the cluster", "resource_group": "the resource group"}
+            ordered = [pretty.get(c, c) for c in cats]
+            first = ordered[0]
+            return _answer(
+                "That's a **compound request** for "
+                f"{len(cats)} independent resources ({', '.join(ordered)}). I create resources "
+                "one at a time so each gets its own plan + approval — I won't silently pick just "
+                f"one. Suggested order: {', then '.join(ordered)}. "
+                f"Shall I start with **{first}**? (For resources that genuinely depend on each "
+                "other — e.g. “an EC2 inside a new VPC” — I do build the ordered plan in one "
+                "approval; this ask looks independent.)",
+                clarify=True)
+    return None
+
+
 async def cloudops_plan(state: AgentState, config) -> dict:
     emitter = emitter_of(config)
     settings = get_settings()
@@ -312,6 +420,16 @@ async def cloudops_plan(state: AgentState, config) -> dict:
     target = state.get("target")
     if action == "read" and target and not inventory.is_broad_ref(target):
         return await _read_resource(state, config, target)
+    # COMP: intercept compound / attach-mount / OS-change asks with an honest answer BEFORE
+    # the flow commits to a single resource (or an in-place modify). Read paths are exempt.
+    if action in ("create", "modify"):
+        comp = _comp_intercept(state)
+        if comp is not None:
+            await emitter.step(2, "Compound/attach/OS-change — answering honestly")
+            await emitter.token(comp["answer"])
+            cc = comp["confidentiality"]
+            await emitter.confidentiality(cc["level"], cc["score"])
+            return comp
     if action == "modify":
         return await _modify_resource(state, config, target)
     # Destroy is a DAY-2 operation on an inventoried resource — it resolves its target from

@@ -40,7 +40,9 @@ For cloudops, also identify cloud (aws|azure|gcp|kubernetes|vmware), resource (s
   action=read — a question is never create/modify/destroy.
 - modify: change an EXISTING resource (e.g. add security-group inbound ports to an instance,
   scale a database, change tags/versioning/lifecycle; start/stop/power on/power off an
-  instance is ALWAYS modify — never destroy).
+  instance is ALWAYS modify — never destroy; asking to CHANGE/SWITCH the OS of an existing
+  VM is ALSO modify — never destroy, even though the platform will explain it needs a
+  recreate).
 - destroy: tear down an existing resource. ONLY when the user explicitly asks to destroy/delete/remove/terminate.
 Also identify `target`: the name or reference of the EXISTING resource a read/modify/destroy acts on
 (e.g. "test-vm", "the instance I created", "the earlier EC2"), or null for a brand-new create.
