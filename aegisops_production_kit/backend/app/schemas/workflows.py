@@ -90,6 +90,9 @@ class AWSS3Inputs(WorkflowInputs):
     region: str = "us-east-1"
     versioning: bool = True
     block_public: bool = True
+    # MOD: 0 = no lifecycle (old behavior). Auto-expiry is always an explicit user choice.
+    lifecycle_expire_days: int = Field(default=0, ge=0, le=3650)
+    extra_tags: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("bucket_name")
     @classmethod
@@ -141,6 +144,7 @@ class AWSRDSInputs(WorkflowInputs):
     allowed_cidr: str = ""              # dedicated SG only when set; MANDATORY for that path
     subnet_ids: list[str] = Field(default_factory=list)
     enable_log_exports: bool = False    # engine-aware exports + query-logging param group
+    extra_tags: dict[str, str] = Field(default_factory=dict)   # MOD: day-2 in-place tags
 
     @field_validator("instance_class")
     @classmethod
@@ -226,6 +230,16 @@ class AWSEC2Inputs(WorkflowInputs):
     # MS-10 (B2 at the schema level): SSM+CloudWatch instance profile — OFF here so existing
     # instances re-plan unchanged; the module's own default is ON for bare use.
     enable_ssm: bool = False
+    # MOD (owner Option A): Terraform-encoded power state; "" = unmanaged (old behavior).
+    power_state: str = ""
+    extra_tags: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("power_state")
+    @classmethod
+    def _valid_power(cls, v: str) -> str:
+        if v.strip().lower() not in ("", "running", "stopped"):
+            raise ValueError("power_state must be empty, running, or stopped")
+        return v.strip().lower()
 
     @field_validator("allowed_cidr")
     @classmethod
@@ -510,6 +524,14 @@ class GCPComputeInputs(WorkflowInputs):
     enable_oslogin: bool = False       # replaces metadata SSH keys while enabled
     spot: bool = False                 # preemptible — maintenance implications on the card
     service_account_email: str = ""    # least-scope (logging+monitoring writes) when set
+    power_state: str = ""              # MOD (Option A): "" unmanaged · running · stopped
+
+    @field_validator("power_state")
+    @classmethod
+    def _valid_power(cls, v: str) -> str:
+        if v.strip().lower() not in ("", "running", "stopped"):
+            raise ValueError("power_state must be empty, running, or stopped")
+        return v.strip().lower()
 
     @field_validator("machine_type")
     @classmethod

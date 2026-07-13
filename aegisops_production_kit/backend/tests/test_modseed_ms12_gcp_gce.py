@@ -71,7 +71,7 @@ def test_fmt_validate_and_b1_terraform_test(tmp_path):
     test = subprocess.run(["terraform", "test", "-no-color"], cwd=d,
                           capture_output=True, text=True, timeout=600, env=env)
     assert test.returncode == 0, f"terraform test failed:\n{test.stdout[-2000:]}{test.stderr[-500:]}"
-    assert "5 passed, 0 failed" in test.stdout
+    assert "6 passed, 0 failed" in test.stdout   # MOD added the power run
 
 
 def test_schema_b2_old_defaults():
@@ -117,7 +117,18 @@ def test_params_required_set_unchanged():
     assert missing == {"name", "machine_type", "os", "allowed_cidr"}
 
 
-def test_all_scanner_waivers_are_gone():
-    """The enhanced module is clean bare — no .checkov.yaml, no .tfsec config at all."""
-    assert not (_ws() / ".checkov.yaml").exists()
-    assert not (_ws() / ".tfsec" / "config.yml").exists()
+def test_scanner_configs_carry_only_the_tool_limitation_waivers():
+    """MS-12 deleted every waiver (bare 19/0). MOD's Option-A power state re-introduced a
+    NARROW set (deliberate, recorded): ANY expression on desired_status makes checkov drop
+    the resource's evaluated defaults, un-proving checks that genuinely pass — the secure
+    module defaults are UNCHANGED and asserted by the committed terraform test."""
+    cfg = (_ws() / ".checkov.yaml").read_text(encoding="utf-8")
+    assert "TOOL LIMITATION" in cfg and "desired_status" in cfg
+    assert cfg.count("- CKV_") == 3                          # exactly the rendering-limited trio
+    assert "MS-12" not in cfg
+    tfs = (_ws() / ".tfsec" / "config.yml").read_text(encoding="utf-8")
+    assert "TOOL LIMITATION" in tfs and tfs.count("  - google-") == 2
+    # the secure defaults themselves are still real:
+    src = _src()
+    assert re.search(r'variable "enable_shielded" \{[^}]*default     = true', src, re.S)
+    assert re.search(r'variable "public_ip" \{[^}]*default     = false', src, re.S)

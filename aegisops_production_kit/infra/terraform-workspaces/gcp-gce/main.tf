@@ -91,6 +91,19 @@ variable "service_account_email" {
   description = "Optional dedicated service account (least scope: logging + monitoring writes only)."
 }
 
+# MOD (owner Option A): Terraform-encoded power state via GCE desired_status — start/stop
+# runs as a governed day-2 modify. "" preserves the old rendering.
+variable "power_state" {
+  type        = string
+  default     = ""
+  description = "\"\" = unmanaged (old behavior) · running · stopped. Managed via desired_status, never an SDK call."
+
+  validation {
+    condition     = contains(["", "running", "stopped"], var.power_state)
+    error_message = "power_state must be empty, running, or stopped."
+  }
+}
+
 provider "google" {
   project = var.project
   region  = var.region
@@ -103,6 +116,11 @@ locals {
     "ubuntu-24.04" = "ubuntu-os-cloud/ubuntu-2404-lts-amd64"
   }
   image = lookup(local.images, var.os, local.images["debian-12"])
+  # MOD power state; null = unmanaged (old behavior). Hoisted to a local because checkov's
+  # renderer drops a resource's evaluated defaults when an attribute carries a non-trivial
+  # expression (silently un-proving the MS-12 secure defaults).
+  power_map    = { "" = null, running = "RUNNING", stopped = "TERMINATED" }
+  power_status = local.power_map[var.power_state]
   metadata = merge(
     { ssh-keys = "${var.ssh_user}:${tls_private_key.ssh.public_key_openssh}" },
     var.block_project_ssh_keys ? { block-project-ssh-keys = "true" } : {},
@@ -119,6 +137,8 @@ resource "google_compute_instance" "this" {
   name         = var.name
   machine_type = var.machine_type
   zone         = var.zone
+  # Power state managed THROUGH terraform (owner Option A) — see local.power_status.
+  desired_status = local.power_status
 
   boot_disk {
     initialize_params {

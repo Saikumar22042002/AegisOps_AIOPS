@@ -55,6 +55,113 @@ async def _extract_ports(settings, message: str) -> list[int]:
     return sorted(set(ports))
 
 
+async def _extract_modification(settings, message: str) -> dict:
+    """MOD: pull the day-2 changes the user asked for. LLM-first with honest regex
+    fallbacks; only EXPLICITLY requested changes appear in the result."""
+    import re
+
+    changes: dict = {}
+    gemini = get_gemini(settings)
+    if gemini.enabled:
+        try:
+            r = await llm.classify_json(
+                settings,
+                'Extract ONLY the modifications the user explicitly asked for on an existing '
+                'cloud resource. Respond with ONLY JSON, omitting keys the user did not ask '
+                'about: {"ingress_ports": [<int>], "power": "running|stopped", '
+                '"versioning": <bool>, "lifecycle_expire_days": <int>, '
+                '"instance_class": "<db.x.y>", "allocated_storage": <int GiB>, '
+                '"tags": {"<key>": "<value>"}}. '
+                '"start/power on" → power=running; "stop/power off/shut down" → power=stopped.',
+                message)
+            for k in ("ingress_ports", "power", "versioning", "lifecycle_expire_days",
+                      "instance_class", "allocated_storage", "tags"):
+                if r.get(k) not in (None, [], {}, ""):
+                    changes[k] = r[k]
+        except Exception as e:  # noqa: BLE001
+            log.warning("cloudops.modify_extract_failed", error=str(e))
+
+    low = message.lower()
+    if "ingress_ports" not in changes:
+        ports = await _extract_ports(settings, message)
+        if ports:
+            changes["ingress_ports"] = ports
+    if "power" not in changes:
+        if re.search(r"\b(start|power\s*on|boot|turn\s*on)\b", low):
+            changes["power"] = "running"
+        elif re.search(r"\b(stop|power\s*off|shut\s*down|turn\s*off)\b", low):
+            changes["power"] = "stopped"
+    if "versioning" not in changes:
+        m = re.search(r"versioning\s*(on|off|enabled?|disabled?|suspend\w*)", low)
+        if m:
+            changes["versioning"] = m.group(1).startswith(("on", "enable"))
+    if "lifecycle_expire_days" not in changes:
+        m = re.search(r"(?:expire|lifecycle|delete\s+objects?)\D{0,24}?(\d{1,4})\s*days?", low)
+        if m:
+            changes["lifecycle_expire_days"] = int(m.group(1))
+    if "instance_class" not in changes:
+        m = re.search(r"\b(db\.[a-z0-9]+\.[a-z0-9]+)\b", low)
+        if m and re.search(r"\b(scale|resize|upgrade|instance class|class)\b", low):
+            changes["instance_class"] = m.group(1)
+    if "allocated_storage" not in changes:
+        m = re.search(r"\b(?:storage|disk)\D{0,16}?(\d{2,5})\s*g[i]?b\b", low)
+        if m:
+            changes["allocated_storage"] = int(m.group(1))
+    if "tags" not in changes:
+        m = re.search(r"\btag\s+([A-Za-z][\w.-]*)\s*[=:]\s*([\w.-]+)", message)
+        if m:
+            changes["tags"] = {m.group(1): m.group(2)}
+    if isinstance(changes.get("power"), str):
+        changes["power"] = changes["power"].strip().lower()
+        if changes["power"] not in ("running", "stopped"):
+            changes.pop("power")
+    return changes
+
+
+# MOD capability map: which day-2 changes each resource family supports, and how each
+# change lands on the module inputs. Power is Terraform-encoded (owner Option A) — AWS via
+# aws_ec2_instance_state, GCE via desired_status; Azure has no TF-native power path.
+_MODIFY_CAPS: dict[str, set[str]] = {
+    "aws.ec2": {"ingress_ports", "power", "tags"},
+    "gcp.vm": {"ingress_ports", "power"},
+    "azure.vm": {"ingress_ports"},
+    "aws.s3": {"versioning", "lifecycle_expire_days", "tags"},
+    "aws.rds": {"instance_class", "allocated_storage", "tags"},
+}
+
+_AZURE_POWER_ANSWER = ("Power on/off isn't supported for Azure — use the portal for that; "
+                       "create, modify, and destroy are fully supported here.")
+
+
+def _apply_modification(base: dict, changes: dict) -> tuple[dict, list[str]]:
+    """Merge the requested changes onto the stored inputs; return (merged, descriptions)."""
+    merged = dict(base)
+    desc: list[str] = []
+    if "ingress_ports" in changes:
+        current = [int(p) for p in (base.get("ingress_ports") or [])]
+        merged["ingress_ports"] = sorted(set(current) | set(changes["ingress_ports"]))
+        desc.append(f"open inbound TCP {changes['ingress_ports']}")
+    if "power" in changes:
+        merged["power_state"] = changes["power"]
+        desc.append(f"set power state to {changes['power']} (Terraform-managed, no SDK call)")
+    if "versioning" in changes:
+        merged["versioning"] = bool(changes["versioning"])
+        desc.append(f"turn versioning {'on' if changes['versioning'] else 'off'}")
+    if "lifecycle_expire_days" in changes:
+        merged["lifecycle_expire_days"] = int(changes["lifecycle_expire_days"])
+        desc.append(f"expire objects after {changes['lifecycle_expire_days']} days")
+    if "instance_class" in changes:
+        merged["instance_class"] = str(changes["instance_class"])
+        desc.append(f"scale to {changes['instance_class']}")
+    if "allocated_storage" in changes:
+        merged["allocated_storage"] = int(changes["allocated_storage"])
+        desc.append(f"grow storage to {changes['allocated_storage']} GiB")
+    if "tags" in changes:
+        merged["extra_tags"] = {**(base.get("extra_tags") or {}), **dict(changes["tags"])}
+        desc.append("update tags " + ", ".join(f"{k}={v}" for k, v in changes["tags"].items()))
+    return merged, desc
+
+
 async def _extract_inputs(settings, template, message: str, *, org_id: str | None = None,
                           user_id: str | None = None) -> dict:
     """Extract this module's parameter values from NL via Gemini, merged with free-form parsing.
@@ -977,23 +1084,40 @@ async def _modify_resource(state: AgentState, config, target: str | None) -> dic
                           f"{', '.join(m['name'] for m in matches)}. Which should I modify?")
     res = matches[0]
     template = templates.select(res["cloud"], res["resource_type"])
-    if template is None or res["resource_type"] not in ("ec2", "vm"):
-        return await _say(f"I can currently modify inbound ports on compute instances (AWS EC2, Azure/GCP VM); "
-                          f"modifying {res['cloud']}/{res['resource_type']} isn't supported yet.")
-    ports = await _extract_ports(settings, state["message"])
-    if not ports:
-        return await _say(f"What change should I make to **{res['name']}**? I can add inbound TCP ports — "
-                          f"e.g. “add inbound ports 8501, 8502 to {res['name']}”.")
+    caps = _MODIFY_CAPS.get(template.key) if template else None
+    if template is None or caps is None:
+        supported = ", ".join(sorted(_MODIFY_CAPS))
+        return await _say(f"Modifying {res['cloud']}/{res['resource_type']} isn't supported yet. "
+                          f"Day-2 modify currently covers: {supported}.")
+
+    changes = await _extract_modification(settings, state["message"])
+    # Owner Option A: Azure has no Terraform-native power path — say so honestly, never
+    # fall back to an SDK mutation.
+    if changes.get("power") and template.key == "azure.vm":
+        return await _say(_AZURE_POWER_ANSWER)
+    unsupported = sorted(set(changes) - caps)
+    if changes and unsupported:
+        return await _say(f"On {template.key} I can change: {', '.join(sorted(caps))} — "
+                          f"not {', '.join(unsupported)}. Rephrase with a supported change "
+                          f"for **{res['name']}**.")
+    if not changes:
+        hints = {"aws.ec2": "e.g. “stop web-01”, “add inbound port 8501 to web-01”, or “tag env=prod”",
+                 "gcp.vm": "e.g. “start web-01” or “add inbound port 8080”",
+                 "azure.vm": "e.g. “add inbound ports 8501, 8502”",
+                 "aws.s3": "e.g. “turn versioning off”, “expire objects after 30 days”, or “tag env=prod”",
+                 "aws.rds": "e.g. “scale to db.t3.large”, “grow storage to 100 GiB”, or “tag env=prod”"}
+        return await _say(f"What change should I make to **{res['name']}**? "
+                          f"{hints.get(template.key, '')}")
 
     base = dict(res.get("inputs") or {})
-    current = [int(p) for p in (base.get("ingress_ports") or [])]
-    merged = {**base, "ingress_ports": sorted(set(current) | set(ports))}
+    merged, change_desc = _apply_modification(base, changes)
     try:
         validated = template.schema(**merged).model_dump()
     except Exception as e:  # noqa: BLE001
         return await _say(f"Couldn't build a valid modification for {res['name']}: {e}")
+    change_text = "; ".join(change_desc)
 
-    await emitter.step(3, f"Planning inbound {ports} on {res['name']}")
+    await emitter.step(3, f"Planning day-2 change on {res['name']}: {change_text}")
     await timing.start_step(run_id, "cloudops_agent")
     await timing.end_step(run_id, "cloudops_agent", status="done")
     await timing.start_step(run_id, "planner", tool="terraform")
@@ -1039,15 +1163,15 @@ async def _modify_resource(state: AgentState, config, target: str | None) -> dic
                  "workspace": res["workspace"] or template.workspace,
                  "state_workspace": res.get("state_workspace"),
                  "policy_checks": policy_checks, "mode": "apply"}
-    cc = classify(json.dumps({"modify": res["name"], "ports": ports}))
+    cc = classify(json.dumps({"modify": res["name"], "changes": change_desc}))
     await emitter.confidentiality(cc.level, cc.score)
     reasoning = [
         {"title": "Day-2 modification", "conf": "",
-         "body": f"Add inbound TCP {ports} to {res['name']}'s security group (resource {res.get('provider_id')})."},
+         "body": f"{change_text.capitalize()} on {res['name']} (resource {res.get('provider_id')})."},
         {"title": "Plan", "conf": "",
          "body": f"+{plan['summary']['add']} ~{plan['summary']['change']} -{plan['summary']['destroy']}"},
     ]
-    await emitter.analysis(summary=f"Planned a security-group change on {res['name']}; awaiting approval.", cards=reasoning)
+    await emitter.analysis(summary=f"Planned a day-2 change on {res['name']}; awaiting approval.", cards=reasoning)
     interrupt_payload = {"kind": "approval", "runId": state["run_id"], "workflow": template.key, "plan": plan_json,
                          "diff": plan["diff"], "policyChecks": policy_checks, "mode": "apply",
                          "cloud": res["cloud"], "resource": res["resource_type"]}
@@ -1059,8 +1183,9 @@ async def _modify_resource(state: AgentState, config, target: str | None) -> dic
             "diff": plan["diff"], "policy_checks": policy_checks, "execution_mode": "apply",
             "needs_change": True, "approval_status": "pending", "reasoning_cards": reasoning,
             "interrupt_payload": interrupt_payload, "confidentiality": {"level": cc.level, "score": cc.score},
-            "answer": f"Planned adding inbound {', '.join(map(str, ports))} to **{res['name']}** "
-                      f"(~{plan['summary']['change']} changed). Review and approve to apply."}
+            "answer": f"Planned this change on **{res['name']}**: {change_text} "
+                      f"(+{plan['summary']['add']} ~{plan['summary']['change']}). "
+                      "Review and approve to apply."}
 
 
 async def cloudops_execute(state: AgentState, config) -> dict:

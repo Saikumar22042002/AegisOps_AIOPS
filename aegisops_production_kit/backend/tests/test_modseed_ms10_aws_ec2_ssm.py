@@ -68,7 +68,7 @@ def test_fmt_validate_and_b1_terraform_test(tmp_path):
     test = subprocess.run(["terraform", "test", "-no-color"], cwd=d,
                           capture_output=True, text=True, timeout=600, env=env)
     assert test.returncode == 0, f"terraform test failed:\n{test.stdout[-2000:]}{test.stderr[-500:]}"
-    assert "2 passed, 0 failed" in test.stdout
+    assert "4 passed, 0 failed" in test.stdout   # MOD added 2 power/tags runs
 
 
 def test_schema_b2_default_off():

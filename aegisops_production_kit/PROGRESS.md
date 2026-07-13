@@ -1322,6 +1322,21 @@ as done without the live run; the code paths behind each are covered by tests wi
       (3) gated destroy → card states soft-delete/purge semantics → verify the vault is
       soft-deleted (recoverable), not purged.
       Expect: AzureServices bypass + current-SP policy visible in the portal.
+- [ ] **DLV-28 · MOD day-2 modify beyond ports + Option-A power state (MOD)** — Needs:
+      valid `GEMINI_API_KEY` + AWS creds (+ GCP SA for the gce power pass).
+      Steps: (1) "stop web-01" (an aws.ec2 from DLV-12/24) → the approval card shows a
+      day-2 change "set power state to stopped (Terraform-managed, no SDK call)" with an
+      IN-PLACE plan → approve → the instance shows stopped in the console;
+      "start web-01" brings it back; (2) "stop az-box" (azure) → the honest answer
+      ("use the portal…") with NO plan and NO SDK call — verify no run was created;
+      (3) "turn versioning off on logs-bucket" → approve → suspended in the console;
+      "expire objects after 30 days in logs-bucket" → the aegisops-expire rule appears;
+      (4) "scale payments-db to db.t3.large" → in-place modify (plan_guard blocks any
+      replace) → class changes without data loss; (5) "tag env=prod on web-01" → merged
+      tags visible; (6) **live B1**: re-plan any pre-MOD resource from stored inputs →
+      "No changes."
+      Expect: every modify is approval-gated; power state changes appear in the plan diff
+      as aws_ec2_instance_state / desired_status — never a bare API call.
 - [ ] **DLV-27 · MODSEED azure.aks add-ons + azure.vm vnet placement live (MS-13)** —
       Needs: valid `GEMINI_API_KEY` + Azure creds.
       Steps: (1) "create an aks cluster named apps-aks with monitoring and calico" → the
@@ -1788,6 +1803,20 @@ this section mirrors phase-level status only.
         green. Live = **DLV-27**. **MODSEED MS-7..13 COMPLETE — STOPPED for the evidence
         table + the VM start/stop options.**
 
+  - [x] **MOD — day-2 modify beyond ports + Option-A power state** (2026-07-13):
+        `_extract_modification` + `_MODIFY_CAPS` + `_apply_modification` generalize
+        `_modify_resource` — s3 versioning/lifecycle/tags, rds scaling/tags, ec2
+        ports/power/tags, gcp ports/power, azure ports — same gates as ever (approval,
+        plan_guard in-place, policy re-run, per-resource state). **Power = Terraform-
+        encoded per the owner's Option A** (`aws_ec2_instance_state` / GCE
+        `desired_status`; `""` = unmanaged, B1); **Azure power answers honestly** (portal;
+        no SDK fallback, no plan). Router: start/stop is ALWAYS modify. Committed tftest
+        gates extended deliberately (ec2 4, gce 6, s3 NEW 3 — lifecycle expiry never a
+        module default); CKV_AWS_300 fixed at the source. Tool discovery: `desired_status`
+        expressions break checkov/tfsec default-rendering → 3+2 gcp-gce waivers re-added
+        with TOOL-LIMITATION reasons (secure defaults unchanged, tftest-asserted).
+        Evidence: `test_mod_day2.py` (11). Canary (B5) green. Live = **DLV-28**.
+
 ### Scanner ledger (fix or waiver per finding — owner condition, 2026-07-12)
 
 Scanners: checkov 3.3.8, tfsec v1.28.14. Waivers live per-workspace in
@@ -1837,7 +1866,7 @@ for the same reason — commit-hash pinning applies to git sources).
 | aws-rds | CKV_AWS_161 / AVD-AWS-0176 | IAM auth: opt-in candidate; master credentials are AWS-managed (`manage_master_user_password`). |
 | aws-rds | CKV_AWS_293 / AVD-AWS-0177 | TF-level deletion protection would fail governed destroy runs mid-apply; destroys are approval-gated by the platform instead (same reasoning as gcp-kms CKV_GCP_82 and gke's explicit `deletion_protection = false`). |
 | aws-rds | AVD-AWS-0077 | Backup retention: day-2 candidate; changing it would alter existing instances' re-plans (B1); sandbox cost posture. *(Re-justified without the MS tag when MS-7 shipped.)* |
-| aws-s3 | CKV2_AWS_61 | Lifecycle rules: demo bucket posture; day-2 candidate. |
+| aws-s3 | CKV2_AWS_61 | Lifecycle rules: the OPTION now exists (`lifecycle_expire_days`, MOD) but never as a module default — auto-expiring objects is a data-loss decision the user makes explicitly; the check judges the off-default rendering. |
 | aws-s3 | CKV2_AWS_62 | Event notifications: no consumer exists in the platform's flows. |
 | aws-s3 | CKV_AWS_144 | Cross-region replication: not in any binding scope (explicitly out of MODSEED). |
 | aws-s3 | CKV_AWS_145 / AVD-AWS-0132 | SSE-S3 (AES256) is the module contract; KMS default would add key cost/coupling. |
@@ -1885,7 +1914,8 @@ for the same reason — commit-hash pinning applies to git sources).
 | gcp-cloudsql | CKV_GCP_6 / AVD-GCP-0015 | google provider 5.x replaced `require_ssl` with `ssl_mode` (module default ENCRYPTED_ONLY); both scanners track the removed attribute. *(Re-justified when MS-9 shipped.)* |
 | gcp-cloudsql | CKV_GCP_60 / AVD-GCP-0017 (public-address rule) | Public IP is the sandbox access path; the `private_network` option ships and drops it entirely. *(Re-justified when MS-9 shipped.)* |
 | gcp-cloudsql | CKV_GCP_79 | Major-version bump is destructive for existing instances; version is variable-driven. |
-| gcp-gce | ~~ALL (CKV_GCP_32/38/39/40 + AVD-GCP-0030/0031/0033/0041/0045)~~ | **EVERY WAIVER REMOVED by MS-12 (2026-07-13) — both config files DELETED.** Module defaults: shielded VM on, project-wide SSH keys blocked, NO public IP (the platform schema keeps public_ip=true + options-off for existing instances per B2). Bare scans: checkov 19 passed / 0 failed, tfsec clean. |
+| gcp-gce | ~~CKV_GCP_39 + AVD-GCP-0041/0045 (shielded) + AVD-GCP-0031 (public IP, tfsec)~~ | **REMOVED by MS-12 and still gone** — module defaults shielded ON / no public IP. |
+| gcp-gce | CKV_GCP_32, CKV_GCP_38, CKV_GCP_40 / AVD-GCP-0030, AVD-GCP-0033 | **TOOL LIMITATION (re-added by MOD, 2026-07-13)**: ANY expression on `desired_status` (the Option-A power state) makes checkov/tfsec drop the resource's evaluated variable defaults, un-proving checks that genuinely pass. The MODSEED secure module defaults are UNCHANGED and the committed terraform test asserts those renders. MS-12 had these at zero (bare 19/0) before the power attribute existed. |
 | gcp-gcs | CKV_GCP_62 | Bucket access logging needs a log bucket; demo posture, opt-in candidate. |
 | gcp-gcs | AVD-GCP-0066 | CMEK: platform-managed encryption is the sandbox posture. |
 | gcp-gke | CKV_GCP_12 / AVD-GCP-0056 | Network policy: sandbox cluster posture; enterprise hardening candidate. |

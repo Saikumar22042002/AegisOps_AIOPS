@@ -124,7 +124,7 @@ resource "aws_db_instance" "this" {
   vpc_security_group_ids          = local.create_sg ? [aws_security_group.db[0].id] : null
   db_subnet_group_name            = local.create_subnet_group ? aws_db_subnet_group.this[0].name : null
 
-  tags = {
+  tags = merge({
     ManagedBy = "AegisOps"
-  }
+  }, var.extra_tags)
 }

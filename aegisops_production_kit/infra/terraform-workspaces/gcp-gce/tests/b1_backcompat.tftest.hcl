@@ -22,6 +22,7 @@ variables {
   enable_oslogin         = false
   spot                   = false
   service_account_email  = ""
+  power_state            = ""
 }
 
 run "b1_old_shape_renders_exactly_the_old_plan" {
@@ -127,5 +128,18 @@ run "dep_slot_network_flows_to_instance_and_firewalls" {
   assert {
     condition     = google_compute_firewall.ingress[0].network == "prod-network" && google_compute_firewall.admin[0].network == "prod-network"
     error_message = "BOTH firewalls must follow the same network"
+  }
+}
+
+run "mod_power_state_via_desired_status" {
+  command = plan
+
+  variables {
+    power_state = "stopped"
+  }
+
+  assert {
+    condition     = google_compute_instance.this.desired_status == "TERMINATED"
+    error_message = "stopped must render desired_status=TERMINATED (Terraform-managed, no SDK)"
   }
 }

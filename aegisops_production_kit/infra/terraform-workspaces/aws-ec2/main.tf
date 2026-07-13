@@ -66,6 +66,25 @@ variable "enable_ssm" {
   description = "MS-10: SSM Session Manager + CloudWatch agent instance profile. Secure/observable by default here; the platform schema defaults this OFF (B2) and always passes it explicitly."
 }
 
+# MOD (owner Option A): Terraform-encoded power state — start/stop runs as a governed
+# day-2 modify (approval-gated, plan-guarded, audited). "" preserves the old rendering.
+variable "power_state" {
+  type        = string
+  default     = ""
+  description = "\"\" = unmanaged (old behavior) · running · stopped. Managed via aws_ec2_instance_state, never an SDK call."
+
+  validation {
+    condition     = contains(["", "running", "stopped"], var.power_state)
+    error_message = "power_state must be empty, running, or stopped."
+  }
+}
+
+variable "extra_tags" {
+  type        = map(string)
+  default     = {}
+  description = "MOD: additional tags merged onto the instance (day-2 tag updates are in-place)."
+}
+
 variable "ingress_ports" {
   type    = list(number)
   default = []
@@ -273,10 +292,18 @@ resource "aws_instance" "this" {
     volume_type = var.root_volume_type
   }
 
-  tags = {
+  tags = merge({
     Name      = var.name
     ManagedBy = "AegisOps"
-  }
+  }, var.extra_tags)
+}
+
+# Power state managed THROUGH terraform (owner Option A) — created only when the platform
+# asks for a managed power state, so existing instances re-plan unchanged (B1).
+resource "aws_ec2_instance_state" "power" {
+  for_each    = var.power_state != "" ? toset(["power"]) : toset([])
+  instance_id = aws_instance.this.id
+  state       = var.power_state
 }
 
 output "instance_id" { value = aws_instance.this.id }
@@ -290,6 +317,7 @@ output "ingress_ports" { value = var.ingress_ports }
 output "allowed_cidr" { value = var.allowed_cidr }
 output "admin_port" { value = var.allowed_cidr != "" ? local.admin_port : null }
 output "ssm_enabled" { value = var.enable_ssm }
+output "power_state" { value = var.power_state != "" ? var.power_state : "unmanaged" }
 output "instance_profile" { value = one(values(aws_iam_instance_profile.ssm)[*].name) }
 output "ami_used" { value = local.ami_id }
 output "login_user" { value = local.login_user }

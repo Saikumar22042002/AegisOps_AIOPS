@@ -27,6 +27,8 @@ variables {
   ingress_ports    = []
   allowed_cidr     = "10.0.0.0/16"
   enable_ssm       = false
+  power_state      = ""
+  extra_tags       = {}
 }
 
 run "b1_old_shape_renders_no_ssm_resources" {
@@ -35,6 +37,10 @@ run "b1_old_shape_renders_no_ssm_resources" {
   assert {
     condition     = length(aws_iam_role.ssm) == 0 && length(aws_iam_instance_profile.ssm) == 0
     error_message = "old inputs must not render any IAM role or instance profile"
+  }
+  assert {
+    condition     = length(aws_ec2_instance_state.power) == 0
+    error_message = "old inputs must not render a managed power state (MOD Option A)"
   }
   assert {
     condition     = length(aws_iam_role_policy_attachment.ssm_core) == 0 && length(aws_iam_role_policy_attachment.cloudwatch_agent) == 0
@@ -63,5 +69,31 @@ run "enable_ssm_renders_the_profile_chain" {
   assert {
     condition     = aws_iam_role_policy_attachment.cloudwatch_agent["ssm"].policy_arn == "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
     error_message = "the CloudWatch agent managed policy must be attached"
+  }
+}
+
+run "mod_power_state_is_terraform_managed" {
+  command = plan
+
+  variables {
+    power_state = "stopped"
+  }
+
+  assert {
+    condition     = aws_ec2_instance_state.power["power"].state == "stopped"
+    error_message = "a managed power state must render aws_ec2_instance_state (never an SDK call)"
+  }
+}
+
+run "mod_extra_tags_merge" {
+  command = plan
+
+  variables {
+    extra_tags = { env = "prod" }
+  }
+
+  assert {
+    condition     = aws_instance.this.tags["env"] == "prod" && aws_instance.this.tags["ManagedBy"] == "AegisOps"
+    error_message = "extra tags must merge without displacing the managed tags"
   }
 }

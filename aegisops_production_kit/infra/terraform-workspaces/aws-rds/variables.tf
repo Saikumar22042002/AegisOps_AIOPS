@@ -54,3 +54,9 @@ variable "enable_log_exports" {
   default     = true
   description = "Engine-aware CloudWatch log exports + query-logging parameter group. Secure by default here; the platform schema defaults this OFF (B2) and always passes it explicitly."
 }
+
+variable "extra_tags" {
+  type        = map(string)
+  default     = {}
+  description = "MOD: additional tags merged onto the instance (day-2 tag updates are in-place)."
+}

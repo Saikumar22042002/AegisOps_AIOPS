@@ -25,10 +25,48 @@ variable "block_public" {
   default = true
 }
 
+# MOD: day-2 lifecycle — 0 keeps the old rendering (no lifecycle configuration at all).
+# Never a module default: auto-expiring objects is a data-loss decision the user makes.
+variable "lifecycle_expire_days" {
+  type    = number
+  default = 0
+
+  validation {
+    condition     = var.lifecycle_expire_days >= 0 && var.lifecycle_expire_days <= 3650
+    error_message = "lifecycle_expire_days must be 0 (off) to 3650."
+  }
+}
+
+variable "extra_tags" {
+  type        = map(string)
+  default     = {}
+  description = "MOD: additional tags merged onto the bucket (day-2 tag updates are in-place)."
+}
+
 resource "aws_s3_bucket" "this" {
   bucket = var.bucket_name
-  tags = {
+  tags = merge({
     ManagedBy = "AegisOps"
+  }, var.extra_tags)
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "this" {
+  for_each = var.lifecycle_expire_days > 0 ? toset(["expire"]) : toset([])
+  bucket   = aws_s3_bucket.this.id
+
+  rule {
+    id     = "aegisops-expire"
+    status = "Enabled"
+
+    filter {}
+
+    expiration {
+      days = var.lifecycle_expire_days
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
   }
 }
 
@@ -58,3 +96,5 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "this" {
 
 output "bucket_arn" { value = aws_s3_bucket.this.arn }
 output "bucket_name" { value = aws_s3_bucket.this.id }
+output "versioning" { value = var.versioning }
+output "lifecycle_expire_days" { value = var.lifecycle_expire_days }
