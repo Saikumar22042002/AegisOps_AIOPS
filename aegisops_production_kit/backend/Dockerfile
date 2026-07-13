@@ -1,6 +1,10 @@
 # syntax=docker/dockerfile:1
 # AegisOps API image — FastAPI + LangGraph, with Terraform, Ansible, and kubectl on PATH.
-FROM python:3.11-slim AS base
+# PR-7: the base image is pinned by DIGEST (not just the 3.11-slim tag) so a rebuild is
+# reproducible and a moved tag can't slip a different base in. Rebuild cadence: refresh the
+# digest monthly (or on a base CVE) — `docker manifest inspect python:3.11-slim` for the new
+# digest, update here, rebuild, re-run the supply-chain CI job.
+FROM python:3.11-slim@sha256:e031123e3d85762b141ad1cbc56452ba69c6e722ebf2f042cc0dc86c47c0d8b3 AS base
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \

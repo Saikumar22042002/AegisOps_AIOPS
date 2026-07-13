@@ -95,6 +95,12 @@ services:
       - "../FIX.md:/app/FIX.md:ro"
       # PR-1c: the hygiene posture test reads the real ignore rules.
       - "./.gitignore:/app/.gitignore:ro"
+      # PR-5/6/7: structural tests read these repo artifacts (mounted under /app so the
+      # backend-dir anchor resolves them the same way it does on the host).
+      - "./docs:/app/docs:ro"
+      - "./infra/prometheus:/app/infra/prometheus:ro"
+      - "./infra/backup:/app/infra/backup:ro"
+      - "./.github:/app/.github:ro"
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }

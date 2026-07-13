@@ -1322,6 +1322,35 @@ as done without the live run; the code paths behind each are covered by tests wi
       (3) gated destroy → card states soft-delete/purge semantics → verify the vault is
       soft-deleted (recoverable), not purged.
       Expect: AzureServices bypass + current-SP policy visible in the portal.
+- [ ] **DLV-33 · PR-3 run cancellation (PR-3)** — Needs `GEMINI_API_KEY`.
+      Steps: (1) send a slow provisioning request; while it plans, POST
+      `/runs/<id>/cancel` (or the UI Cancel) → the run goes terminal `cancelled`
+      ("nothing changed"), no plan file remains; (2) a VPC→EC2 DAG: approve, then cancel
+      mid-run after step 1 applies → step 2 never starts, the outcome reads "step 1
+      applied, cancelled before step 2", the VPC really exists and the EC2 does not;
+      (3) a bystander (not initiator/approver) gets 403.
+      Expect: cancel NEVER interrupts a terraform apply already in flight — only at the
+      next step boundary.
+- [ ] **DLV-34 · PR-4 retention sweep (PR-4)** — Needs the reconciler on + seeded old data.
+      Steps: set `RETENTION_MESSAGES_DAYS=180` / `RETENTION_RUN_PLAN_DAYS=180`, seed a
+      closed session + old run, run `python -m app.admin retention-sweep` → old msgs gone,
+      the old run's Terraform tab shows "compacted per retention policy", audit_log +
+      approvals untouched, an active session's messages untouched.
+- [ ] **DLV-35 · PR-5 backup + restore drill (PR-5, exit-gate item)** — Needs a Postgres
+      instance + a restore target.
+      Steps: run `infra/backup/pg_backup.sh`; follow `docs/RESTORE_RUNBOOK.md` — restore
+      into a fresh DB, boot the API, verify sessions/runs/inventory + audit_log intact,
+      `python -m app.admin rebuild-world-model` reconstructs the graph, then a day-2 on a
+      pre-backup resource succeeds. Record the executed drill here with evidence.
+- [ ] **DLV-36 · PR-6 alert fires (PR-6, exit-gate item)** — Needs Prometheus loaded with
+      alerts.yml.
+      Steps: `promtool check rules infra/prometheus/alerts.yml` (clean); simulate one
+      condition (e.g. stop Postgres → `aegisops_dependency_up{dependency="postgres"}==0`)
+      → the DependencyDown alert fires in the Prometheus UI within its `for` window.
+- [ ] **DLV-37 · PR-7 supply-chain audit (PR-7)** — Needs CI.
+      Steps: push → the `supply-chain` job runs pip-audit + npm audit; add a seeded
+      known-vuln pin to a throwaway manifest → CI catches it (blocking on critical/high).
+      Verify the API image builds from the pinned base digest.
 - [ ] **DLV-30 · P17 stakeholder emails (P17)** — Needs valid SMTP env
       (`SMTP_HOST/SMTP_USER/SMTP_PASSWORD`) + `GEMINI_API_KEY`.
       Steps: (1) initiator A submits an actionable run, approver B approves → the result
@@ -1872,6 +1901,24 @@ this section mirrors phase-level status only.
         no drift), 429 at the org/user cap before any write; per-stage subprocess timeouts
         with SIGTERM→grace→SIGKILL on the process group and an honest rc-124 classification.
         Evidence: `test_pr2_limits.py` (7). Live = DLV-32.
+
+  - [x] **PR-3 — CANCEL** (2026-07-13): cooperative cancel flag + `/runs/{id}/cancel`
+        (initiator/approver); pre-approval stops the live drive → terminal `cancelled`;
+        DAG halts after the current step (never mid-apply) with an honest partial;
+        `cancelled` is first-class terminal everywhere (reconciler/force-terminal/artifacts/
+        metrics). Evidence: `test_pr3_cancel.py` (8). Live = DLV-33.
+  - [x] **PR-4 — RETENTION** (2026-07-13): reconciler-loop sweeper, OFF by default; closed-
+        session msg/run_step deletion, notification deletion, run plan_json compaction with
+        an honest tab marker; audit_log + approvals never touched. Evidence:
+        `test_pr4_retention.py` (4). Live = DLV-34.
+  - [x] **PR-5 — BACKUP** (2026-07-13): pg_dump script + RESTORE_RUNBOOK + `rebuild-world-
+        model` admin command (Neo4j rebuilt from inventory, no cloud read) + TF force-unlock
+        runbook. Evidence: `test_pr5_backup.py` (3). Restore DRILL deferred = DLV-35.
+  - [x] **PR-6 — ALERTS** (2026-07-13): alerts.yml (7 runbook'd rules) + new reconciler
+        gauges, loaded + mounted. Evidence: `test_pr6_alerts.py` (5). Live fire = DLV-36.
+  - [x] **PR-7 — SUPPLY** (2026-07-13): CI supply-chain job (pip-audit + npm audit) + base
+        image digest pin with documented cadence. Evidence: `test_pr7_supply_chain.py` (3).
+        Live = DLV-37.
 
 ### Scanner ledger (fix or waiver per finding — owner condition, 2026-07-12)
 
