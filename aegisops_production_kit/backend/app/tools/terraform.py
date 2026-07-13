@@ -43,6 +43,85 @@ def state_slug(name: str) -> str:
     return ("res-" + slug)[:60]
 
 
+def remove_run_plan_files(settings: Settings, run_id: str) -> int:
+    """PR-1a: delete the run's .tfplan file(s) at terminal states — the reviewable record
+    lives on in runs.plan_json. Plan files are named aegisops-<ws>-<run_id>.tfplan, so a
+    run_id glob across all module dirs needs no workspace knowledge. Returns the count."""
+    import glob as _glob
+
+    if not run_id:
+        return 0
+    removed = 0
+    pattern = os.path.join(settings.terraform_workspaces_dir, "*", f"aegisops-*-{run_id}.tfplan")
+    for path in _glob.glob(pattern):
+        try:
+            os.remove(path)
+            removed += 1
+        except OSError as e:
+            log.warning("terraform.plan_cleanup_failed", path=path, error=str(e))
+    if removed:
+        log.info("terraform.plan_files_removed", run_id=run_id, count=removed)
+    return removed
+
+
+def sweep_stray_plan_files(settings: Settings, max_age_days: int = 7,
+                           keep_run_ids: set[str] | None = None) -> int:
+    """PR-1a (sweeper): remove plan files older than the threshold — strays from crashed
+    runs whose terminal cleanup never fired. BINDING: a NON-TERMINAL run's plan is never
+    stray (awaiting_approval may legitimately wait days) — callers pass those run ids in
+    `keep_run_ids` and any filename carrying one is skipped. Logged, never silent."""
+    import glob as _glob
+    import time as _time
+
+    keep = keep_run_ids or set()
+    cutoff = _time.time() - max_age_days * 86400
+    removed = 0
+    pattern = os.path.join(settings.terraform_workspaces_dir, "*", "*.tfplan")
+    for path in _glob.glob(pattern):
+        name = os.path.basename(path)
+        if any(rid and rid in name for rid in keep):
+            continue                       # a live/awaiting run's plan is NOT stray
+        try:
+            if os.path.getmtime(path) < cutoff:
+                os.remove(path)
+                removed += 1
+                log.info("terraform.stray_plan_removed", path=name)
+        except OSError as e:
+            log.warning("terraform.stray_plan_sweep_failed", path=path, error=str(e))
+    return removed
+
+
+def prune_destroyed_state_workspace(settings: Settings, workspace: str,
+                                    state_workspace: str) -> bool:
+    """PR-1b (sweeper-only — NEVER inline at destroy, no chat request triggers this):
+    prune a per-resource state dir whose terraform state holds ZERO resources. The state
+    FILE is read directly (it IS the state; no subprocess). Returns True when pruned."""
+    import shutil as _shutil
+
+    if not state_workspace:
+        return False
+    ws_dir = os.path.join(settings.terraform_workspaces_dir, workspace,
+                          "terraform.tfstate.d", state_workspace)
+    state_file = os.path.join(ws_dir, "terraform.tfstate")
+    if not os.path.isdir(ws_dir):
+        return False
+    try:
+        if os.path.exists(state_file):
+            with open(state_file, encoding="utf-8") as f:
+                if json.load(f).get("resources"):
+                    log.warning("terraform.prune_refused_nonempty_state",
+                                workspace=workspace, state_workspace=state_workspace)
+                    return False
+        _shutil.rmtree(ws_dir)
+        log.info("terraform.state_workspace_pruned", workspace=workspace,
+                 state_workspace=state_workspace)
+        return True
+    except (OSError, json.JSONDecodeError) as e:
+        log.warning("terraform.prune_failed", workspace=workspace,
+                    state_workspace=state_workspace, error=str(e))
+        return False
+
+
 class TerraformRunner:
     """Runs terraform in a module directory. `state_workspace` (Phase 8 / N-08) selects a
     PER-RESOURCE Terraform workspace via the TF_WORKSPACE env var, giving every provisioned
@@ -106,6 +185,18 @@ class TerraformRunner:
             raise TerraformError(f"Terraform workspace not found: {self.workdir}")
         return CommandConsole(cwd=self.workdir, env=self._env(include_ws))
 
+    def _raise_stage_failure(self, stage: str, res, timeout_s: int) -> None:
+        """PR-2b: rc 124 = the stage exceeded its budget and the PROCESS GROUP was killed.
+        Classified honestly — the state may hold a lock; the reconciler/orphan sweep
+        reconciles, and docs/TF_FORCE_UNLOCK.md carries the manual guidance."""
+        if res.returncode == 124:
+            raise TerraformError(
+                f"terraform {stage} exceeded {timeout_s // 60}m and was terminated "
+                "(process group killed). The state may still hold a lock; the "
+                "reconciler/orphan sweep will reconcile the run — manual guidance: "
+                "docs/TF_FORCE_UNLOCK.md")
+        raise TerraformError(f"terraform {stage} failed:\n" + "\n".join(res.stderr[-15:]))
+
     def _span(self, op: str, **extra: Any):
         """Langfuse tool span for one terraform operation — inputs are redacted; a raised
         TerraformError is recorded ON the span (level=ERROR) and still propagates."""
@@ -159,9 +250,10 @@ class TerraformRunner:
                                 error=str(e)[:200])
             init_args = [self.bin, "init", "-input=false", "-upgrade", *self._backend_config_args()] \
                 if force else [self.bin, "init", "-input=false", *self._backend_config_args()]
-            res = await self._console(include_ws=False).run(init_args, on_line)
+            res = await self._console(include_ws=False).run(
+                init_args, on_line, timeout=self.settings.tf_plan_timeout_s)
             if res.returncode != 0:
-                raise TerraformError("terraform init failed:\n" + "\n".join(res.stderr[-15:]))
+                self._raise_stage_failure("init", res, self.settings.tf_plan_timeout_s)
             if self.state_workspace:
                 await self.ensure_state_workspace()
             t.output = {"ok": True, "skipped_init": False}
@@ -199,9 +291,10 @@ class TerraformRunner:
             if destroy:
                 args.append("-destroy")
             args += _var_args(variables or {})
-            res = await self._console().run(args, on_line)
+            res = await self._console().run(args, on_line,
+                                             timeout=self.settings.tf_plan_timeout_s)
             if res.returncode not in (0, 2):  # 0 = no changes, 2 = changes present (with -detailed-exitcode); plain plan returns 0
-                raise TerraformError("terraform plan failed:\n" + "\n".join(res.stderr[-15:]))
+                self._raise_stage_failure("plan", res, self.settings.tf_plan_timeout_s)
             plan = await self.show_plan()
             t.output = plan.get("summary")
         return plan
@@ -270,10 +363,11 @@ class TerraformRunner:
         """Apply the previously-saved, human-approved plan."""
         async with self._span("apply") as t:
             res = await self._console().run(
-                [self.bin, "apply", "-input=false", "-auto-approve", self.plan_file], on_line
+                [self.bin, "apply", "-input=false", "-auto-approve", self.plan_file], on_line,
+                timeout=self.settings.tf_apply_timeout_s,
             )
             if res.returncode != 0:
-                raise TerraformError("terraform apply failed:\n" + "\n".join(res.stderr[-15:]))
+                self._raise_stage_failure("apply", res, self.settings.tf_apply_timeout_s)
             result = {"applied": True, **(await self.output())}
             t.output = {"applied": True, "outputs": sorted(result.get("outputs", {}).keys()),
                         "sensitive_outputs": result.get("sensitive_outputs", [])}
@@ -284,10 +378,11 @@ class TerraformRunner:
         async with self._span("destroy", variables=variables or {}) as t:
             await self.plan(variables, destroy=True, on_line=on_line)
             res = await self._console().run(
-                [self.bin, "apply", "-input=false", "-auto-approve", self.plan_file], on_line
+                [self.bin, "apply", "-input=false", "-auto-approve", self.plan_file], on_line,
+                timeout=self.settings.tf_apply_timeout_s,
             )
             if res.returncode != 0:
-                raise TerraformError("terraform destroy failed:\n" + "\n".join(res.stderr[-15:]))
+                self._raise_stage_failure("destroy", res, self.settings.tf_apply_timeout_s)
             t.output = {"destroyed": True}
         return {"destroyed": True}
 

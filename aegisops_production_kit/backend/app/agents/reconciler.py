@@ -23,7 +23,7 @@ import uuid
 import structlog
 from sqlalchemy import select
 
-from ..db.models import Run
+from ..db.models import Resource, Run
 from ..db.session import session_scope
 from . import inventory
 from .supervisor import RunSupervisor, get_supervisor, hb_key
@@ -71,7 +71,48 @@ class Reconciler:
                 await self._mark_failed(run_id)
                 summary["failed"] += 1
                 log.info("reconciler.marked_failed", run_id=run_id)
+        summary.update(await self.sweep_tf_hygiene())
         return summary
+
+    async def sweep_tf_hygiene(self, max_age_days: int = 7) -> dict[str, int]:
+        """PR-1: (a) stray .tfplan files older than the threshold are removed (crashed runs
+        whose terminal cleanup never fired); (b) a DESTROYED resource's per-state workspace
+        whose terraform state holds zero resources for > threshold is pruned. Sweeper-only —
+        no chat request can trigger a prune; every action is logged."""
+        from datetime import datetime, timedelta, timezone
+
+        from ..settings import get_settings
+        from ..tools import terraform as tf_tools
+
+        settings = get_settings()
+        out = {"stray_plans_removed": 0, "state_workspaces_pruned": 0}
+        try:
+            # BINDING: non-terminal runs' plans are never stray — awaiting_approval may
+            # legitimately wait days for a human.
+            async with session_scope() as s:
+                keep = {str(r.id) for r in (await s.execute(
+                    select(Run).where(Run.status.in_(
+                        ("running", "applying", "awaiting_approval"))))).scalars()}
+            out["stray_plans_removed"] = tf_tools.sweep_stray_plan_files(
+                settings, max_age_days, keep_run_ids=keep)
+        except Exception as e:  # noqa: BLE001 — hygiene must never break the reconcile pass
+            log.warning("reconciler.stray_plan_sweep_failed", error=str(e))
+        try:
+            cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+            async with session_scope() as s:
+                rows = (await s.execute(
+                    select(Resource).where(Resource.status == "destroyed",
+                                           Resource.state_workspace.is_not(None),
+                                           Resource.updated_at < cutoff)
+                )).scalars().all()
+                for r in rows:
+                    if tf_tools.prune_destroyed_state_workspace(settings, r.workspace,
+                                                                r.state_workspace):
+                        out["state_workspaces_pruned"] += 1
+                        r.state_workspace = None    # pruned — never point at a removed dir
+        except Exception as e:  # noqa: BLE001
+            log.warning("reconciler.state_prune_failed", error=str(e))
+        return out
 
     async def sweep_orphans(self) -> dict[str, int]:
         """D2 orphan sweep: recover 'invisible orphans' — runs that applied real infrastructure

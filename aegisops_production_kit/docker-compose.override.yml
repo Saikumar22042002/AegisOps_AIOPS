@@ -93,6 +93,8 @@ services:
       # Single source of truth for the stale-waiver guard test: a scanner waiver may not
       # reference an MS item that FIX.md §8 marks done.
       - "../FIX.md:/app/FIX.md:ro"
+      # PR-1c: the hygiene posture test reads the real ignore rules.
+      - "./.gitignore:/app/.gitignore:ro"
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
