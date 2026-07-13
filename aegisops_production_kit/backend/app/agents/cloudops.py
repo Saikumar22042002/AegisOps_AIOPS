@@ -122,8 +122,11 @@ def _defaulted_dependencies(cloud: str, resource: str, validated: dict, resource
             out.append({"name": "VPC / subnet", "value": sub or "account default VPC + subnet",
                         "note": "no VPC specified — placing in the account's default VPC"})
     elif cloud == "gcp" and r in ("vm", "instance", "gce", "server"):
-        out.append({"name": "Network", "value": "default",
-                    "note": "no network specified — placing in the project's 'default' VPC network"})
+        # MS-12 (B4, by design): a slot-filled/user-named network is a REAL placement — the
+        # DEP closure states its provenance; only the default placement is flagged here.
+        if (validated.get("network") or "default") == "default":
+            out.append({"name": "Network", "value": "default",
+                        "note": "no network specified — placing in the project's 'default' VPC network"})
     elif cloud == "azure" and r in ("vm", "instance", "server"):
         if not validated.get("resource_group"):
             out.append({"name": "Resource group", "value": f"{validated.get('name', '')}-rg (auto-created)",

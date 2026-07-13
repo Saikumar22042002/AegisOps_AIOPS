@@ -1,8 +1,0 @@
-# AegisOps scanner waivers - documented in the PROGRESS.md scanner ledger.
-# tfsec v1.28 config excludes match legacy IDs; the AVD id is in each comment.
-exclude:
-  - google-compute-no-project-wide-ssh-keys  # AVD-GCP-0030 | project-wide SSH key blocking arrives with MS-12 OS Login (B2)
-  - google-compute-no-public-ip  # AVD-GCP-0031 | public IP by design: SSH demo access (generated key)
-  - google-compute-vm-disk-encryption-customer-key  # AVD-GCP-0033 | CMEK disks: platform-managed keys are the sandbox posture
-  - google-compute-enable-shielded-vm-vtpm  # AVD-GCP-0041 | Shielded VM vTPM arrives with MS-12 (B2 opt-in)
-  - google-compute-enable-shielded-vm-im  # AVD-GCP-0045 | Shielded VM integrity monitoring arrives with MS-12 (B2 opt-in)

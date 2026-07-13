@@ -389,11 +389,25 @@ def _gcp_kms_policy(i: dict, resources=None) -> list[dict]:
 
 
 def _gcp_gce_policy(i: dict, resources=None) -> list[dict]:
-    return [
+    checks = [
         _todo("SSH key auth (no password)"),
         _todo("Ingress restricted to declared ports"),
         _todo("Labelled ManagedBy=aegisops"),
     ]
+    # MS-12: the card states each chosen option honestly.
+    if i.get("enable_shielded"):
+        checks.append(_ck("Shielded VM", True, "secure boot + vTPM + integrity monitoring"))
+    if i.get("spot"):
+        checks.append(_ck("Spot/preemptible instance", True,
+                          "may be STOPPED by GCP at any time during maintenance/capacity events; "
+                          "no automatic restart"))
+    if i.get("enable_oslogin"):
+        checks.append(_ck("OS Login", True,
+                          "IAM-governed SSH — the generated key is unused while enabled"))
+    if i.get("service_account_email"):
+        checks.append(_ck("Dedicated service account (least scope)", True,
+                          f"{i['service_account_email']} (logging+monitoring writes only)"))
+    return checks
 
 
 def _gcp_gke_policy(i: dict, resources=None) -> list[dict]:

@@ -101,6 +101,13 @@ SLOTS: dict[str, list[Slot]] = {
                           creator="gcp.kms", value_from="attr:key_ids[0]",
                           wires={},
                           stated_default="Google-managed encryption (no CMEK)")],
+    # MS-12 (B4, BY DESIGN): a known gcp.vpc places the VM — "create a vm in prod-network"
+    # lands in the EXISTING network, stated on the card; none known → the default network.
+    "gcp.vm": [Slot(field="network", parent_cloud="gcp",
+                    parent_type="vpc", required=False,
+                    creator="gcp.vpc", value_from="name",
+                    wires={"network": "input:name"},
+                    stated_default="the project's default network")],
 }
 
 # "in a NEW vpc" / "with a fresh resource group" — the user explicitly wants the parent

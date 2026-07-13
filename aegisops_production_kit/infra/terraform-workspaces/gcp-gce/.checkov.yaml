@@ -1,7 +1,0 @@
-# AegisOps scanner waivers - every skip is documented here AND in the
-# PROGRESS.md scanner ledger. New checks fail the scan until triaged.
-skip-check:
-  - CKV_GCP_32  # project-wide SSH key blocking arrives with the MS-12 OS Login option (B2)
-  - CKV_GCP_38  # CMEK disks: platform-managed keys are the sandbox posture
-  - CKV_GCP_39  # Shielded VM arrives as the MS-12 shielded_instance_config option (B2)
-  - CKV_GCP_40  # public IP by design: demo access is SSH with the generated key (one-time reveal)

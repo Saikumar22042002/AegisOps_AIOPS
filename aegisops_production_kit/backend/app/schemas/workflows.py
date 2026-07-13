@@ -475,6 +475,10 @@ class AzureAKSInputs(WorkflowInputs):
 
 # ── GCP (Phase 5) ──
 class GCPComputeInputs(WorkflowInputs):
+    """MS-12. BACKCOMPAT B2: options default to the OLD behavior here (public IP ON,
+    everything else off, network 'default'); the module's own defaults are the secure
+    ones. The gcp.vm→network DEP slot fills `network` from an existing gcp.vpc (B4)."""
+
     name: str
     project: str = ""                  # defaults to the configured GCP project
     region: str = "us-central1"
@@ -484,6 +488,13 @@ class GCPComputeInputs(WorkflowInputs):
     ssh_user: str = "aegis"
     ingress_ports: list[int] = Field(default_factory=list)
     allowed_cidr: str = ""             # SSH (22) source CIDR; "" = closed (N-02)
+    network: str = "default"           # DEP-slot fillable; "default" = old placement
+    public_ip: bool = True             # B2 old behavior (module default is OFF)
+    enable_shielded: bool = False      # module default is ON
+    block_project_ssh_keys: bool = False
+    enable_oslogin: bool = False       # replaces metadata SSH keys while enabled
+    spot: bool = False                 # preemptible — maintenance implications on the card
+    service_account_email: str = ""    # least-scope (logging+monitoring writes) when set
 
     @field_validator("machine_type")
     @classmethod

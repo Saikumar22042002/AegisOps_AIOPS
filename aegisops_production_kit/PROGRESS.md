@@ -1322,6 +1322,19 @@ as done without the live run; the code paths behind each are covered by tests wi
       (3) gated destroy → card states soft-delete/purge semantics → verify the vault is
       soft-deleted (recoverable), not purged.
       Expect: AzureServices bypass + current-SP policy visible in the portal.
+- [ ] **DLV-26 · MODSEED gcp.vm options + network placement live (MS-12)** — Needs:
+      valid `GEMINI_API_KEY` + the working GCP SA.
+      Steps: (1) with the DLV-15 gcp.vpc ("prod-network") in inventory: "create a vm named
+      web-01 in prod-network" → the card shows the network placement (slot provenance, NOT
+      the default-network row) → approve → apply → verify the instance + both firewalls sit
+      in prod-network; (2) "create a shielded spot vm named batch-01" → the card states
+      Shielded VM AND "may be STOPPED by GCP at any time … no automatic restart" → verify
+      shielded config + SPOT provisioning in the console; (3) OS Login pass: enable_oslogin
+      → SSH via IAM identity; the generated key is unused (stated on the card);
+      (4) **live B1**: a pre-enhancement VM re-planned from stored inputs → "No changes.";
+      (5) gated destroys.
+      Expect: the one-time private-key reveal still works for standard VMs; spot VMs show
+      provisioningModel=SPOT.
 - [ ] **DLV-25 · MODSEED eks Auto Mode live cluster (MS-11)** — Needs: valid
       `GEMINI_API_KEY` + AWS creds + an existing VPC with private subnets (DLV-12's).
       Steps: (1) "create an eks cluster named apps-auto in auto mode, vpc <id>, subnets
@@ -1731,6 +1744,21 @@ this section mirrors phase-level status only.
         MS-tagged). Scans green. Evidence: `test_modseed_ms11_eks_auto_mode.py` (5).
         Canary (B5) green. Live = **DLV-25**.
 
+  - [x] **MODSEED MS-12 gcp-gce options + B4 network slot (`gcp.vm`)** (2026-07-13):
+        shielded VM / OS Login / spot / least-scope SA / public-IP toggle, all
+        variable-driven — schema B2 old-defaults (public IP ON, network "default",
+        options off) while the MODULE defaults are secure (shielded ON, project-wide
+        keys BLOCKED, no public IP). Spot's card check states the maintenance
+        implications verbatim; OS Login's states the generated key becomes unused (the
+        key + one-time reveal are KEPT). The `network` var drives the instance and BOTH
+        firewalls. **B4 (recorded): new gcp.vm→network DEP slot** — "create a vm in
+        prod-network" places into the EXISTING network; the DEF default-network row
+        became conditional (only the default placement is flagged) — the one deliberate
+        test change, no test weakened. **B1 = committed native `terraform test`**
+        (5 runs). **ALL gcp-gce scanner waivers DELETED** (both config files removed;
+        bare scans 19/0 + clean). Evidence: `test_modseed_ms12_gcp_gce.py` (8).
+        Canary (B5) green. Live = **DLV-26**.
+
 ### Scanner ledger (fix or waiver per finding — owner condition, 2026-07-12)
 
 Scanners: checkov 3.3.8, tfsec v1.28.14. Waivers live per-workspace in
@@ -1830,10 +1858,7 @@ for the same reason — commit-hash pinning applies to git sources).
 | gcp-cloudsql | CKV_GCP_6 / AVD-GCP-0015 | google provider 5.x replaced `require_ssl` with `ssl_mode` (module default ENCRYPTED_ONLY); both scanners track the removed attribute. *(Re-justified when MS-9 shipped.)* |
 | gcp-cloudsql | CKV_GCP_60 / AVD-GCP-0017 (public-address rule) | Public IP is the sandbox access path; the `private_network` option ships and drops it entirely. *(Re-justified when MS-9 shipped.)* |
 | gcp-cloudsql | CKV_GCP_79 | Major-version bump is destructive for existing instances; version is variable-driven. |
-| gcp-gce | CKV_GCP_32 / AVD-GCP-0030 | Project-wide SSH key blocking arrives with the MS-12 OS Login option (B2). |
-| gcp-gce | CKV_GCP_39 / AVD-GCP-0041 + AVD-GCP-0045 | Shielded VM arrives as the MS-12 `shielded_instance_config` option (B2). |
-| gcp-gce | CKV_GCP_40 / AVD-GCP-0031 | Public IP by design: demo access is SSH with the generated key (one-time reveal). |
-| gcp-gce | CKV_GCP_38 / AVD-GCP-0033 | CMEK disks: platform-managed keys are the sandbox posture. |
+| gcp-gce | ~~ALL (CKV_GCP_32/38/39/40 + AVD-GCP-0030/0031/0033/0041/0045)~~ | **EVERY WAIVER REMOVED by MS-12 (2026-07-13) — both config files DELETED.** Module defaults: shielded VM on, project-wide SSH keys blocked, NO public IP (the platform schema keeps public_ip=true + options-off for existing instances per B2). Bare scans: checkov 19 passed / 0 failed, tfsec clean. |
 | gcp-gcs | CKV_GCP_62 | Bucket access logging needs a log bucket; demo posture, opt-in candidate. |
 | gcp-gcs | AVD-GCP-0066 | CMEK: platform-managed encryption is the sandbox posture. |
 | gcp-gke | CKV_GCP_12 / AVD-GCP-0056 | Network policy: sandbox cluster posture; enterprise hardening candidate. |
