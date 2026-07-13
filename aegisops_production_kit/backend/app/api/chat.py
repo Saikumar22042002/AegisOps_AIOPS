@@ -76,6 +76,36 @@ async def _sse(channel: RunChannel, replay_after: int = 0):
         yield {"event": item["event"], "data": json.dumps(item["data"]), "id": str(item["id"])}
 
 
+async def _active_run_counts(org_id: str, user_id: str | None) -> tuple[int, int]:
+    """PR-2a: count ACTIVE runs from the EXISTING liveness truth — a non-terminal
+    runs.status AND a fresh run:<id>:hb heartbeat (BINDING: never a separate counter that
+    could drift or lock an org out after a crash; heartbeat-derived counts self-heal like
+    the reconciler). awaiting_approval does NOT count — it may legitimately wait days and
+    holds no worker/subprocess. Returns (org_active, user_active)."""
+    from sqlalchemy import select
+
+    from ..agents.supervisor import hb_key
+    from ..cache.redis import get_redis
+
+    redis = get_redis()
+    org_active = user_active = 0
+    async with session_scope() as s:
+        rows = (await s.execute(
+            select(Run.id, Run.initiated_by).where(
+                Run.org_id == uuid.UUID(org_id),
+                Run.status.in_(("running", "applying"))))).all()
+    for rid, initiated_by in rows:
+        try:
+            if not await redis.exists(hb_key(str(rid))):
+                continue                     # stale row (crashed worker) — not truly active
+        except Exception:                    # noqa: BLE001 — unreachable heartbeat ⇒ not active
+            continue
+        org_active += 1
+        if user_id and str(initiated_by) == user_id:
+            user_active += 1
+    return org_active, user_active
+
+
 async def _force_terminal(run_id: str, message: str) -> None:
     """B5 backstop: guarantee a run reaches a terminal state even if the normal persist path
     threw. A direct, self-guarded status write — the reconciler (B3) is the outer backstop, but
@@ -89,6 +119,18 @@ async def _force_terminal(run_id: str, message: str) -> None:
                 run.outcome = {"status": "failed", "error": message[:500]}
     except Exception as exc:  # noqa: BLE001 — last-ditch; the reconciler will catch what this can't
         log.error("chat.force_terminal_failed", run_id=run_id, error=str(exc))
+    _cleanup_terminal_plan_files(run_id)
+
+
+def _cleanup_terminal_plan_files(run_id: str) -> None:
+    """PR-1a: a terminal run's .tfplan is deleted — the reviewable record persists in
+    runs.plan_json. Best-effort; the reconciler's stray sweep is the backstop."""
+    try:
+        from ..settings import get_settings
+        from ..tools.terraform import remove_run_plan_files
+        remove_run_plan_files(get_settings(), run_id)
+    except Exception as exc:  # noqa: BLE001 — hygiene must never break the persist path
+        log.warning("chat.plan_cleanup_failed", run_id=run_id, error=str(exc))
 
 
 async def _persist_result(run_id: str, session_id: str, org_id: str, state: dict, status_: str) -> str:
@@ -134,6 +176,10 @@ async def _persist_result(run_id: str, session_id: str, org_id: str, state: dict
     # a Gemini key → keyword-recall fallback). Fired after commit so it re-fetches a persisted row.
     from ..agents import memory as _memory
     asyncio.create_task(_memory.embed_message(msg_id, answer, get_settings()))
+    # PR-1a: terminal runs leave no plan file behind (awaiting_approval keeps its plan —
+    # the approved apply still needs it).
+    if status_ in ("completed", "failed"):
+        _cleanup_terminal_plan_files(run_id)
     return msg_id
 
 
@@ -153,6 +199,20 @@ async def chat(body: ChatRequest, request: Request, user: User = Depends(require
         org = await repo.org_for(s, user)
         org_id = str(org.id)
         owner_id = uuid.UUID(user.user_id) if user.user_id else None
+        # PR-2a: refuse a new run BEFORE persisting anything (no row leaked) when the org or
+        # user is at its ACTIVE-run limit. Terraform processes are heavy; queueing isn't
+        # supported yet, so the refusal is honest. Counts derive from the liveness truth.
+        org_active, user_active = await _active_run_counts(org_id, user.user_id)
+        if org_active >= settings.max_active_runs_per_org:
+            raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS,
+                                f"{org_active} runs already in progress for your org "
+                                f"(limit {settings.max_active_runs_per_org}). Queuing isn't "
+                                "supported yet — retry when one completes.")
+        if user.user_id and user_active >= settings.max_active_runs_per_user:
+            raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS,
+                                f"You have {user_active} runs in progress "
+                                f"(limit {settings.max_active_runs_per_user}). Retry when one "
+                                "completes.")
         if body.sessionId:
             # The caller may only continue a session that exists in THEIR org (S0).
             try:
@@ -296,7 +356,8 @@ async def resolve_approval(run_id: str, body: ApprovalRequest,
     channel = create_channel(run_id)  # fresh channel for the continuation stream
     resume_value = {"decision": body.decision, "user": user.username,
                     "role": user.display_roles[0] if user.display_roles else "", "rationale": body.rationale,
-                    "can_execute": user.can_execute}  # S5: carry the approver's execute capability
+                    "can_execute": user.can_execute,  # S5: carry the approver's execute capability
+                    "email": user.email}              # P17: notify the APPROVER, never the sender
 
     async def _drive():
         from ..agents.events import Emitter
