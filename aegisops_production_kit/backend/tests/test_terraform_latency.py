@@ -115,5 +115,9 @@ def test_plugin_cache_dir_threaded_into_env():
     s = Settings(_env_file=None, tf_plugin_cache_dir="/app/.tf-plugin-cache")
     env = TerraformRunner("demo-null", s)._env()
     assert env.get("TF_PLUGIN_CACHE_DIR") == "/app/.tf-plugin-cache"
-    # off by default
-    assert "TF_PLUGIN_CACHE_DIR" not in TerraformRunner("demo-null", Settings(_env_file=None))._env()
+    # off when the SETTING is empty — pinned explicitly: api-test itself now exports
+    # TF_PLUGIN_CACHE_DIR (shared cache volume), and Settings(_env_file=None) still reads
+    # process env, so the old bare-Settings form asserted on the ambient environment, not
+    # on the runner's threading logic (deliberate test update, 2026-07-14).
+    off = Settings(_env_file=None, tf_plugin_cache_dir="")
+    assert "TF_PLUGIN_CACHE_DIR" not in TerraformRunner("demo-null", off)._env()

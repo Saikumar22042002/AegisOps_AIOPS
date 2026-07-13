@@ -189,16 +189,21 @@ async def recover_missing(s, run) -> bool:
     payload its outcome carries. Returns True when a row was created. WITHIN the caller's txn.
 
     No-op (returns False) when the run has no `_inventory` payload (legacy run — nothing to
-    rebuild from a DB read alone) or when an active row for it already exists (not an orphan)."""
+    rebuild from a DB read alone) or when ANY row for it already exists. BUGFIX-4 (found
+    live, 2026-07-14): this guard used to match only ACTIVE rows, so after a gated destroy
+    the apply-run's payload was treated as an orphan again and the sweeper RESURRECTED the
+    resource as a duplicate active row (live: accept-key/accept-gnet/accept-gvm each ended
+    up destroyed + active). A row in any status means the lifecycle is known — recovery is
+    only for rows that never got written."""
     outcome = run.outcome or {}
     payload = outcome.get("_inventory")
     if not payload or not payload.get("name") or not payload.get("workspace"):
         return False
     existing = (await s.execute(select(Resource).where(
         Resource.org_id == run.org_id, Resource.workspace == payload["workspace"],
-        Resource.name == payload["name"], Resource.status == "active"))).scalar_one_or_none()
+        Resource.name == payload["name"]))).scalars().first()
     if existing is not None:
-        return False  # already visible — not an orphan
+        return False  # the lifecycle is known (any status) — never resurrect a ghost
     await upsert_resource(s, str(run.org_id), payload)
     return True
 

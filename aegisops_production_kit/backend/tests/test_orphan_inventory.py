@@ -100,6 +100,42 @@ async def test_sweeper_is_idempotent_and_skips_visible_resources(live_db, org_id
         await _cleanup(org_id, run_id)
 
 
+async def test_destroyed_resource_is_never_resurrected(live_db, org_id):
+    """BUGFIX-4 (found live 2026-07-14): after a gated destroy, the apply-run's recovery
+    payload must NOT read as an orphan — the guard used to match only ACTIVE rows, so the
+    sweeper resurrected destroyed resources as duplicate active rows (live: accept-key /
+    accept-gnet / accept-gvm each ended up destroyed + active). Recovery is only for rows
+    that never got written; a row in ANY status means the lifecycle is known."""
+    run_id = await _make_applied_run(org_id, with_inventory_row=True)
+    try:
+        async with session_scope() as s:
+            await inventory.mark_destroyed_txn(s, org_id, "aws-ec2", name="orphan-vm")
+        assert await _active_row(org_id, run_id) is None           # destroyed → invisible
+        await Reconciler().sweep_orphans()
+        assert await _active_row(org_id, run_id) is None           # STILL invisible — no ghost
+        async with session_scope() as s:
+            rows = (await s.execute(select(Resource).where(
+                Resource.run_id == uuid.UUID(run_id)))).scalars().all()
+        assert len(rows) == 1 and rows[0].status == "destroyed"    # exactly the destroyed row
+    finally:
+        await _cleanup(org_id, run_id)
+
+
+async def test_unreachable_resource_is_never_resurrected(live_db, org_id):
+    """Same guard, inventory-honesty flavor: an `unreachable` row (rotated-away sandbox
+    account) must not be resurrected by the sweeper either."""
+    run_id = await _make_applied_run(org_id, with_inventory_row=True)
+    try:
+        async with session_scope() as s:
+            row = (await s.execute(select(Resource).where(
+                Resource.run_id == uuid.UUID(run_id)))).scalars().one()
+            row.status = "unreachable"
+        await Reconciler().sweep_orphans()
+        assert await _active_row(org_id, run_id) is None
+    finally:
+        await _cleanup(org_id, run_id)
+
+
 async def test_recover_missing_noop_without_payload(live_db, org_id):
     """A legacy applied run with no recovery payload is left alone (nothing to rebuild from)."""
     run_id = str(uuid.uuid4())
