@@ -120,6 +120,30 @@ async def _force_terminal(run_id: str, message: str) -> None:
     except Exception as exc:  # noqa: BLE001 — last-ditch; the reconciler will catch what this can't
         log.error("chat.force_terminal_failed", run_id=run_id, error=str(exc))
     _cleanup_terminal_plan_files(run_id)
+    await _release_cancel(run_id)
+
+
+async def _mark_cancelled(run_id: str, message: str) -> None:
+    """PR-3: set the run terminal `cancelled` (only from a non-terminal state — never
+    overwrite an already-final status), clean the plan file, release the cancel flag."""
+    try:
+        async with session_scope() as s:
+            run = await s.get(Run, uuid.UUID(run_id))
+            if run and run.status in ("running", "applying", "awaiting_approval"):
+                run.status = "cancelled"
+                run.outcome = {"status": "cancelled", "note": message[:500]}
+    except Exception as exc:  # noqa: BLE001
+        log.error("chat.mark_cancelled_failed", run_id=run_id, error=str(exc))
+    _cleanup_terminal_plan_files(run_id)
+    await _release_cancel(run_id)
+
+
+async def _release_cancel(run_id: str) -> None:
+    try:
+        from ..agents.supervisor import clear_cancel
+        await clear_cancel(run_id)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _cleanup_terminal_plan_files(run_id: str) -> None:
@@ -177,9 +201,10 @@ async def _persist_result(run_id: str, session_id: str, org_id: str, state: dict
     from ..agents import memory as _memory
     asyncio.create_task(_memory.embed_message(msg_id, answer, get_settings()))
     # PR-1a: terminal runs leave no plan file behind (awaiting_approval keeps its plan —
-    # the approved apply still needs it).
-    if status_ in ("completed", "failed"):
+    # the approved apply still needs it). PR-3: release the cancel flag at any terminal state.
+    if status_ in ("completed", "failed", "cancelled"):
         _cleanup_terminal_plan_files(run_id)
+        await _release_cancel(run_id)
     return msg_id
 
 
@@ -269,6 +294,10 @@ async def chat(body: ChatRequest, request: Request, user: User = Depends(require
             # empty "completed" run (that produced the "Agent Agent / Classified → intent"
             # placeholder timeline of screenshots 15/16). (Phase 7 / BUG-03.)
             status_ = "failed" if error else ("awaiting_approval" if res["interrupted"] else "completed")
+            # PR-3c: the exec loop can finish with an honest cancelled outcome — that is a
+            # terminal `cancelled`, not `completed`.
+            if not error and (state.get("outcome") or {}).get("status") == "cancelled":
+                status_ = "cancelled"
             if error and not state.get("answer"):
                 state = {**state, "answer": f"⚠️ This run failed unexpectedly: {error}. "
                                             "Nothing was changed — please send that again.",
@@ -283,6 +312,13 @@ async def chat(body: ChatRequest, request: Request, user: User = Depends(require
                     "outcome": state.get("outcome") or ({"status": "failed", "error": error} if error
                                                         else {"status": "completed"}),
                 })
+        except asyncio.CancelledError:
+            # PR-3a: a pre-approval cancel cancels the live drive → terminal `cancelled`
+            # ("nothing was changed"), plan file cleaned, idempotency naturally released
+            # (the apply claim was never taken). Re-raised so the task truly unwinds.
+            log.info("chat.drive_cancelled", run_id=run_id)
+            await _mark_cancelled(run_id, "cancelled before any change was applied")
+            raise
         except Exception as exc:  # noqa: BLE001 — B5: never leave the run stuck in `running`
             log.error("chat.drive_failed", run_id=run_id, error=str(exc))
             await _force_terminal(run_id, f"run driver failed: {exc}")
@@ -431,6 +467,40 @@ async def get_run(run_id: str, user: User = Depends(get_current_user)) -> dict:
             "input_json": run.input_json, "outcome": run.outcome, "snow_id": run.snow_id,
             "context_id": run.context_id,
         }
+
+
+@router.post("/runs/{run_id}/cancel")
+async def cancel_run(run_id: str, user: User = Depends(get_current_user)) -> dict:
+    """PR-3: cooperative cancel. Pre-approval/executing → the drive stops at the next safe
+    boundary and the run goes terminal `cancelled` (never a mid-apply kill). Authz: the
+    initiator OR an approver in the org (audited like approvals). Terminal runs are a no-op."""
+    from ..agents.supervisor import request_cancel
+
+    async with session_scope() as s:
+        try:
+            run = await s.get(Run, uuid.UUID(run_id))
+        except ValueError:
+            raise HTTPException(404, "run not found") from None
+        authorize_run(run, user)  # S2: cross-org is 404
+        # initiator or approver only
+        is_initiator = run.initiated_by is not None and str(run.initiated_by) == (user.user_id or "")
+        if not (is_initiator or user.can_execute):
+            raise HTTPException(status.HTTP_403_FORBIDDEN,
+                                "only the run's initiator or an approver can cancel it")
+        if run.status in ("completed", "failed", "cancelled"):
+            return {"id": run_id, "status": run.status, "note": "already terminal — no-op"}
+        current = run.status
+
+    log.info("chat.cancel_requested", run_id=run_id, by=user.username, from_status=current)
+    await request_cancel(run_id)
+    # awaiting_approval holds no live drive — flip it terminal directly (equivalent to Reject
+    # for cancel purposes). Executing runs are flipped by their own drive at the next boundary;
+    # the reconciler is the backstop if that worker is already gone.
+    if current == "awaiting_approval":
+        await _mark_cancelled(run_id, "cancelled while awaiting approval")
+    return {"id": run_id, "status": "cancelling",
+            "note": "cancellation requested; the run will stop at the next safe point "
+                    "(never mid-apply)."}
 
 
 # O3: exempt the SSE endpoints from the per-IP rate limit. We register the exemption by NAME

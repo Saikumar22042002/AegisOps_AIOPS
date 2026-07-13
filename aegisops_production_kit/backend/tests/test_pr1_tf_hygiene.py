@@ -124,7 +124,10 @@ def test_plan_cleanup_is_wired_into_the_terminal_path():
     src = (Path(tf_tools.__file__).resolve().parents[2] / "app" / "api" / "chat.py"
            ).read_text(encoding="utf-8")
     assert "_cleanup_terminal_plan_files(run_id)" in src
-    assert 'status_ in ("completed", "failed")' in src      # awaiting_approval keeps its plan
+    # terminal states clean the plan; awaiting_approval keeps its plan (PR-3 added
+    # 'cancelled' to the terminal tuple, so match the terminal states individually).
+    assert '"completed"' in src and '"failed"' in src
+    assert 'status_ in ("completed", "failed"' in src
 
 
 def test_plugin_cache_and_gitignore_posture():

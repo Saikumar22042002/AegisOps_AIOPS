@@ -81,8 +81,11 @@ async def timeline(run_id: str, user: User = Depends(get_current_user)) -> dict:
     approved = run.status in {"completed"} and any(a.decision == "approved" for a in approvals)
     rejected = any(a.decision == "rejected" for a in approvals)
     out_status = (run.outcome or {}).get("status")
-    failed = (bool(out_status) and str(out_status).endswith("_failed")) or out_status == "failed" \
-        or run.status == "failed"
+    # PR-3: cancelled is a first-class terminal status — never rendered as failed.
+    cancelled = run.status == "cancelled" or out_status == "cancelled"
+    failed = (not cancelled) and (
+        (bool(out_status) and str(out_status).endswith("_failed")) or out_status == "failed"
+        or run.status == "failed")
     has_plan = bool(run.plan_json)
     # Displayed node -> the run_step that timed it (real durations; "—" for legacy runs w/o timings).
     domain_step = {"cloudops": "cloudops_agent", "devops": "devops_plan", "sre": "sre_analyze",
@@ -150,7 +153,11 @@ async def terraform(run_id: str, user: User = Depends(get_current_user)) -> dict
     plan = run.plan_json or {}
     return {"summary": plan.get("summary", {"add": 0, "change": 0, "destroy": 0}),
             "diff": plan.get("diff", []), "policy_checks": plan.get("policy_checks", []),
-            "workspace": plan.get("workspace"), "mode": plan.get("mode", run.mode)}
+            "workspace": plan.get("workspace"), "mode": plan.get("mode", run.mode),
+            # PR-4: an old run whose plan_json was compacted shows an honest marker, never a
+            # silently-empty diff.
+            "compacted": bool(plan.get("_compacted")),
+            "note": plan.get("_note") if plan.get("_compacted") else None}
 
 
 @router.get("/runs/{run_id}/logs")
@@ -210,7 +217,8 @@ def _trace_spans(run, steps: list) -> tuple[list[dict], str | None]:
     total = _fmt_dur(total_sec) if total_sec is not None else None
 
     root_status = "failed" if run.status == "failed" else (
-        "running" if run.status in {"running", "applying", "awaiting_approval"} else "done")
+        "cancelled" if run.status == "cancelled" else (
+            "running" if run.status in {"running", "applying", "awaiting_approval"} else "done"))
     # A still-running run has no honest total yet — show in-flight, not the partial elapsed.
     root_dur = "···" if root_status == "running" else (total or "—")
     spans: list[dict] = [{

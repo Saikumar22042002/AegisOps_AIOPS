@@ -29,6 +29,41 @@ def hb_key(run_id: str) -> str:
     return f"run:{run_id}:hb"
 
 
+def cancel_key(run_id: str) -> str:
+    return f"run:{run_id}:cancel"
+
+
+CANCEL_TTL = 3600  # the cancel flag outlives any single stage; cleared at terminal time
+
+
+async def request_cancel(run_id: str) -> None:
+    """PR-3: raise the cooperative cancel flag. Checked at safe boundaries (pre-approval
+    drive, between DAG steps) — NEVER mid-apply. Also cancels the live asyncio drive in
+    THIS worker so a pre-approval run stops promptly."""
+    from ..cache.redis import get_redis
+
+    await get_redis().set(cancel_key(run_id), "1", ex=CANCEL_TTL)
+    get_supervisor().signal_cancel(run_id)
+
+
+async def is_cancelled(run_id: str) -> bool:
+    from ..cache.redis import get_redis
+
+    try:
+        return bool(await get_redis().exists(cancel_key(run_id)))
+    except Exception:  # noqa: BLE001 — an unreachable flag store never forces a cancel
+        return False
+
+
+async def clear_cancel(run_id: str) -> None:
+    from ..cache.redis import get_redis
+
+    try:
+        await get_redis().delete(cancel_key(run_id))
+    except Exception:  # noqa: BLE001
+        pass
+
+
 class RunSupervisor:
     def __init__(self) -> None:
         self._runs: dict[str, asyncio.Task] = {}
@@ -37,6 +72,15 @@ class RunSupervisor:
     def is_live(self, run_id: str) -> bool:
         t = self._runs.get(run_id)
         return t is not None and not t.done()
+
+    def signal_cancel(self, run_id: str) -> None:
+        """PR-3: cancel the live pre-approval drive in this worker (cooperative — the flag
+        is the source of truth; this just stops the idle await promptly). A run executing
+        terraform is NOT force-killed here — its cancel is honored at the next step
+        boundary, never mid-apply."""
+        t = self._runs.get(run_id)
+        if t is not None and not t.done():
+            t.cancel()
 
     def live_run_ids(self) -> list[str]:
         return [rid for rid, t in self._runs.items() if not t.done()]

@@ -54,7 +54,7 @@ async def test_init_runs_when_flag_off(tmp_path, monkeypatch):
     ran = {}
 
     class _FakeConsole:
-        async def run(self, args, on_line=None):
+        async def run(self, args, on_line=None, timeout=None):
             ran["yes"] = True
 
             class _R:
@@ -85,7 +85,7 @@ async def test_warm_skip_falls_back_to_full_init_when_unusable(tmp_path, monkeyp
     ran = {}
 
     class _FakeConsole:
-        async def run(self, args, on_line=None):
+        async def run(self, args, on_line=None, timeout=None):
             ran["yes"] = True
 
             class _R:

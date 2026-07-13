@@ -274,6 +274,11 @@ async def execute_goal_dag(state: AgentState, config) -> dict:
     step_reports: list[dict] = []
 
     for i, step in enumerate(dag):
+        # PR-3c: cancel is honored at the STEP BOUNDARY — halt-after-current-step, NEVER
+        # mid-apply. Steps already applied stay applied; the next never starts.
+        if i > 0 and await _cancel_requested(state.get("run_id")):
+            return _partial_outcome(step_reports, dag, i - 1,
+                                    {"error": "cancelled by user"}, halted="cancelled")
         replans = 0
         current = step
         while True:
@@ -319,11 +324,27 @@ async def execute_goal_dag(state: AgentState, config) -> dict:
             "confidentiality": {"level": cc.level, "score": cc.score}}
 
 
+async def _cancel_requested(run_id: str | None) -> bool:
+    if not run_id:
+        return False
+    from .supervisor import is_cancelled
+    return await is_cancelled(run_id)
+
+
 def _partial_outcome(step_reports: list[dict], dag: list[dict], failed_index: int,
                      obs: dict, halted: str) -> dict:
     applied = [r for r in step_reports if r["status"] == "applied"]
     applied_txt = (f"steps {', '.join(str(r['order']) for r in applied)} applied"
                    if applied else "no steps applied")
+    if halted == "cancelled":
+        # PR-3c honest partial: "steps 1–2 applied, cancelled before step 3."
+        next_step = failed_index + 2
+        answer = (f"🛑 Cancelled: {applied_txt}"
+                  + (f", cancelled before step {next_step}." if next_step <= len(dag)
+                     else "; nothing further was attempted."))
+        return {"outcome": {"status": "cancelled", "steps": step_reports,
+                            "halted": "cancelled"},
+                "answer": answer}
     remaining = len(dag) - failed_index - 1
     answer = (f"⚠️ Governed plan halted ({halted}): {applied_txt}; step {failed_index + 1} "
               f"failed: {obs.get('error', 'unknown error')}."
