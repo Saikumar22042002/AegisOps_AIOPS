@@ -180,6 +180,11 @@ class Settings(BaseSettings):
     # PR-2a: max concurrent ACTIVE runs (heartbeat-derived — never a drifting counter).
     max_active_runs_per_org: int = 5
     max_active_runs_per_user: int = 2
+    # PR-4: retention sweeper — ALL OFF (0) by default in dev. Prod defaults documented in
+    # .env.example. audit_log + approvals are NEVER auto-deleted (compliance).
+    retention_messages_days: int = 0        # delete msgs/run_steps for CLOSED sessions beyond N days
+    retention_notifications_days: int = 0   # delete notifications beyond N days
+    retention_run_plan_days: int = 0        # compact bulky run plan_json beyond N days (keep the row)
 
     @field_validator("cors_origins")
     @classmethod

@@ -72,6 +72,11 @@ class Reconciler:
                 summary["failed"] += 1
                 log.info("reconciler.marked_failed", run_id=run_id)
         summary.update(await self.sweep_tf_hygiene())
+        try:
+            from .retention import sweep_retention
+            summary.update(await sweep_retention())   # PR-4: no-op unless retention is configured
+        except Exception as e:  # noqa: BLE001 — retention must never break the reconcile pass
+            log.warning("reconciler.retention_sweep_failed", error=str(e))
         return summary
 
     async def sweep_tf_hygiene(self, max_age_days: int = 7) -> dict[str, int]:
@@ -210,12 +215,21 @@ class Reconciler:
 
             while True:
                 try:
-                    await self.sweep()
+                    summary = await self.sweep()
                     await self.sweep_orphans()  # D2: rebuild any invisible inventory orphan
+                    # PR-6: publish the operator-alert gauges from the sweep result.
+                    from ..metrics import STRANDED_RUNS
+                    STRANDED_RUNS.set((summary.get("resumed", 0)) + (summary.get("failed", 0)))
                     if get_settings().aegisops_drift == "on":
                         from . import drift  # D3: cloud drift/orphan reconciliation
-                        await drift.sweep()
+                        d = await drift.sweep()
+                        from ..metrics import DRIFT_FINDINGS
+                        if isinstance(d, dict):
+                            DRIFT_FINDINGS.labels(kind="drift").set(d.get("drift", 0))
+                            DRIFT_FINDINGS.labels(kind="orphan").set(d.get("orphans", 0))
                 except Exception as e:  # noqa: BLE001 — a sweep failure must not kill the loop
+                    from ..metrics import RECONCILER_SWEEP_FAILURES
+                    RECONCILER_SWEEP_FAILURES.inc()
                     log.error("reconciler.sweep_failed", error=str(e))
                 await asyncio.sleep(interval)
 
