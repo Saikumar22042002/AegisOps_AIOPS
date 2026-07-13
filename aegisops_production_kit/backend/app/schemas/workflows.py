@@ -587,6 +587,28 @@ class GCPCloudSQLInputs(WorkflowInputs):
     deletion_protection: bool = False   # destroys stay approval-gated by the platform
     encryption_key_name: str = ""       # CMEK; offered by the DEP slot, never forced
 
+    @field_validator("database_version")
+    @classmethod
+    def _normalize_engine(cls, v: str) -> str:
+        """BUGFIX-1 (live acceptance run 2): the param extractor passes the user's own word
+        ("postgres") straight through — un-normalized it fails the approved-engine policy
+        check AND the provider's enum at apply. Canonicalize the honest spellings to the
+        Cloud SQL enum; reject what can't be mapped (with examples), never guess an engine
+        the user didn't name. Canonical values pass through unchanged (B1)."""
+        raw = re.sub(r"[\s-]+", "_", v.strip().upper())
+        if not raw:
+            return "POSTGRES_15"                      # schema default (B2)
+        raw = re.sub(r"^POSTGRESQL", "POSTGRES", raw)
+        if raw == "POSTGRES":
+            return "POSTGRES_15"                      # bare engine → default version
+        if raw == "MYSQL":
+            return "MYSQL_8_0"
+        if re.fullmatch(r"POSTGRES_\d+(_\d+)?|MYSQL_\d+(_\d+)?|SQLSERVER_\d{4}_[A-Z0-9]+", raw):
+            return raw
+        raise ValueError(f"'{v}' is not a valid Cloud SQL engine/version — expected e.g. "
+                         "POSTGRES_15, MYSQL_8_0, SQLSERVER_2019_STANDARD (or just "
+                         "'postgres' / 'mysql')")
+
     @field_validator("ssl_mode")
     @classmethod
     def _valid_ssl_mode(cls, v: str) -> str:
