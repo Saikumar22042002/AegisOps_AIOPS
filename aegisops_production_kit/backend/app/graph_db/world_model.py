@@ -74,6 +74,42 @@ async def ensure_schema() -> None:
                "FOR (r:Resource) REQUIRE r.provider_id IS UNIQUE")
 
 
+async def rebuild_from_inventory() -> dict[str, int]:
+    """PR-5: prove Neo4j is a DERIVED mirror — rebuild the world model's live resource graph
+    purely from Postgres inventory (the ONE store that must be backed up). No cloud read.
+    For every org's active resources, re-`upsert_resource` (idempotent MERGE) so the nodes +
+    DEPENDS_ON edges are reconstructed. Returns {orgs, resources}."""
+    import uuid as _uuid
+
+    from sqlalchemy import select
+
+    from ..db.models import Organization, Resource
+    from ..db.session import session_scope
+
+    out = {"orgs": 0, "resources": 0}
+    async with session_scope() as s:
+        org_ids = [str(oid) for oid in (await s.execute(select(Organization.id))).scalars()]
+    for org_id in org_ids:
+        async with session_scope() as s:
+            rows = (await s.execute(select(Resource).where(
+                Resource.org_id == _uuid.UUID(org_id),
+                Resource.status == "active"))).scalars().all()
+            payloads = [{"name": r.name, "cloud": r.cloud, "region": r.region,
+                         "resource_type": r.resource_type, "provider_id": r.provider_id,
+                         "workspace": r.workspace, "state_workspace": r.state_workspace,
+                         "attributes": r.attributes or {}, "inputs": r.inputs or {}}
+                        for r in rows]
+        if payloads:
+            out["orgs"] += 1
+        for p in payloads:
+            # dependencies_from reads inputs/outputs; merge them so edges rebuild too.
+            await upsert_resource(org_id, {**p, **(p.get("inputs") or {}),
+                                           "attributes": p.get("attributes")})
+            out["resources"] += 1
+    log.info("world_model.rebuilt_from_inventory", **out)
+    return out
+
+
 async def upsert_resource(org_id: str, payload: dict) -> None:
     """MERGE the resource into the world model (same node the context graph writes, enriched
     with org scope + Terraform state refs) and its DEPENDS_ON edges from real inputs/outputs."""
