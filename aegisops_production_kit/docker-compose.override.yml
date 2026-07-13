@@ -86,8 +86,13 @@ services:
       # B3: no periodic reconciler loop auto-starts in the test TestClient lifespan — tests that
       # exercise the reconciler call sweep() explicitly on their own Reconciler instance.
       AEGISOPS_RECONCILER: "off"
+      # Same shared provider cache the api services use — without it every MODSEED test's
+      # real `terraform init` re-downloads providers (~700MB) into the host bind mount and
+      # a fresh container's first suite run wedges on the download (found 2026-07-13).
+      TF_PLUGIN_CACHE_DIR: /app/.tf-plugin-cache
     volumes:
       - "./backend:/app"
+      - "tfplugins:/app/.tf-plugin-cache"
       - "./infra/secrets:/secrets:ro"
       - "./infra/terraform-workspaces:/app/infra/terraform-workspaces"
       # Single source of truth for the stale-waiver guard test: a scanner waiver may not
