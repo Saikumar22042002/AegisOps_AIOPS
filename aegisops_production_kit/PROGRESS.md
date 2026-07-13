@@ -1322,6 +1322,20 @@ as done without the live run; the code paths behind each are covered by tests wi
       (3) gated destroy → card states soft-delete/purge semantics → verify the vault is
       soft-deleted (recoverable), not purged.
       Expect: AzureServices bypass + current-SP policy visible in the portal.
+- [ ] **DLV-25 · MODSEED eks Auto Mode live cluster (MS-11)** — Needs: valid
+      `GEMINI_API_KEY` + AWS creds + an existing VPC with private subnets (DLV-12's).
+      Steps: (1) "create an eks cluster named apps-auto in auto mode, vpc <id>, subnets
+      <ids>" → the approval card shows **"Cluster mode: EKS Auto Mode (API auth,
+      general-purpose pool, auto-mode IAM policy set)"** → approve → apply (~10 min);
+      (2) verify in the console: cluster Compute tab shows Auto Mode with the
+      general-purpose node pool; access config = API; the cluster role carries the
+      auto-mode policies (Compute/BlockStorage/LoadBalancing/Networking); NO managed
+      node groups; (3) deploy a test pod → a node materialises without any node group;
+      (4) **live B1**: a pre-enhancement standard cluster re-planned from stored inputs →
+      "No changes."; (5) create a second cluster in standard mode → the old node-group
+      path renders as before; (6) gated destroys.
+      Expect: auto-mode clusters ignore instance_types/desired_size (the pool decides);
+      the card's mode statement matches the console.
 - [ ] **DLV-24 · MODSEED aws.ec2 SSM live session (MS-10)** — Needs: valid
       `GEMINI_API_KEY` + AWS creds.
       Steps: (1) "create an ubuntu vm named ops-box with session manager access" →
@@ -1701,6 +1715,21 @@ this section mirrors phase-level status only.
         **Waiver REMOVED: CKV2_AWS_41** (aws-ec2 checkov 24/0; tfsec clean).
         Evidence: `test_modseed_ms10_aws_ec2_ssm.py` (6). Canary (B5) green.
         Live = **DLV-24**.
+
+  - [x] **MODSEED MS-11 eks-provision Auto Mode (`aws.eks`)** (2026-07-13): `eks_mode =
+        standard | auto` — mode wiring lives in root locals passed to the registry
+        module: standard renders the EXACT pre-enhancement inputs (nulls leave the
+        module's own defaults untouched; the `app` node group verbatim — B1), auto
+        forces API authentication + `cluster_compute_config` with the general-purpose
+        pool + no bootstrap self-managed addons + zero node groups (the registry module
+        wires elastic-LB/block-storage and the auto-mode IAM policy set; `~> 20.8`
+        already floats to the 20.31+ releases carrying Auto Mode — no pin change).
+        **B1 gate = committed native `terraform test` with `override_module`** (the
+        registry module output-mocked; OUR wiring asserted through locals). Schema
+        default standard (B2 verbatim); the card states the mode ("Cluster mode" in
+        `_eks_policy`); params offer the choice. No waiver changes (CKV_TF_1 was never
+        MS-tagged). Scans green. Evidence: `test_modseed_ms11_eks_auto_mode.py` (5).
+        Canary (B5) green. Live = **DLV-25**.
 
 ### Scanner ledger (fix or waiver per finding — owner condition, 2026-07-12)
 

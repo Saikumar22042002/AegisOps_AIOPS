@@ -115,6 +115,15 @@ class AWSEKSInputs(WorkflowInputs):
     instance_types: list[str] = Field(default_factory=lambda: ["m6i.xlarge"])
     desired_size: int = Field(default=3, ge=1, le=20)
     region: str = "us-east-1"
+    # MS-11 (B2, verbatim per spec): standard = the pre-enhancement node-group path.
+    eks_mode: str = "standard"
+
+    @field_validator("eks_mode")
+    @classmethod
+    def _valid_mode(cls, v: str) -> str:
+        if v.strip().lower() not in ("standard", "auto"):
+            raise ValueError(f"eks_mode must be 'standard' or 'auto' — got '{v}'")
+        return v.strip().lower()
 
 
 class AWSRDSInputs(WorkflowInputs):

@@ -39,3 +39,14 @@ variable "max_size" {
   type    = number
   default = 6
 }
+
+variable "eks_mode" {
+  type        = string
+  default     = "standard"
+  description = "standard = the pre-enhancement managed-node-group path (B2 default). auto = EKS Auto Mode (API auth, general-purpose pool, elastic-LB/block-storage + auto-mode IAM policies via the module)."
+
+  validation {
+    condition     = contains(["standard", "auto"], var.eks_mode)
+    error_message = "eks_mode must be standard or auto."
+  }
+}

@@ -91,6 +91,8 @@ PARAMS: dict[str, list[ParamSpec]] = {
         ParamSpec("cluster_name", "Cluster name", required=True, help="e.g. payments-eks"),
         ParamSpec("vpc_id", "Existing VPC id", required=True, help="EKS reuses an existing VPC (vpc-…)"),
         ParamSpec("subnet_ids", "Private subnet ids", required=True, help="comma-separated subnet-… ids (≥2)"),
+        ParamSpec("eks_mode", "Cluster mode", kind="choice", choices=["standard", "auto"],
+                  default="standard", help="auto = EKS Auto Mode (B2: standard for existing)"),
         ParamSpec("kubernetes_version", "Kubernetes version", default="1.29"),
         ParamSpec("instance_types", "Node instance types", default=["m6i.xlarge"]),
         ParamSpec("desired_size", "Node desired size", kind="int", default=3),

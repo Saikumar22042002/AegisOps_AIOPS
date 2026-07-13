@@ -104,12 +104,17 @@ def _vpc_policy(i: dict, resources=None) -> list[dict]:
 
 
 def _eks_policy(i: dict, resources=None) -> list[dict]:
+    mode = str(i.get("eks_mode", "standard"))
     return [
         _todo("Secrets encryption enabled"),
         _todo("Private API endpoint only"),
         _todo("IRSA configured · no node IAM keys"),
         _todo("Approved module version (v20.8)"),
         _ck("Multi-AZ node placement", len(i.get("subnet_ids", [])) >= 2, f"{len(i.get('subnet_ids', []))} subnets"),
+        # MS-11: the card states the cluster mode.
+        _ck("Cluster mode", mode in {"standard", "auto"},
+            "EKS Auto Mode (API auth, general-purpose pool, auto-mode IAM policy set)"
+            if mode == "auto" else "standard (managed node groups)"),
     ]
 
 
