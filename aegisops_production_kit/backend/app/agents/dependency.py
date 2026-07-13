@@ -126,6 +126,35 @@ _WANTS_NEW = {
                                  re.IGNORECASE),
 }
 
+# BUGFIX-2: a bare "new" (exactly what the ask suggests: «say "new" to create one»),
+# optionally with an article/parent noun — the reply form, not the in-sentence form above.
+_REPLY_NEW = re.compile(r"^\s*(?:a\s+|the\s+)?(?:new|fresh)"
+                        r"(?:\s+(?:one|vpc|network|vnet|rg|resource\s*group))?\s*[.!]?\s*$",
+                        re.IGNORECASE)
+
+
+def choice_from_reply(message: str, dep_ask: dict | None) -> dict | None:
+    """Map a follow-up reply onto the pending DEP ask (BUGFIX-2, live acceptance run 2).
+
+    `dep_ask` is what the asking turn persisted: `{"parent_type": ..., "options": [...]}`.
+    Returns `{"parent_type", "choice"}` — `"__new__"` for an explicit new-parent reply, or
+    the matched candidate's recorded name/provider_id. None = the reply doesn't answer the
+    ask (nothing is forced; the resolver re-asks honestly). Pure function, no I/O.
+    """
+    if not dep_ask or not (message or "").strip():
+        return None
+    ptype = dep_ask.get("parent_type") or ""
+    if _REPLY_NEW.match(message):
+        return {"parent_type": ptype, "choice": "__new__"}
+    msg = message.strip().strip("\"'“”‘’").lower()
+    for opt in dep_ask.get("options") or []:
+        name = str(opt.get("name") or "").strip().lower()
+        pid = str(opt.get("provider_id") or "").strip().lower()
+        if (name and (msg == name or name in msg)) or (pid and (msg == pid or pid in msg)):
+            return {"parent_type": ptype,
+                    "choice": opt.get("name") or opt.get("provider_id")}
+    return None
+
 
 @dataclass
 class Closure:
@@ -137,6 +166,8 @@ class Closure:
     question: str = ""              # (ask)
     options: list[dict] = field(default_factory=list)   # (ask) candidate parents
     dag: list[dict] = field(default_factory=list)       # (dag) ordered steps, parents first
+    parent_type: str = ""           # (ask) which slot asked — persisted so the NEXT turn's
+    #                                 reply can be mapped back onto this ask (BUGFIX-2)
 
 
 def _slot_value(slot: Slot, cand: dict) -> str | None:
@@ -191,19 +222,29 @@ def _dag_steps(template_key: str, slot: Slot, inputs: dict) -> list[dict]:
 
 
 def resolve_closure(template_key: str, validated: dict, active: list[dict],
-                    message: str = "") -> Closure:
+                    message: str = "", dep_choice: dict | None = None) -> Closure:
     """Resolve every dependency slot of `template_key` in the strict order (see module doc).
 
     `active` is the org's active inventory (`inventory.list_active`); `validated` is the
     schema-validated input dict (mutated copies only — the caller's dict is never touched).
+
+    `dep_choice` (BUGFIX-2, live acceptance run 2): the previous turn's DEP ask, answered —
+    `{"parent_type": ..., "choice": "__new__" | "<candidate name/provider_id>"}`. The live
+    bug: replying "new" (bare, exactly as the ask suggests) or a candidate's name never
+    mapped back onto the slot, so the ask repeated forever. The choice applies only to the
+    slot whose parent_type matches; an unmatched choice changes nothing (the ask honestly
+    repeats).
     """
     slots = SLOTS.get(template_key, [])
     inputs = dict(validated)
     notes: list[str] = []
 
     for slot in slots:
-        wants_new = bool(_WANTS_NEW.get(slot.parent_type)
-                         and _WANTS_NEW[slot.parent_type].search(message or ""))
+        choice = ((dep_choice or {}).get("choice")
+                  if (dep_choice or {}).get("parent_type") == slot.parent_type else None)
+        wants_new = bool(choice == "__new__"
+                         or (_WANTS_NEW.get(slot.parent_type)
+                             and _WANTS_NEW[slot.parent_type].search(message or "")))
 
         # 1) named — the user already supplied it.
         if not wants_new and inputs.get(slot.field):
@@ -214,12 +255,23 @@ def resolve_closure(template_key: str, validated: dict, active: list[dict],
                       if r.get("cloud") == slot.parent_cloud
                       and r.get("resource_type") == slot.parent_type]
 
+        # BUGFIX-2: a reply that names one of the offered candidates narrows the field to
+        # exactly that parent — the existing single-candidate path then fills from its REAL
+        # recorded facts (or asks again honestly when they're missing). Never a guess: an
+        # unrecognized name leaves the candidate set untouched.
+        if choice and choice != "__new__":
+            named = [c for c in candidates
+                     if str(c.get("name") or "").lower() == str(choice).lower()
+                     or str(c.get("provider_id") or "").lower() == str(choice).lower()]
+            if named:
+                candidates = named[:1]
+
         # 2) world model — one candidate is used (and stated); several are OFFERED, never guessed.
         if not wants_new and len(candidates) == 1:
             if _fill_from_candidate(inputs, slot, candidates[0], notes):
                 continue
             cand = candidates[0]
-            return Closure(status="ask", inputs=inputs, notes=notes,
+            return Closure(status="ask", inputs=inputs, notes=notes, parent_type=slot.parent_type,
                            question=(f"I found {slot.parent_type} “{cand.get('name')}” but its "
                                      f"recorded facts don't include what {template_key} needs "
                                      f"({', '.join(slot.companion_fields)}). Name the values, or "
@@ -229,7 +281,7 @@ def resolve_closure(template_key: str, validated: dict, active: list[dict],
         if not wants_new and len(candidates) >= 2:
             names = ", ".join(f"“{c.get('name')}” ({c.get('provider_id') or 'no id'})"
                               for c in candidates[:6])
-            return Closure(status="ask", inputs=inputs, notes=notes,
+            return Closure(status="ask", inputs=inputs, notes=notes, parent_type=slot.parent_type,
                            question=(f"Which {slot.parent_type} should this use? You have "
                                      f"{len(candidates)}: {names}. Or say “new” to create one."),
                            options=[{"name": c.get("name"), "provider_id": c.get("provider_id")}

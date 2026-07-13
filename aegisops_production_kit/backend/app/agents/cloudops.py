@@ -603,12 +603,25 @@ async def cloudops_plan(state: AgentState, config) -> dict:
     # create-first DAG). An ambiguous parent ASKS with the real candidates; a missing required
     # parent yields an ordered create-first plan (executed by the executive loop, U6) — the
     # single-step path proceeds with the resolved inputs + provenance notes for the card.
+    # BUGFIX-2 (live acceptance run 2): when the PREVIOUS turn was that ask, map this turn's
+    # reply ("new" / a candidate's name — exactly the forms the ask suggests) back onto the
+    # slot; before this, the reply was re-resolved from scratch and the ask repeated forever.
+    dep_choice = dependency.choice_from_reply(state.get("message", ""),
+                                              pending_rec.get("dep_ask"))
+    if dep_choice:
+        await emitter.step(4, f"Placement answered · {dep_choice['parent_type']} → "
+                              f"{'a new one' if dep_choice['choice'] == '__new__' else dep_choice['choice']}")
     closure = dependency.resolve_closure(
         template.key, validated,
-        await inventory.list_active(state["org_id"]), message=state.get("message", ""))
+        await inventory.list_active(state["org_id"]), message=state.get("message", ""),
+        dep_choice=dep_choice)
     if closure.status == "ask":
         if session_id:
-            await params.save_pending(session_id, _pending_record(collected))
+            rec = _pending_record(collected)
+            # persist WHICH slot asked + the real candidates, so the next turn's bare reply
+            # can be mapped honestly instead of being re-classified (BUGFIX-2)
+            rec["dep_ask"] = {"parent_type": closure.parent_type, "options": closure.options}
+            await params.save_pending(session_id, rec)
         await emitter.step(4, "Placement is ambiguous — asking")
         await emitter.token(closure.question)
         cc = classify(closure.question)
