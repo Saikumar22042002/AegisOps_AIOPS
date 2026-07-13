@@ -336,11 +336,20 @@ def _azure_db_policy(i: dict, resources=None) -> list[dict]:
 
 
 def _azure_aks_policy(i: dict, resources=None) -> list[dict]:
-    return [
+    checks = [
         _todo("System-assigned managed identity"),
         _todo("Azure RBAC enabled"),
         _ck("Multi-node pool", int(i.get("node_count", 2)) >= 2, f"{i.get('node_count', 2)} nodes"),
     ]
+    # MS-13: the card states each chosen add-on.
+    if i.get("enable_monitoring"):
+        checks.append(_ck("Cluster monitoring", True,
+                          "Log Analytics workspace + OMS agent (30-day retention)"))
+    if i.get("network_policy"):
+        checks.append(_ck("Network policy", True, f"{i['network_policy']} on kubenet"))
+    if i.get("azure_policy_enabled"):
+        checks.append(_ck("Azure Policy add-on", True, "governance policies enforced in-cluster"))
+    return checks
 
 
 def _gcp_vpc_policy(i: dict, resources=None) -> list[dict]:

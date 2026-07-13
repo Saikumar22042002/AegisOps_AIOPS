@@ -79,7 +79,15 @@ SLOTS: dict[str, list[Slot]] = {
                         creator="azure.resource_group", value_from="name",
                         wires={"resource_group": "input:name"},
                         stated_default="a module-created “<name>-rg” resource group")],
-    "azure.vm": [Slot(field="resource_group", parent_cloud="azure",
+    # MS-13 (B4, BY DESIGN): a known azure.vnet places the VM — "create a vm in my-vnet"
+    # lands in the EXISTING network's first recorded subnet; none known → the module
+    # creates its dedicated '<name>-vnet' as before.
+    "azure.vm": [Slot(field="existing_subnet_id", parent_cloud="azure",
+                      parent_type="vnet", required=False,
+                      creator="azure.vnet", value_from="attr:subnet_ids[0]",
+                      wires={},
+                      stated_default="a module-created “<name>-vnet” network"),
+                 Slot(field="resource_group", parent_cloud="azure",
                       parent_type="resource_group", required=False,
                       creator="azure.resource_group", value_from="name",
                       wires={"resource_group": "input:name"},

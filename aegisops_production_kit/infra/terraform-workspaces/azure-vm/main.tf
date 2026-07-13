@@ -89,7 +89,32 @@ resource "azurerm_resource_group" "this" {
   tags     = { ManagedBy = "AegisOps" }
 }
 
+# MS-13 (B4, BY DESIGN): the azure.vm→vnet DEP slot fills existing_subnet_id from a known
+# azure.vnet — the dedicated vnet+subnet are then skipped and the VM lands in the existing
+# network. `moved` blocks migrate the old unkeyed addresses so existing state re-plans as a
+# no-op rename.
+variable "existing_subnet_id" {
+  type        = string
+  default     = ""
+  description = "Subnet id of an existing azure.vnet (filled by the DEP slot); empty keeps the module-created '<name>-vnet' (old behavior)."
+}
+
+locals {
+  use_existing_net = var.existing_subnet_id != ""
+}
+
+moved {
+  from = azurerm_virtual_network.this
+  to   = azurerm_virtual_network.this[0]
+}
+
+moved {
+  from = azurerm_subnet.this
+  to   = azurerm_subnet.this[0]
+}
+
 resource "azurerm_virtual_network" "this" {
+  count               = local.use_existing_net ? 0 : 1
   name                = "${var.name}-vnet"
   resource_group_name = azurerm_resource_group.this.name
   location            = var.location
@@ -97,9 +122,10 @@ resource "azurerm_virtual_network" "this" {
 }
 
 resource "azurerm_subnet" "this" {
+  count                = local.use_existing_net ? 0 : 1
   name                 = "${var.name}-subnet"
   resource_group_name  = azurerm_resource_group.this.name
-  virtual_network_name = azurerm_virtual_network.this.name
+  virtual_network_name = azurerm_virtual_network.this[0].name
   address_prefixes     = ["10.10.1.0/24"]
 }
 
@@ -155,7 +181,7 @@ resource "azurerm_network_interface" "this" {
 
   ip_configuration {
     name                          = "ipconfig"
-    subnet_id                     = azurerm_subnet.this.id
+    subnet_id                     = local.use_existing_net ? var.existing_subnet_id : azurerm_subnet.this[0].id
     private_ip_address_allocation = "Dynamic"
     public_ip_address_id          = azurerm_public_ip.this.id
   }

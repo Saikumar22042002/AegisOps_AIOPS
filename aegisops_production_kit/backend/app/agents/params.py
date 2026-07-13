@@ -156,6 +156,12 @@ PARAMS: dict[str, list[ParamSpec]] = {
         ParamSpec("location", "Location", default="eastus"),
         ParamSpec("node_count", "Node count", kind="int", default=2),
         ParamSpec("node_size", "Node size", default="Standard_B2s"),
+        ParamSpec("enable_monitoring", "Cluster monitoring", kind="bool", default=False,
+                  help="Log Analytics workspace + OMS agent (B2: off for existing)"),
+        ParamSpec("network_policy", "Network policy", kind="choice",
+                  choices=["", "calico", "azure"], default="",
+                  help="empty keeps the pre-enhancement rendering"),
+        ParamSpec("azure_policy_enabled", "Azure Policy add-on", kind="bool", default=False),
     ],
     # ── GCP (Phase 5) ──
     "gcp.vm": [

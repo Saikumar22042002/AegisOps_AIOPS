@@ -1,18 +1,18 @@
 # AegisOps scanner waivers - every skip is documented here AND in the
 # PROGRESS.md scanner ledger. New checks fail the scan until triaged.
+# REMOVED when the enhancement shipped: monitoring (Log Analytics + OMS), network
+# policy (calico), and the Azure Policy add-on now pass on module defaults (the
+# platform schema keeps old behavior for existing clusters per B2).
 skip-check:
-  - CKV2_AZURE_29  # kubenet is the sandbox default; Azure CNI is a plan-shape change (network profile)
-  - CKV_AZURE_115  # private cluster would cut the demo's public API access path
-  - CKV_AZURE_116  # Azure Policy add-on arrives as the MS-13 azure_policy_enabled opt-in (B2)
-  - CKV_AZURE_117  # disk encryption set: platform-managed keys are the sandbox posture
-  - CKV_AZURE_141  # local admin stays enabled: kube_config output is the demo access path
-  - CKV_AZURE_168  # max-pods sizing: sandbox node defaults
-  - CKV_AZURE_170  # paid SLA SKU: cost posture for sandbox clusters
-  - CKV_AZURE_171  # upgrade channel: pinned-version posture; owner-controlled upgrades
-  - CKV_AZURE_172  # CSI secret autorotation: CSI driver not enabled in this module
-  - CKV_AZURE_226  # ephemeral OS disks are VM-size dependent; sandbox sizes may not support them
-  - CKV_AZURE_227  # host encryption requires subscription feature registration; sandbox posture
-  - CKV_AZURE_232  # single-pool sandbox cluster; system/user pool split is an enterprise topology
-  - CKV_AZURE_4  # Log Analytics/OMS agent arrives with MS-13 (B2 opt-in)
-  - CKV_AZURE_6  # API authorized IP ranges would cut the demo's access path
-  - CKV_AZURE_7  # network_policy=calico arrives with MS-13 (B2 opt-in)
+  - CKV2_AZURE_29   # kubenet is the sandbox default (calico runs on it); Azure CNI is a plan-shape change (network profile plugin)
+  - CKV_AZURE_115   # private cluster would cut the demo's public API access path
+  - CKV_AZURE_117   # disk encryption set: platform-managed keys are the sandbox posture
+  - CKV_AZURE_141   # local admin stays enabled: kube_config output is the demo access path
+  - CKV_AZURE_168   # max-pods sizing: sandbox node defaults
+  - CKV_AZURE_170   # paid SLA SKU: cost posture for sandbox clusters
+  - CKV_AZURE_171   # upgrade channel: pinned-version posture; owner-controlled upgrades
+  - CKV_AZURE_172   # CSI secret autorotation: CSI driver not enabled in this module
+  - CKV_AZURE_226   # ephemeral OS disks are VM-size dependent; sandbox sizes may not support them
+  - CKV_AZURE_227   # host encryption requires subscription feature registration; sandbox posture
+  - CKV_AZURE_232   # single-pool sandbox cluster; system/user pool split is an enterprise topology
+  - CKV_AZURE_6     # API authorized IP ranges would cut the demo's access path

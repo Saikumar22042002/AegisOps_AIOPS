@@ -384,6 +384,8 @@ class AzureVMInputs(WorkflowInputs):
     resource_group: str = ""
     ingress_ports: list[int] = Field(default_factory=list)
     allowed_cidr: str = ""             # admin access (22/3389) source CIDR; "" = closed (N-02)
+    # MS-13 (B4): filled by the azure.vm→vnet DEP slot; "" keeps the module-created vnet.
+    existing_subnet_id: str = ""
 
     @field_validator("size")
     @classmethod
@@ -460,10 +462,23 @@ AzurePostgresInputs = AzureDBInputs
 
 
 class AzureAKSInputs(WorkflowInputs):
+    """MS-13. B2: options default OFF here (existing clusters re-plan unchanged); the
+    module's own defaults are the observable/governed ones."""
+
     name: str
     location: str = "eastus"
     node_count: int = Field(default=2, ge=1, le=100)
     node_size: str = "Standard_B2s"
+    enable_monitoring: bool = False     # Log Analytics + OMS agent
+    network_policy: str = ""            # "" = old rendering; calico | azure
+    azure_policy_enabled: bool = False
+
+    @field_validator("network_policy")
+    @classmethod
+    def _valid_netpol(cls, v: str) -> str:
+        if v.strip().lower() not in ("", "calico", "azure"):
+            raise ValueError("network_policy must be empty, calico, or azure")
+        return v.strip().lower()
     kubernetes_version: str = ""
     resource_group: str = ""
 

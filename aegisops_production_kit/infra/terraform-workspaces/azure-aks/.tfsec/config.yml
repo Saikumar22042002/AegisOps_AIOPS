@@ -1,6 +1,6 @@
 # AegisOps scanner waivers - documented in the PROGRESS.md scanner ledger.
 # tfsec v1.28 config excludes match legacy IDs; the AVD id is in each comment.
+# REMOVED when the enhancement shipped: logging (OMS) and network-policy excludes -
+# tfsec passes both on module defaults.
 exclude:
-  - azure-container-logging  # AVD-AZU-0040 | Log Analytics/OMS arrives with MS-13 (B2 opt-in)
   - azure-container-limit-authorized-ips  # AVD-AZU-0041 | API authorized IPs would cut the demo's access path
-  - azure-container-configured-network-policy  # AVD-AZU-0043 | network_policy=calico arrives with MS-13 (B2 opt-in)

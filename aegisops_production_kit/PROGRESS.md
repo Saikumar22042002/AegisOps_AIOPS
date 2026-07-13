@@ -1322,6 +1322,20 @@ as done without the live run; the code paths behind each are covered by tests wi
       (3) gated destroy → card states soft-delete/purge semantics → verify the vault is
       soft-deleted (recoverable), not purged.
       Expect: AzureServices bypass + current-SP policy visible in the portal.
+- [ ] **DLV-27 · MODSEED azure.aks add-ons + azure.vm vnet placement live (MS-13)** —
+      Needs: valid `GEMINI_API_KEY` + Azure creds.
+      Steps: (1) "create an aks cluster named apps-aks with monitoring and calico" → the
+      card states "Cluster monitoring: Log Analytics + OMS", "Network policy: calico on
+      kubenet", "Azure Policy add-on" if chosen → approve → apply (~10 min) → verify in
+      the portal: Insights receives logs (the -logs workspace), network policy calico,
+      the policy add-on enabled; (2) with the DLV-16 azure.vnet in inventory: "create a
+      vm named app-01 in my-vnet" → the card shows the vnet placement (slot provenance)
+      → apply → the NIC sits in the existing vnet's first subnet and NO '<name>-vnet'
+      was created; (3) **live moved-block B1**: a pre-enhancement VM re-planned from
+      stored inputs → the plan shows the vnet/subnet address MOVES and "No changes.";
+      (4) same for a pre-enhancement AKS cluster → "No changes."; (5) gated destroys.
+      Expect: kube_config still works (RBAC pin unchanged); the vm's NSG stays attached
+      via the NIC regardless of which vnet it landed in.
 - [ ] **DLV-26 · MODSEED gcp.vm options + network placement live (MS-12)** — Needs:
       valid `GEMINI_API_KEY` + the working GCP SA.
       Steps: (1) with the DLV-15 gcp.vpc ("prod-network") in inventory: "create a vm named
@@ -1759,6 +1773,21 @@ this section mirrors phase-level status only.
         bare scans 19/0 + clean). Evidence: `test_modseed_ms12_gcp_gce.py` (8).
         Canary (B5) green. Live = **DLV-26**.
 
+  - [x] **MODSEED MS-13 azure-aks add-ons + B4 azure.vm→vnet slot** (2026-07-13, the
+        LAST MODSEED item): Log Analytics workspace + OMS agent / calico-on-kubenet /
+        `azure_policy_enabled`, all variable-driven — schema B2 defaults OFF, module
+        defaults ON (killing CKV_AZURE_4/7/116 + AVD-AZU-0040/0043; 12 sandbox-posture
+        skips remain, none MS-tagged). **B4: azure.vm→vnet DEP slot** — "create a vm in
+        my-vnet" lands the NIC in the existing vnet's first recorded subnet and the
+        module skips its dedicated vnet+subnet (count + `moved` blocks migrate existing
+        state); coexists with the RG slot; no existing test needed changing. **B1 gates =
+        committed native `terraform test` in BOTH workspaces** (aks 4 runs, vm 2 runs).
+        Discovery recorded: checkov auto-discovers a directory's own `.checkov.yaml` —
+        "bare" in-place scans silently load the waivers, so waiver-death proofs use a
+        config-free copy. Evidence: `test_modseed_ms13_azure_aks.py` (9). Canary (B5)
+        green. Live = **DLV-27**. **MODSEED MS-7..13 COMPLETE — STOPPED for the evidence
+        table + the VM start/stop options.**
+
 ### Scanner ledger (fix or waiver per finding — owner condition, 2026-07-12)
 
 Scanners: checkov 3.3.8, tfsec v1.28.14. Waivers live per-workspace in
@@ -1815,9 +1844,7 @@ for the same reason — commit-hash pinning applies to git sources).
 | aws-s3 | CKV_AWS_18 / AVD-AWS-0089 | Access logging needs a second bucket; demo posture, opt-in candidate. |
 | aws-vpc | CKV_TF_1 | Registry module `terraform-aws-modules/vpc` pinned by exact version (see upstream note). |
 | eks-provision | CKV_TF_1 | Registry module `terraform-aws-modules/eks` pinned by exact version (see upstream note). |
-| azure-aks | CKV_AZURE_4 / AVD-AZU-0040 | Log Analytics/OMS agent arrives with MS-13 (B2 opt-in). |
-| azure-aks | CKV_AZURE_7 / AVD-AZU-0043 | `network_policy=calico` arrives with MS-13 (B2 opt-in). |
-| azure-aks | CKV_AZURE_116 | Azure Policy add-on arrives as the MS-13 `azure_policy_enabled` opt-in (B2). |
+| azure-aks | ~~CKV_AZURE_4 / AVD-AZU-0040 + CKV_AZURE_7 / AVD-AZU-0043 + CKV_AZURE_116~~ | **WAIVERS REMOVED by MS-13 (2026-07-13)** — module defaults: Log Analytics + OMS on, calico on kubenet, Azure Policy add-on on (schema keeps existing clusters unchanged per B2). Proven on TRUE-bare scans (a config-free copy — checkov auto-discovers a directory's own `.checkov.yaml`, so in-place scans are never bare). |
 | azure-aks | CKV_AZURE_115 + CKV_AZURE_6 / AVD-AZU-0041 | Private cluster / authorized IP ranges would cut the demo's public API access path. |
 | azure-aks | CKV2_AZURE_29 | kubenet is the sandbox default; Azure CNI is a plan-shape change (network profile). |
 | azure-aks | CKV_AZURE_117 | Disk encryption set: platform-managed keys are the sandbox posture. |
