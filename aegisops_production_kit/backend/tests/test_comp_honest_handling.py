@@ -89,6 +89,13 @@ def test_os_change_is_not_triggered_by_a_port_modify():
 def test_category_detection():
     assert set(_detected_categories("an ubuntu vm and a gcs bucket")) == {"compute", "storage"}
     assert _detected_categories("a postgres database") == ["database"]
+    # BUGFIX-3 (live run 2): a database's own noun phrase is ONE resource — the "instance"/
+    # "server" qualifier never counts as compute ("Cloud SQL instance" is the product name).
+    assert _detected_categories("a postgres cloudsql instance") == ["database"]
+    assert _detected_categories("an rds instance") == ["database"]
+    assert _detected_categories("a sql server instance") == ["database"]
+    # …while a free-standing instance still means compute (real compounds stay caught)
+    assert set(_detected_categories("an instance and a bucket")) == {"compute", "storage"}
 
 
 def test_router_prompt_keeps_these_off_destroy():

@@ -325,8 +325,20 @@ _OS_CHANGE = re.compile(
 _OS_TOKENS = re.compile(r"\b(windows|ubuntu|debian|amazon[- ]linux|rhel|centos)\b", re.IGNORECASE)
 
 
+# BUGFIX-3 (live acceptance run 2): "instance"/"server" directly qualifying a database noun
+# is that DATABASE's own noun phrase — Cloud SQL/RDS products are literally named
+# "instances" ("a postgres cloudsql instance", "an rds instance", "a sql server"). Counting
+# the qualifier as compute made ONE resource look like a compound ask. Collapse the phrase
+# to its database head before category detection; a free-standing "instance" still means
+# compute ("an instance and a bucket" stays compound).
+_DB_QUALIFIED = re.compile(
+    r"\b(cloud\s*sql|cloudsql|rds|database|db|postgres(?:ql)?|mysql|mariadb|"
+    r"sql\s*server|mssql)((?:[\s-]+(?:instance|server))+)\b", re.IGNORECASE)
+
+
 def _detected_categories(message: str) -> list[str]:
-    low = f" {message.lower()} "
+    collapsed = _DB_QUALIFIED.sub(r"\1", message.lower())
+    low = f" {collapsed} "
     hits: list[str] = []
     for cat, kws in _COMP_CATEGORIES.items():
         if any(k in low for k in kws):
