@@ -1322,6 +1322,17 @@ as done without the live run; the code paths behind each are covered by tests wi
       (3) gated destroy → card states soft-delete/purge semantics → verify the vault is
       soft-deleted (recoverable), not purged.
       Expect: AzureServices bypass + current-SP policy visible in the portal.
+- [ ] **DLV-29 · COST catalog estimate + guardrail on the live card (COST)** — Needs:
+      valid `GEMINI_API_KEY` (any cloud creds optional — plan-only is enough).
+      Steps: (1) `AEGISOPS_COST_GUARDRAIL_USD=50` in .env → restart api; (2) "create an
+      ec2 named cost-probe, t3.medium" → the approval card shows "Cost estimate (catalog)
+      $32.77/mo — static catalog estimate" and "Cost guardrail (≤ $50/mo)" PASS;
+      (3) "create a postgres db named big-db, db.m5.large, 200 GiB" → the guardrail row
+      FAILS ($147.83/mo vs the cap) and the approver still decides; (4) guardrail off →
+      only the estimate row renders.
+      Expect: numbers match agents/cost.py's catalog exactly; usage-based types (s3) show
+      the honest zero-with-note. BACKLOG (owner 2026-07-13): Infracost integration
+      replaces the static catalog later.
 - [ ] **DLV-28 · MOD day-2 modify beyond ports + Option-A power state (MOD)** — Needs:
       valid `GEMINI_API_KEY` + AWS creds (+ GCP SA for the gce power pass).
       Steps: (1) "stop web-01" (an aws.ec2 from DLV-12/24) → the approval card shows a
@@ -1816,6 +1827,14 @@ this section mirrors phase-level status only.
         expressions break checkov/tfsec default-rendering → 3+2 gcp-gce waivers re-added
         with TOOL-LIMITATION reasons (secure defaults unchanged, tftest-asserted).
         Evidence: `test_mod_day2.py` (11). Canary (B5) green. Live = **DLV-28**.
+
+  - [x] **COST — static catalog estimation + guardrail** (2026-07-13, owner
+        speed-directive scope): `agents/cost.py` static provider-pricing catalog (labelled
+        "static catalog estimate" on every row — never a quote), honest unpriced/usage-based
+        states, power/spot-aware; `AEGISOPS_COST_GUARDRAIL_USD` adds a REAL policy check
+        failing on breach and failing closed when unpriced; wired into both plan paths.
+        **Infracost integration → BACKLOG (owner directive).** Evidence:
+        `test_cost_estimation.py` (7). Live = **DLV-29**.
 
 ### Scanner ledger (fix or waiver per finding — owner condition, 2026-07-12)
 

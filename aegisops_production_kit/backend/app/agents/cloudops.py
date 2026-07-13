@@ -26,7 +26,7 @@ from ..tools import aws as aws_tool
 from ..tools import azure as azure_tool
 from ..tools import gcp as gcp_tool
 from ..tools.terraform import TerraformError, TerraformRunner, state_slug
-from . import dependency, intent_guard, inventory, llm, params, plan_guard, provider_errors, templates, timing
+from . import cost, dependency, intent_guard, inventory, llm, params, plan_guard, provider_errors, templates, timing
 from .runtime import emitter_of
 from .state import AgentState
 
@@ -583,6 +583,7 @@ async def cloudops_plan(state: AgentState, config) -> dict:
 
     await timing.start_step(run_id, "policy_evaluation")
     policy_checks = template.policy_fn(validated, runner.planned_resources())  # U1: over the real plan
+    policy_checks = policy_checks + cost.checks_for(template.key, validated)  # COST: estimate + guardrail on the card
     await timing.end_step(run_id, "policy_evaluation", status="done",
                           result={"passed": sum(1 for p in policy_checks if p["passed"]), "total": len(policy_checks)})
     # DEF: surface any silently-defaulted dependency placement on the approval card — plus the
@@ -1157,6 +1158,7 @@ async def _modify_resource(state: AgentState, config, target: str | None) -> dic
 
     await timing.start_step(run_id, "policy_evaluation")
     policy_checks = template.policy_fn(validated, runner.planned_resources())  # U1: over the real plan
+    policy_checks = policy_checks + cost.checks_for(template.key, validated)  # COST: estimate + guardrail on the card
     await timing.end_step(run_id, "policy_evaluation", status="done")
 
     plan_json = {"summary": plan["summary"], "diff": plan["diff"],
