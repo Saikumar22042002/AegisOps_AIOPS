@@ -214,6 +214,9 @@ class AWSEC2Inputs(WorkflowInputs):
     root_volume_type: str = "gp3"
     ingress_ports: list[int] = Field(default_factory=list)  # inbound TCP ports on the managed SG (day-2)
     allowed_cidr: str = ""  # admin access (22/3389) source CIDR; "" = closed (N-02)
+    # MS-10 (B2 at the schema level): SSM+CloudWatch instance profile — OFF here so existing
+    # instances re-plan unchanged; the module's own default is ON for bare use.
+    enable_ssm: bool = False
 
     @field_validator("allowed_cidr")
     @classmethod

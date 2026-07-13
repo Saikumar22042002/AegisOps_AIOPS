@@ -1,7 +1,8 @@
 # AegisOps scanner waivers - every skip is documented here AND in the
 # PROGRESS.md scanner ledger. New checks fail the scan until triaged.
+# The IAM-instance-profile waiver was REMOVED when the SSM enhancement shipped
+# (module default ON; the platform schema keeps old behavior for existing instances).
 skip-check:
-  - CKV2_AWS_41  # IAM instance profile arrives as the MS-10 SSM opt-in (B2: off by default)
   - CKV_AWS_126  # detailed monitoring: cost posture for sandbox VMs; opt-in candidate
   - CKV_AWS_135  # EBS-optimized is instance-type dependent; modern types are optimized by default
   - CKV_AWS_382  # egress-open by design (outbound updates); ingress is the guarded surface (U1 SSH-CIDR policy)

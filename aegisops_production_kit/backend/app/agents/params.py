@@ -49,6 +49,8 @@ PARAMS: dict[str, list[ParamSpec]] = {
         ParamSpec("allowed_cidr", "Allowed source IP/CIDR", required=True,
                   help="your public IP (e.g. 203.0.113.7) to open SSH/RDP for it, or 'none' to keep "
                        "remote access closed"),
+        ParamSpec("enable_ssm", "Session Manager (SSM) access", kind="bool", default=False,
+                  help="SSM + CloudWatch agent instance profile (B2: off for existing)"),
         # Defaulted / overridable — never asked:
         ParamSpec("region", "Region", help="defaults to the selected region"),
         ParamSpec("vpc_id", "VPC", help="defaults to the account's default VPC"),

@@ -60,6 +60,12 @@ variable "root_volume_type" {
   default = "gp3"
 }
 # Inbound TCP ports opened on the instance's managed security group (day-2 modifiable).
+variable "enable_ssm" {
+  type        = bool
+  default     = true
+  description = "MS-10: SSM Session Manager + CloudWatch agent instance profile. Secure/observable by default here; the platform schema defaults this OFF (B2) and always passes it explicitly."
+}
+
 variable "ingress_ports" {
   type    = list(number)
   default = []
@@ -214,12 +220,49 @@ resource "aws_key_pair" "generated" {
   tags       = { ManagedBy = "AegisOps" }
 }
 
+# ── MS-10: optional SSM + CloudWatch instance profile (for_each so scanners can follow
+#    the graph; the platform schema defaults enable_ssm OFF per B2 — existing instances
+#    re-plan without any profile resources). ──
+resource "aws_iam_role" "ssm" {
+  for_each    = var.enable_ssm ? toset(["ssm"]) : toset([])
+  name_prefix = "${var.name}-ssm-"
+  description = "AegisOps SSM Session Manager + CloudWatch agent role for ${var.name}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "ec2.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "ssm_core" {
+  for_each   = var.enable_ssm ? toset(["ssm"]) : toset([])
+  role       = aws_iam_role.ssm[each.value].name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_role_policy_attachment" "cloudwatch_agent" {
+  for_each   = var.enable_ssm ? toset(["ssm"]) : toset([])
+  role       = aws_iam_role.ssm[each.value].name
+  policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+}
+
+resource "aws_iam_instance_profile" "ssm" {
+  for_each    = var.enable_ssm ? toset(["ssm"]) : toset([])
+  name_prefix = "${var.name}-ssm-"
+  role        = aws_iam_role.ssm[each.value].name
+}
+
 resource "aws_instance" "this" {
   ami                    = local.ami_id
   instance_type          = var.instance_type
   subnet_id              = local.subnet_id
   key_name               = local.key_name
   vpc_security_group_ids = [aws_security_group.this.id]
+  iam_instance_profile   = one(values(aws_iam_instance_profile.ssm)[*].name)
 
   metadata_options {
     http_tokens = "required" # IMDSv2 only
@@ -246,6 +289,8 @@ output "security_group_id" { value = aws_security_group.this.id }
 output "ingress_ports" { value = var.ingress_ports }
 output "allowed_cidr" { value = var.allowed_cidr }
 output "admin_port" { value = var.allowed_cidr != "" ? local.admin_port : null }
+output "ssm_enabled" { value = var.enable_ssm }
+output "instance_profile" { value = one(values(aws_iam_instance_profile.ssm)[*].name) }
 output "ami_used" { value = local.ami_id }
 output "login_user" { value = local.login_user }
 output "key_name" { value = local.key_name }

@@ -1322,6 +1322,17 @@ as done without the live run; the code paths behind each are covered by tests wi
       (3) gated destroy → card states soft-delete/purge semantics → verify the vault is
       soft-deleted (recoverable), not purged.
       Expect: AzureServices bypass + current-SP policy visible in the portal.
+- [ ] **DLV-24 · MODSEED aws.ec2 SSM live session (MS-10)** — Needs: valid
+      `GEMINI_API_KEY` + AWS creds.
+      Steps: (1) "create an ubuntu vm named ops-box with session manager access" →
+      the approval card shows **"Session Manager access available"** → approve → apply;
+      (2) in the AWS console, Systems Manager → Session Manager → start a session to
+      ops-box WITHOUT any SSH key/port (the SSM agent registers via the instance
+      profile); (3) CloudWatch → confirm the agent's metrics namespace appears;
+      (4) **live B1**: a pre-enhancement instance re-planned from stored inputs →
+      "No changes." (no IAM resources appear); (5) gated destroy (verify the role/profile
+      are removed with the instance).
+      Expect: the SSH path still works independently (U1 CIDR-scoped) — SSM is additive.
 - [ ] **DLV-23 · MODSEED gcp.cloudsql enhanced live lifecycle + CMEK slot (MS-9)** —
       Needs: valid `GEMINI_API_KEY` + the working GCP SA (Cloud SQL Admin API enabled).
       Steps: (1) with the gcp.kms ring from DLV-20 present: "create a cloudsql database
@@ -1679,6 +1690,18 @@ this section mirrors phase-level status only.
         render). Evidence: `test_modseed_ms9_gcp_cloudsql.py` (8). Canary (B5) green.
         Live = **DLV-23**.
 
+  - [x] **MODSEED MS-10 aws-ec2 SSM (`aws.ec2`)** (2026-07-12): optional SSM Session
+        Manager + CloudWatch agent instance profile — IAM role with the two AWS managed
+        policies + instance profile, the whole chain `for_each`-gated on `enable_ssm`
+        (schema default FALSE per B2, named verbatim in the spec; module default TRUE —
+        which is what kills the scanner waiver). The card states "Session Manager access
+        available" when on (`_ec2_policy`). **B1 gate = committed native `terraform
+        test`** (mock provider + `override_data` for the default-subnet discovery;
+        isolated `TF_DATA_DIR` keeps tests off the workspace's A3 backend pointer).
+        **Waiver REMOVED: CKV2_AWS_41** (aws-ec2 checkov 24/0; tfsec clean).
+        Evidence: `test_modseed_ms10_aws_ec2_ssm.py` (6). Canary (B5) green.
+        Live = **DLV-24**.
+
 ### Scanner ledger (fix or waiver per finding — owner condition, 2026-07-12)
 
 Scanners: checkov 3.3.8, tfsec v1.28.14. Waivers live per-workspace in
@@ -1712,7 +1735,7 @@ for the same reason — commit-hash pinning applies to git sources).
 
 | Workspace | Finding(s) | Waiver reason |
 |---|---|---|
-| aws-ec2 | CKV2_AWS_41 | IAM instance profile arrives as the MS-10 SSM opt-in (B2: off by default). |
+| aws-ec2 | ~~CKV2_AWS_41~~ | **WAIVER REMOVED by MS-10 (2026-07-12)** — the SSM+CloudWatch instance-profile chain ships for_each-gated (module default ON; schema keeps existing instances unchanged per B2); checkov follows the graph and passes. |
 | aws-ec2 | CKV_AWS_126 | Detailed monitoring: sandbox cost posture; opt-in candidate. |
 | aws-ec2 | CKV_AWS_135 | EBS-optimized is instance-type dependent; modern types are optimized by default. |
 | aws-ec2 | CKV_AWS_382 / AVD-AWS-0104 | Egress-open by design (outbound updates); ingress is the guarded surface — U1 enforces the SSH-CIDR policy. |

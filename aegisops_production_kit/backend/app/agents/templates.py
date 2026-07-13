@@ -146,15 +146,21 @@ def _rds_policy(i: dict, resources=None) -> list[dict]:
 def _ec2_policy(i: dict, resources=None) -> list[dict]:
     inst = _after(resources, "aws_instance")
     if inst is None:
-        return [_todo("IMDSv2 enforced"), _todo("Root volume encrypted"), _todo("Dedicated security group")]
-    mo = _block0(inst, "metadata_options")
-    rbd = _block0(inst, "root_block_device")
-    tokens = mo.get("http_tokens")
-    return [
-        _ck("IMDSv2 enforced", tokens == "required", tokens or "unset"),
-        _ck("Root volume encrypted", bool(rbd.get("encrypted")),
-            "encrypted" if rbd.get("encrypted") else "NOT encrypted"),
-    ]
+        checks = [_todo("IMDSv2 enforced"), _todo("Root volume encrypted"), _todo("Dedicated security group")]
+    else:
+        mo = _block0(inst, "metadata_options")
+        rbd = _block0(inst, "root_block_device")
+        tokens = mo.get("http_tokens")
+        checks = [
+            _ck("IMDSv2 enforced", tokens == "required", tokens or "unset"),
+            _ck("Root volume encrypted", bool(rbd.get("encrypted")),
+                "encrypted" if rbd.get("encrypted") else "NOT encrypted"),
+        ]
+    # MS-10: the card states Session Manager availability when the profile is on.
+    if i.get("enable_ssm"):
+        checks.append(_ck("Session Manager access available", True,
+                          "SSM + CloudWatch agent instance profile attached"))
+    return checks
 
 
 def _aws_nlb_policy(i: dict, resources=None) -> list[dict]:
