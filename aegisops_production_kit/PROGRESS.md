@@ -1322,6 +1322,29 @@ as done without the live run; the code paths behind each are covered by tests wi
       (3) gated destroy → card states soft-delete/purge semantics → verify the vault is
       soft-deleted (recoverable), not purged.
       Expect: AzureServices bypass + current-SP policy visible in the portal.
+- [ ] **DLV-30 · P17 stakeholder emails (P17)** — Needs valid SMTP env
+      (`SMTP_HOST/SMTP_USER/SMTP_PASSWORD`) + `GEMINI_API_KEY`.
+      Steps: (1) initiator A submits an actionable run, approver B approves → the result
+      email's To carries A AND B (not the from-address); (2) a run with no approval →
+      only the initiator; (3) unset SMTP → the in-app bell notification still lands.
+      Expect: From stays the configured sender; To never defaults to it while a
+      stakeholder exists.
+- [ ] **DLV-31 · PR-1 TF disk hygiene (PR-1)** — Needs AWS creds for a real apply.
+      Steps: (1) run a create to terminal → its `aegisops-*-<run_id>.tfplan` is gone,
+      runs.plan_json intact; (2) an awaiting_approval run KEEPS its plan; (3) destroy a
+      resource, wait past the threshold (or call `sweep_tf_hygiene(max_age_days=0)`) →
+      its empty state workspace dir is pruned, a day-2 on ANOTHER resource is unaffected;
+      (4) a stray plan >7d is swept, a live run's plan is not.
+      Expect: no prune ever fires inline at destroy or from a chat request.
+- [ ] **DLV-32 · PR-2 limits (PR-2)** — Needs AWS creds (a genuinely slow apply) to see
+      a real timeout; concurrency is verifiable without creds.
+      Steps: (1) set `MAX_ACTIVE_RUNS_PER_USER=1`, start one run, submit a second →
+      429 with the honest message, no second run row; kill the first worker → the count
+      self-heals (the next submit succeeds without waiting for status cleanup);
+      (2) set `TF_APPLY_TIMEOUT_S=5`, apply something real → fails within ~15s with the
+      "exceeded … process group killed" classification, worker not hung, reconciler
+      reconciles.
+      Expect: awaiting_approval never consumes a slot.
 - [ ] **DLV-29 · COST catalog estimate + guardrail on the live card (COST)** — Needs:
       valid `GEMINI_API_KEY` (any cloud creds optional — plan-only is enough).
       Steps: (1) `AEGISOPS_COST_GUARDRAIL_USD=50` in .env → restart api; (2) "create an
@@ -1835,6 +1858,20 @@ this section mirrors phase-level status only.
         failing on breach and failing closed when unpriced; wired into both plan paths.
         **Infracost integration → BACKLOG (owner directive).** Evidence:
         `test_cost_estimation.py` (7). Live = **DLV-29**.
+
+  - [x] **P17 — notify real recipients** (2026-07-13): fixed the sender-as-recipient
+        defect; `notify._recipients` addresses initiator + approver (approver email carried
+        on the approval resume payload), from-address is the logged last-resort only.
+        Evidence: `test_notify_recipients.py` (6). Live = DLV-30.
+  - [x] **PR-1 — TFHYGIENE** (2026-07-13): terminal runs delete their .tfplan (record lives
+        in plan_json; awaiting_approval keeps its plan); reconciler sweeps strays >7d
+        (skipping non-terminal runs) and prunes destroyed resources' empty state workspaces
+        (sweeper-only, reads state file directly, refuses non-empty, clears the pointer).
+        Evidence: `test_pr1_tf_hygiene.py` (7). Live = DLV-31.
+  - [x] **PR-2 — LIMITS** (2026-07-13): heartbeat-derived active-run counts (self-healing,
+        no drift), 429 at the org/user cap before any write; per-stage subprocess timeouts
+        with SIGTERM→grace→SIGKILL on the process group and an honest rc-124 classification.
+        Evidence: `test_pr2_limits.py` (7). Live = DLV-32.
 
 ### Scanner ledger (fix or waiver per finding — owner condition, 2026-07-12)
 

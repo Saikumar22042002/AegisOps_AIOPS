@@ -173,6 +173,13 @@ class Settings(BaseSettings):
     ansible_bin: str = "ansible-playbook"
     terraform_workspaces_dir: str = "./infra/terraform-workspaces"
     default_execution_mode: Literal["dry_run", "plan", "apply", "destroy"] = "plan"
+    # PR-2b: per-stage subprocess budgets. Expiry = process-GROUP kill (TERM→grace→KILL),
+    # run fails honestly, the reconciler/orphan sweep reconciles any leftover state lock.
+    tf_plan_timeout_s: int = 600       # init/plan/show
+    tf_apply_timeout_s: int = 2700     # apply/destroy
+    # PR-2a: max concurrent ACTIVE runs (heartbeat-derived — never a drifting counter).
+    max_active_runs_per_org: int = 5
+    max_active_runs_per_user: int = 2
 
     @field_validator("cors_origins")
     @classmethod
