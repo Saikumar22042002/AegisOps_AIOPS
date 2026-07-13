@@ -7,9 +7,10 @@ frontend/.env.local
 infra/secrets/
 *-sa.json
 
-# Docker Desktop creates an empty host-side placeholder for the api-test FIX.md file
-# mount (the container sees the real ro-mounted content) — never commit it.
+# Docker Desktop creates empty host-side placeholders for the api-test read-only file
+# mounts (the container sees the real ro-mounted content) — never commit them.
 backend/FIX.md
+backend/.gitignore
 
 # Terraform
 *.tfstate
