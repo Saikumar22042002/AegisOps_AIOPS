@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from datetime import datetime, timezone
 
 import structlog
 from sqlalchemy import select
@@ -210,6 +211,37 @@ async def mark_destroyed_txn(s, org_id: str, workspace: str, name: str | None = 
         q = q.where(Resource.name == name)
     for row in (await s.execute(q)).scalars():
         row.status = "destroyed"
+
+
+async def mark_unreachable(org_id: str, name: str, reason: str, undo: bool = False) -> dict | None:
+    """Inventory honesty (live acceptance follow-up): a row whose real resource lives in a
+    cloud account we can no longer reach (rotated-away sandbox creds, revoked account) must
+    never sit silently `active` — it would be offered as a DEP parent / day-2 target and
+    block its name. Flip it to `unreachable` with the reason + timestamp recorded on the
+    row (audit stays in the DB; `list_active` naturally excludes it). REVERSIBLE: `undo`
+    flips an `unreachable` row back to `active` untouched otherwise. Logged both ways.
+    Returns the row dict, or None when no row matches (never guesses)."""
+    from_status, to_status = ("unreachable", "active") if undo else ("active", "unreachable")
+    async with session_scope() as s:
+        row = (await s.execute(select(Resource).where(
+            Resource.org_id == uuid.UUID(org_id), Resource.name == name,
+            Resource.status == from_status))).scalars().first()
+        if row is None:
+            return None
+        row.status = to_status
+        attrs = dict(row.attributes or {})
+        if undo:
+            attrs.pop("unreachable_reason", None)
+            attrs.pop("unreachable_marked_at", None)
+        else:
+            attrs["unreachable_reason"] = reason
+            attrs["unreachable_marked_at"] = datetime.now(timezone.utc).isoformat()
+        row.attributes = attrs
+        log.info("inventory.mark_unreachable", org_id=org_id, name=name,
+                 workspace=row.workspace, undo=undo, reason=(None if undo else reason))
+        return {"id": str(row.id), "name": row.name, "workspace": row.workspace,
+                "cloud": row.cloud, "status": row.status,
+                "reason": attrs.get("unreachable_reason")}
 
 
 async def mark_destroyed_graph_only(name: str | None = None, org_id: str | None = None) -> None:
