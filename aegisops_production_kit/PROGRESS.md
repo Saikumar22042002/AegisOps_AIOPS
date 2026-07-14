@@ -1542,13 +1542,14 @@ this section mirrors phase-level status only.
 
 ## S. Phase 3 — Intelligence layer (started 2026-07-12)
 
-- [~] **Phase 3 in progress.** Checklist order: D3 world model → DEP → U6 executive loop →
-      INV → MPP → M4 → U7 → MOD → COST → P17 → CLN-1 (final cleanup to the pure baked-image
-      production posture). Same discipline: one item at a time → tests (fakes where live clouds
-      are needed) → full suite green → FIX §8 + PROGRESS → commit. Live-cred demos go to the
-      DEFERRED LIVE VERIFICATION list above with exact replay steps — never a faked live
-      result. **STOP when all items are code-complete + suite green**, presenting the DLV list
-      as one ordered end-to-end acceptance script.
+- [x] **Phase 3 CODE-COMPLETE + suite green (2026-07-14).** Checklist order: D3 world model → DEP
+      → U6 executive loop → INV → MPP → M4 → U7 → MOD → COST → P17 → CLN-1 (final cleanup to the
+      pure baked-image production posture) — every item **done** in FIX.md §8, plus the owner-ordered
+      live-acceptance bugfixes (BUGFIX-1..4, INV-HON). Suites at the STOP point (pure-baked stack):
+      backend pytest 834/3 skips, vitest 28, Playwright 25/5 by-design skips. The STOP deliverable —
+      the DLV list as one ordered end-to-end acceptance script — is the **Phase-3 EXIT REPORT**
+      section at the end of this file. The exit-gate live demos remain tracked per-item in the DLV
+      ledger (never faked); the gate closes when the owner runs the remaining script stages.
   - [x] **D3 World Model + Reconciliation Engine** (2026-07-12): new `graph_db/world_model.py`
         — org-scoped `Resource` nodes (same merge key the context graph uses, enriched with
         org/TF-state refs) + `DEPENDS_ON` edges extracted by a PURE lookup over the resource's
@@ -2164,3 +2165,60 @@ is retired. `api`, `api-b`, and `frontend` now run ONLY the code baked into thei
   newest-100 window (the org now carries 320 sessions; it ranked 182nd) — environment-data
   accretion, not a product regression. Turn-20 verbatim recall + real Traces tab + honest model
   menu re-proven in the UI against the baked images (chromium).
+
+---
+
+## Phase-3 EXIT REPORT (2026-07-14) — the DLV list as one ordered acceptance script
+
+**State at STOP:** every Phase-3 checklist item (D3 · DEP · U6 · PR-3 · INV · MODSEED MS-1..13 ·
+PR-1 · PR-2 · MPP · M4 · U7 · COMP · MOD · COST · P17 · PR-4..7 · BUGFIX-1..4 · INV-HON · CLN-1)
+is **done** in FIX.md §8 with tests; full suites green on the pure-baked production stack
+(backend 834/3, vitest 28, Playwright 25/5). Nothing below is faked — each stage names its real
+precondition and its DLV ledger entry (exact replay steps live in the ledger above).
+
+**Already PROVEN live (acceptance runs 1–2, 2026-07-13, via the real chatbot HTTP driver,
+four-eyes dev.engineer→maya.okafor):** DLV-1 (failed policy check on a real card) · DLV-3 (warm
+turn) · DLV-7 (semantic recall) · DLV-8 AWS (S3 apply, four-eyes, real checks) · **DLV-12
+flagship** ("EC2 in a new VPC" → ONE approval → VPC applied → EC2 applied, real ids) · DLV-13
+(MPP scan seam, suite-satisfied) · DLV-15 (gcp.vpc lifecycle) · DLV-18 (aws.kms lifecycle +
+world-model dep check) · DLV-26 (gcp.vm + Option-A power-stop) · DLV-29 (cost guardrail breach
+parked at approval) · DLV-33 (cancel) · DLV-34 (retention sweep) · DLV-38 (COMP honesty ×3) ·
+gated destroys throughout; plus today (2026-07-14, baked stack): M2 turn-20-of-100 UI recall,
+real Traces tab, honest model menu (gate-evidence, chromium).
+
+**Remaining script — run stages in order; each stage lists its single unblock condition:**
+
+1. **Remote state + recovery chain** *(needs: an S3 bucket + DynamoDB lock table + AWS creds)* —
+   DLV-4 (switch `AEGISOPS_TF_BACKEND=remote`, one full lifecycle on remote locked state) →
+   DLV-9 (cloud-level orphan reconcile from the remote backend) → DLV-2 (kill the worker
+   mid-APPLY; reconciler brings the run terminal exactly once, no re-apply).
+2. **Ops hardening on a real apply** *(needs: AWS creds only)* — DLV-31 (PR-1: terminal runs
+   leave zero stray `.tfplan`; destroyed workspace pruned by the sweeper after threshold) →
+   DLV-32 (PR-2: org/user active-run caps refuse honestly at the limit; a wedged apply times
+   out per stage, run fails, worker survives) → DLV-36 tail (PR-6: induce one stranded run →
+   `AegisOpsStrandedRuns` fires in Prometheus; rules already promtool-clean + served live).
+3. **World-model live demos** *(needs: AWS creds + a browser)* — DLV-10 (create an EC2 via chat,
+   change its SG in the AWS console out-of-band, `AEGISOPS_DRIFT=on` → drift notification with
+   world-model annotation) → DLV-11 (create VPC→EC2 DAG, then ask to destroy the VPC → the
+   destroy card's dependency check names the EC2 in the UI).
+4. **MODSEED tails on AWS/GCP** *(needs: fresh sandbox creds; ~1 lifecycle each)* — DLV-17
+   (aws.nlb incl. none→create-first DAG) · DLV-21 (aws.rds enhanced + live B1 zero-change
+   re-plan) · DLV-24 (EC2 SSM session) · DLV-25 (EKS Auto Mode) · DLV-28 (day-2 modify matrix)
+   · DLV-23 tail (cloudsql APPLY + CMEK slot — the run-2 false checks were BUGFIX-1, fixed+pinned).
+5. **Azure group** *(single unblock: grant the sandbox SP **Contributor** — both fresh SPs had
+   zero role assignments in runs 1–2)* — DLV-16 (vnet) · DLV-19 (keyvault) · DLV-22 (azure.db
+   multi-engine + moved-block B1) · DLV-27 (aks add-ons + vm vnet placement).
+6. **GCP KMS** *(single unblock: enable `cloudkms.googleapis.com` — disabled on all three
+   sandbox projects tried; the product already shows the exact activation URL in-chat)* — DLV-20.
+7. **External integrations** *(each needs one env/infra input)* — DLV-5 (CI poll: `GITHUB_TOKEN`)
+   · DLV-6 (SRE remediation: kubeconfig + Prometheus signals) · DLV-30 (P17 emails: SMTP env) ·
+   DLV-37 (supply-chain: one CI push) · DLV-13 live variant (draft→promote a module through the
+   UI; checkov/tfsec are baked in the image).
+8. **Owner-in-the-loop finale** — DLV-35 (PR-5: execute the documented restore drill against a
+   fresh Postgres — an awaiting-approval run must survive restore and still be approvable;
+   `rebuild-world-model` proves Neo4j derived) — this is the last exit-gate checkbox.
+
+**Sandbox-side facts (not product bugs, verified on fresh projects/subscriptions):** Azure SPs
+ship with zero RBAC roles; GCP sandbox projects ship with Cloud KMS (and initially Compute) APIs
+disabled; sandbox accounts rotate per cred set, stranding prior-account resources (handled
+honestly by INV-HON `mark-unreachable` + the BUGFIX-4 sweeper guard).
