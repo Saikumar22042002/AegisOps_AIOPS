@@ -381,7 +381,7 @@ function CredentialReveal({ runId, outputs }: { runId: string; outputs: string[]
           style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60 }}>
           <div onClick={(e) => e.stopPropagation()}
             style={{ width: 380, maxWidth: "90vw", background: "var(--surface)", border: "1px solid var(--border-2)", borderRadius: 14, padding: "20px 22px", boxShadow: "0 18px 50px rgba(0,0,0,.4)" }}>
-            <div style={{ fontSize: 14.5, fontWeight: 600, color: "var(--text)", marginBottom: 6 }}>Confirm it's you</div>
+            <div style={{ fontSize: 14.5, fontWeight: 600, color: "var(--text)", marginBottom: 6 }}>Confirm it&apos;s you</div>
             <div style={{ fontSize: 12.5, color: "var(--text-3)", lineHeight: 1.5, marginBottom: 14 }}>
               Revealing <span style={{ fontFamily: "'IBM Plex Mono',monospace", color: "var(--text-2)" }}>{stepUp.name}</span> requires a fresh sign-in. Re-enter your password — this is logged.
             </div>

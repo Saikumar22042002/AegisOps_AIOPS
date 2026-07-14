@@ -1,11 +1,13 @@
-# ── Dev override (auto-loaded by `docker compose`) ────────────────────────────
-# Runs the API from MOUNTED host source instead of the baked image layer, so code
-# changes take effect on a container restart without an image rebuild. This exists
-# because image rebuilds on this host (OneDrive path + Docker Desktop) intermittently
-# fail to invalidate the COPY cache, leaving stale code in the image.
-#
-# To return to the pure baked-image production model, delete this file (or run with
-# only the base file:  docker compose -f docker-compose.yml --profile full up -d).
+# ── Local-production override (auto-loaded by `docker compose`) ───────────────
+# CLN-1 (2026-07-14): the dev host-source mounts over the baked image are REMOVED —
+# api and api-b now run the code baked into aegisops-api:local (pure baked-image
+# posture; rebuild with `docker compose --profile full build` after code changes).
+# What remains here is runtime configuration, not code:
+#   * the Phase-2 exit-gate multi-worker posture (Redis Streams bus + reconciler),
+#   * the gitignored runtime-credential mount (/secrets, GCP SA key),
+#   * the second API worker (api-b) proving the stateless multi-worker model,
+#   * the profile-gated test runner (api-test), which mounts host source BY DESIGN
+#     so tests always execute the current checkout against the live datastores.
 services:
   api:
     environment:
@@ -15,12 +17,11 @@ services:
       AEGISOPS_EVENT_BUS: redis
       AEGISOPS_RECONCILER: "on"
     volumes:
-      - "./backend/app:/app/app"
       # GCP service-account key for the Terraform google provider (gitignored host dir).
       - "./infra/secrets:/secrets:ro"
 
   # ── Second API worker (Phase-2 exit gate: multi-worker streaming demo) ────────
-  # Same image + mounted source as `api`, on port 8001. A run started on `api` streams and
+  # Same baked image as `api`, on port 8001. A run started on `api` streams and
   # reconnects from `api-b` because events live in Redis Streams, sessions in the server-side
   # store, and state in PG — the API itself is stateless (B1).
   api-b:
@@ -44,7 +45,6 @@ services:
       AEGISOPS_RECONCILER: "on"
     ports: ["8001:8000"]
     volumes:
-      - "./backend/app:/app/app"
       - "./infra/secrets:/secrets:ro"
       - "${KUBECONFIG_HOST:-./infra/kube/empty-kubeconfig}:/root/.kube/config:ro"
       - "tfstate:/app/.terraform-state"

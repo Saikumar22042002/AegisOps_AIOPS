@@ -12,6 +12,10 @@ import { expect, test } from "@playwright/test";
 
 test.describe.configure({ mode: "serial" });
 
+// Desktop-only by design (see header: run with --project=chromium): the flows drive the
+// session sidebar, which is off-canvas on the mobile viewport. Mobile UX is covered by core-flow.
+test.skip(({ isMobile }) => !!isMobile, "gate-evidence flows drive the desktop sidebar; mobile covered by core-flow");
+
 test("turn-20-of-100 recall in the UI", async ({ page }) => {
   test.setTimeout(180000);
   await page.goto("/");

@@ -37,6 +37,7 @@ out/
 coverage/
 playwright-report/
 test-results/
+*.tsbuildinfo
 # Playwright saved auth state (contains a live session cookie)
 frontend/e2e/.auth/
 

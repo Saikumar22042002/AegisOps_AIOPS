@@ -2115,3 +2115,52 @@ _Legend: [x] done · [~] partial/scaffolded · [ ] pending._
 **Cleanup / orphan ledger:**
 - This window: everything created was destroyed or never-created (see above); one plan-only S3 run (`accept-open3`) left parked at awaiting_approval — cannot execute without four-eyes approval; reconciler hygiene sweeps its plan files.
 - Sandbox accounts ROTATE per cred set: run-1 orphans (`accept-web3-net`, `acc-web-net`, `aegis-accept-b3`, `aegis-accept-b1`) live in prior sandbox accounts unreachable from later creds — the world-model DB honestly still lists them; owner should sweep old sandbox accounts (or let the sandbox TTL reap them). A boto3 out-of-band cleanup was attempted once and abandoned (permission-gated + against the Terraform-only mutation principle).
+
+---
+
+## CLN-1 — pure baked-image production posture (2026-07-14)
+
+Removal-only cleanup (owner-ordered after the live-acceptance bugfixes; last Phase-3 item before
+the exit report). The dev-era "run the API from mounted host source" posture — introduced because
+image rebuilds on this host (OneDrive + Docker Desktop) intermittently kept stale COPY layers —
+is retired. `api`, `api-b`, and `frontend` now run ONLY the code baked into their images.
+
+**Removed / cleaned:**
+- `docker-compose.override.yml`: the `./backend/app:/app/app` host-source mounts are gone from
+  BOTH api workers; the header now states what legitimately remains (runtime config, not code):
+  the Phase-2 multi-worker posture (`AEGISOPS_EVENT_BUS=redis`, `AEGISOPS_RECONCILER=on`), the
+  gitignored `/secrets` runtime-credential mount, the second worker `api-b`, and the
+  profile-gated `api-test` runner — whose source mount is BY DESIGN (tests must run the current
+  checkout against the live datastores).
+- `frontend/tsconfig.tsbuildinfo` untracked (+ `*.tsbuildinfo` gitignored) — a TypeScript build
+  cache that had been keeping the working tree perpetually dirty (same class as the D4 tfplan purge).
+
+**Fixed en route (the production build path had never been exercised end-to-end):**
+- `frontend/package-lock.json` was inconsistent at the transitive level (missing `@emnapi/*`
+  peer-dep entries for `@napi-rs/wasm-runtime`) — `npm ci` failed EUSAGE, so the frontend image
+  could not build at all. Re-resolved with the image's own node20/npm10 (host npm 11 tolerated
+  the inconsistency; the builder's npm 10 does not).
+- `components/Workspace.tsx`: the S1 reveal modal's `Confirm it's you` tripped
+  `react/no-unescaped-entities`, which only fires in the production build (`next dev` never ran it).
+- `e2e/gate-evidence.spec.ts`: explicit by-design mobile skip (the flows drive the desktop
+  session sidebar, off-canvas on Pixel 7; the spec's own header always scoped it to chromium).
+
+**Verified (live, baked stack):**
+- `aegisops-api:local` rebuilt `--no-cache`; **all 112 `app/` + `alembic/` files sha256-identical**
+  between the checkout and the image — the historical COPY-cache staleness did not reproduce on a
+  from-scratch build.
+- api/api-b recreated: `docker inspect` shows NO source mount (only tfstate/tfplugins/
+  terraform-workspaces/secrets/kubeconfig). Both `/healthz` ok; frontend container 200.
+- `alembic upgrade head` + `alembic current` → `0008_user_memory (head)` run **from the baked
+  image** — the Phase-8 workaround ("baked alembic is stale; migrations must run via api-test")
+  is dead.
+- Fresh 1-h sandbox creds live from the recreated containers: AWS STS (acct 939338074907),
+  Azure SP, GCP SA — `ping: True` for all three readers; Gemini key HTTP 200.
+- **Suites: backend pytest 834 passed / 3 skipped / 0 failed (in-container against the live
+  datastores, 10m00s); vitest 28 passed; Playwright 25 passed / 5 skipped (by-design mobile) /
+  0 failed** — all against the pure-baked stack.
+- Gate-evidence fixture re-seeded through the REAL `POST /chat` (100 turns, 619s, session
+  `36586905…`, maya.okafor): the 2026-07-12 fixture had aged out of the sessions endpoint's
+  newest-100 window (the org now carries 320 sessions; it ranked 182nd) — environment-data
+  accretion, not a product regression. Turn-20 verbatim recall + real Traces tab + honest model
+  menu re-proven in the UI against the baked images (chromium).
