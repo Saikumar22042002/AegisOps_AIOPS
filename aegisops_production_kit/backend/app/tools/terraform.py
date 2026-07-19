@@ -152,12 +152,18 @@ class TerraformRunner:
         else:
             self.plan_file = "aegisops.tfplan"
 
-    def _env(self, include_ws: bool = True) -> dict[str, str]:
+    def _env(self, include_ws: bool = True, plugin_cache: bool = True) -> dict[str, str]:
         env = {"TF_IN_AUTOMATION": "1", "TF_INPUT": "0", "TF_CLI_ARGS": "-no-color"}
         # LAT: a shared provider plugin cache so `terraform init` reuses downloaded providers
-        # across modules/resources instead of re-fetching them every time.
-        if self.settings.tf_plugin_cache_dir:
+        # across modules/resources instead of re-fetching them every time. plugin_cache=False
+        # is the STAB P0-1 escape hatch: init retries without the cache when the cache itself
+        # is what's broken (a foreign root-owned file inside it).
+        if plugin_cache and self.settings.tf_plugin_cache_dir:
             env["TF_PLUGIN_CACHE_DIR"] = self.settings.tf_plugin_cache_dir
+        # STAB P0-1: relocate .terraform onto the native volume (per module — shared across
+        # this module's state workspaces, exactly like the module-dir .terraform it replaces).
+        if self._data_dir:
+            env["TF_DATA_DIR"] = self._data_dir
         if self.state_workspace and include_ws:
             env["TF_WORKSPACE"] = self.state_workspace
         s = self.settings
@@ -180,10 +186,22 @@ class TerraformRunner:
             env["GOOGLE_APPLICATION_CREDENTIALS"] = s.google_application_credentials
         return env
 
-    def _console(self, include_ws: bool = True) -> CommandConsole:
+    def _console(self, include_ws: bool = True, plugin_cache: bool = True) -> CommandConsole:
         if not os.path.isdir(self.workdir):
             raise TerraformError(f"Terraform workspace not found: {self.workdir}")
-        return CommandConsole(cwd=self.workdir, env=self._env(include_ws))
+        return CommandConsole(cwd=self.workdir, env=self._env(include_ws, plugin_cache=plugin_cache))
+
+    def _plugin_cache_unusable(self, res) -> bool:
+        """The exact STAB P0-1 live failure shape: `terraform init` dying on a file INSIDE
+        the shared plugin cache (e.g. root-owned provider files written by another
+        container → "…/.tf-plugin-cache/…/LICENSE.txt: permission denied"). Only this
+        shape triggers the no-cache fallback — every other init failure propagates."""
+        cache = self.settings.tf_plugin_cache_dir
+        if not cache:
+            return False
+        out = "\n".join([*(res.stderr or []), *(res.stdout or [])]) \
+            if isinstance(res.stderr, list) else f"{res.stderr or ''}\n{res.stdout or ''}"
+        return cache in out and "permission denied" in out.lower()
 
     def _raise_stage_failure(self, stage: str, res, timeout_s: int) -> None:
         """PR-2b: rc 124 = the stage exceeded its budget and the PROCESS GROUP was killed.
@@ -221,9 +239,18 @@ class TerraformRunner:
             args.append(f"-backend-config=dynamodb_table={s.tf_state_dynamodb_table}")
         return args
 
+    @property
+    def _data_dir(self) -> str:
+        """P0-1: this module's TF_DATA_DIR under the native tf_data_root ("" = off)."""
+        root = self.settings.tf_data_root
+        return os.path.join(root, self.workspace) if root else ""
+
     def _is_initialized(self) -> bool:
-        """Warm-init check (LAT): providers + backend are already set up for this module."""
-        return (os.path.isdir(os.path.join(self.workdir, ".terraform"))
+        """Warm-init check (LAT): providers + backend are already set up for this module.
+        With tf_data_root set, .terraform lives in the data dir (P0-1); the lockfile always
+        stays beside the module sources."""
+        dot_terraform = self._data_dir or os.path.join(self.workdir, ".terraform")
+        return (os.path.isdir(dot_terraform)
                 and os.path.isfile(os.path.join(self.workdir, ".terraform.lock.hcl")))
 
     async def init(self, on_line: LineCallback | None = None, force: bool = False) -> dict[str, Any]:
@@ -250,8 +277,28 @@ class TerraformRunner:
                                 error=str(e)[:200])
             init_args = [self.bin, "init", "-input=false", "-upgrade", *self._backend_config_args()] \
                 if force else [self.bin, "init", "-input=false", *self._backend_config_args()]
+            # P0-1: the first init after relocating .terraform (fresh TF_DATA_DIR over a module
+            # with legacy local state) hits the residual-backend migration prompt, which
+            # -input=false turns into a hard error (the LAT-era known failure). local→local
+            # migration is adoption of the same terraform.tfstate.d files, so auto-approve it.
+            # Remote mode is untouched — A3's explicit -backend-config keeps its semantics.
+            if self._data_dir and self.settings.aegisops_tf_backend != "remote":
+                init_args += ["-migrate-state", "-force-copy"]
             res = await self._console(include_ws=False).run(
                 init_args, on_line, timeout=self.settings.tf_plan_timeout_s)
+            if res.returncode != 0 and self._plugin_cache_unusable(res):
+                # STAB P0-1: the shared plugin cache itself is unreadable (live 2026-07-19:
+                # root-owned provider files poisoned it and every GCS plan hard-failed).
+                # A cache problem must never fail a run — retry ONCE with the cache
+                # disabled; providers install into this module's own .terraform instead
+                # (slower, correct), and the loud log points at the real disease.
+                log.error("terraform.plugin_cache_unusable_falling_back",
+                          workspace=self.workspace,
+                          cache_dir=self.settings.tf_plugin_cache_dir,
+                          error=("\n".join(res.stderr[-5:]) if isinstance(res.stderr, list)
+                                 else str(res.stderr))[:400])
+                res = await self._console(include_ws=False, plugin_cache=False).run(
+                    init_args, on_line, timeout=self.settings.tf_plan_timeout_s)
             if res.returncode != 0:
                 self._raise_stage_failure("init", res, self.settings.tf_plan_timeout_s)
             if self.state_workspace:

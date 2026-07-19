@@ -44,6 +44,8 @@ services:
       PROMETHEUS_URL: http://prometheus:9090
       GRAFANA_URL: http://grafana:3000
       TF_PLUGIN_CACHE_DIR: /app/.tf-plugin-cache
+      # STAB P0-1: same native-volume .terraform relocation as the api service.
+      TF_DATA_ROOT: /app/.terraform-state/tfdata
       AEGISOPS_EVENT_BUS: redis
       AEGISOPS_RECONCILER: "on"
     ports: ["8001:8000"]
@@ -91,18 +93,25 @@ services:
       # B3: no periodic reconciler loop auto-starts in the test TestClient lifespan — tests that
       # exercise the reconciler call sweep() explicitly on their own Reconciler instance.
       AEGISOPS_RECONCILER: "off"
-      # Same shared provider cache the api services use — without it every MODSEED test's
-      # real `terraform init` re-downloads providers (~700MB) into the host bind mount and
-      # a fresh container's first suite run wedges on the download (found 2026-07-13).
+      # A persistent provider cache so MODSEED tests' real `terraform init` doesn't
+      # re-download providers (~700MB) every fresh container (the 2026-07-13 wedge) —
+      # but its OWN volume, never the api's: this service runs as root, and root-written
+      # provider files in the api's cache broke every live GCS plan with
+      # "LICENSE.txt: permission denied" (STAB P0-1, regression from 1d27bd4).
       TF_PLUGIN_CACHE_DIR: /app/.tf-plugin-cache
     volumes:
       - "./backend:/app"
-      - "tfplugins:/app/.tf-plugin-cache"
+      # STAB P0-1: root-owned cache, separate from the api's `tfplugins` by construction.
+      - "tfplugins-test:/app/.tf-plugin-cache"
       - "./infra/secrets:/secrets:ro"
       - "./infra/terraform-workspaces:/app/infra/terraform-workspaces"
       # Single source of truth for the stale-waiver guard test: a scanner waiver may not
       # reference an MS item that FIX.md §8 marks done.
       - "../FIX.md:/app/FIX.md:ro"
+      # STAB P0-1 guard: the compose-invariant test reads the real service/volume wiring —
+      # a root-running service must never mount the api's plugin-cache volume again.
+      - "./docker-compose.yml:/app/docker-compose.yml:ro"
+      - "./docker-compose.override.yml:/app/docker-compose.override.yml:ro"
       # PR-1c: the hygiene posture test reads the real ignore rules.
       - "./.gitignore:/app/.gitignore:ro"
       # PR-5/6/7: structural tests read these repo artifacts (mounted under /app so the
@@ -123,3 +132,8 @@ services:
       # terraform.tfstate.d/ dirs would otherwise block the app's per-resource state
       # workspaces (found live in Phase 8). Exit code of pytest is preserved.
       - "pip install -q pytest pytest-asyncio pytest-cov testcontainers anyio && pytest -q; rc=$?; chmod -R a+rwX /app/infra/terraform-workspaces 2>/dev/null || true; exit $rc"
+
+volumes:
+  # STAB P0-1: api-test's own root-owned provider cache — persists across test runs
+  # (keeps the 1d27bd4 no-re-download intent) without ever touching the api's cache.
+  tfplugins-test:

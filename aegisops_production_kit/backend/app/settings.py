@@ -170,6 +170,13 @@ class Settings(BaseSettings):
     # compose) makes even the cold init cheap by reusing downloaded providers across modules.
     aegisops_tf_skip_init_when_ready: bool = True
     tf_plugin_cache_dir: str = ""
+    # STAB P0-1: when set, each module's .terraform lives under <tf_data_root>/<module>
+    # (TF_DATA_DIR) on a NATIVE volume instead of the 9p/OneDrive-backed workspaces bind
+    # mount. Providers then symlink from the shared cache (same filesystem) and the
+    # provider binary executes off ext4 — measured aws-s3 plan: 84-94s on 9p → 5s native.
+    # "" = off (module-dir .terraform, the pre-P0-1 behavior). State files are untouched
+    # (terraform.tfstate.d stays in the module dir).
+    tf_data_root: str = ""
     ansible_bin: str = "ansible-playbook"
     terraform_workspaces_dir: str = "./infra/terraform-workspaces"
     default_execution_mode: Literal["dry_run", "plan", "apply", "destroy"] = "plan"

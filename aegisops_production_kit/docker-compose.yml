@@ -204,6 +204,9 @@ services:
       GRAFANA_URL: http://grafana:3000
       # LAT: shared Terraform provider plugin cache on a named volume (reused across modules).
       TF_PLUGIN_CACHE_DIR: /app/.tf-plugin-cache
+      # STAB P0-1: .terraform on the NATIVE tfstate volume, not the 9p/OneDrive bind mount —
+      # providers symlink from the cache and execute off ext4 (measured: s3 plan 84s → 5s).
+      TF_DATA_ROOT: /app/.terraform-state/tfdata
     ports: ["8000:8000"]
     volumes:
       - "${KUBECONFIG_HOST:-./infra/kube/empty-kubeconfig}:/root/.kube/config:ro"
