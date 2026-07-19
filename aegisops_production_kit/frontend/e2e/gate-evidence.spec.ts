@@ -33,7 +33,10 @@ test("turn-20-of-100 recall in the UI", async ({ page }) => {
   const composer = page.getByPlaceholder(/Ask AegisOps/);
   await composer.fill("What did I say in turn 20?");
   await composer.press("Enter");
-  const answer = page.getByText(/Your 20th user in this conversation was/);
+  // .last(): recall answers PERSIST in the fixture transcript, so every prior run of this
+  // spec leaves one behind — the unscoped locator strict-violates once two exist (found
+  // during STAB step-2/3 canaries). The newest answer is the one this turn produced.
+  const answer = page.getByText(/Your 20th user in this conversation was/).last();
   await expect(answer).toBeVisible({ timeout: 120000 });
   await answer.scrollIntoViewIfNeeded();
   // The verbatim quote follows in the same reply.
