@@ -20,6 +20,10 @@ DATABASE_URL='postgresql://aegisops:...@postgres:5432/aegisops' \
   BACKUP_DIR=/var/backups/aegisops RETENTION=14 infra/backup/pg_backup.sh
 ```
 
+`postgres:5432` is the in-network (sidecar) address. When running from the host instead, use
+`localhost:${POSTGRES_PORT}` — the host-published port from `.env` (this repo defaults to
+**5433**; the container-internal port is always 5432).
+
 ## Restore drill (run this — an untested backup is not a backup)
 
 1. **Stop the API/workers** (no writers during restore):
@@ -27,7 +31,8 @@ DATABASE_URL='postgresql://aegisops:...@postgres:5432/aegisops' \
 2. **Create a fresh, empty database** (or a throwaway target to rehearse):
    `createdb -h <host> -U <user> aegisops_restore`
 3. **Restore the dump** (custom format → `pg_restore`):
-   `pg_restore --dbname='postgresql://user:pass@host:5432/aegisops_restore' --no-owner --clean --if-exists /var/backups/aegisops/aegisops-<stamp>.dump`
+   `pg_restore --dbname='postgresql://user:pass@host:port/aegisops_restore' --no-owner --clean --if-exists /var/backups/aegisops/aegisops-<stamp>.dump`
+   (port: `5432` in-network / `${POSTGRES_PORT}` from the host — see the backup note above)
 4. **Point the app at the restored DB** (`DATABASE_URL`) and **boot**:
    `docker compose up -d api` → `GET /healthz` returns 200.
 5. **Verify data integrity:**

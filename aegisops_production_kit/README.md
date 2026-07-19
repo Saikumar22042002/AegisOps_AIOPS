@@ -46,7 +46,7 @@ To run everything containerized instead of `make dev`: `docker compose --profile
 | Frontend | http://localhost:3000 | Langfuse | http://localhost:3001 |
 | API | http://localhost:8000 | Grafana | http://localhost:3002 |
 | Keycloak | http://localhost:8080 | Prometheus | http://localhost:9090 |
-| Neo4j browser | http://localhost:7474 | Postgres | localhost:5432 · Redis localhost:6379 |
+| Neo4j browser | http://localhost:7474 | Postgres | localhost:`${POSTGRES_PORT}` (default 5433) · Redis localhost:6379 |
 
 > Langfuse and Grafana both listen on container port 3000 but are mapped to **3001/3002** —
 > only the frontend uses host **3000**. (Don't run `make dev` and `--profile full` together.)

@@ -26,7 +26,7 @@ docker compose up -d        # PG+pgvector, Redis, Neo4j, Keycloak, Langfuse, OTe
 docker compose ps           # all healthy
 ```
 Default local endpoints (override in .env):
-- Postgres `localhost:5432` · Redis `localhost:6379` · Neo4j `localhost:7687` (UI `:7474`)
+- Postgres `localhost:${POSTGRES_PORT}` (default `5433`; container-internal port stays `5432`) · Redis `localhost:6379` · Neo4j `localhost:7687` (UI `:7474`)
 - Keycloak `localhost:8080` (realm `aegisops` auto-imported) · Langfuse `localhost:3001`
 - Prometheus `localhost:9090` · Grafana `localhost:3002` · OTel Collector `:4317/:4318`
 
