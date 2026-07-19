@@ -6,6 +6,11 @@
                                                 # inventory honesty: a row whose real resource
                                                 # lives in an account we can no longer reach is
                                                 # flipped active→unreachable (reversible)
+    python -m app.admin purge-session <session_id> [--org <org_id>]
+                                                # on-demand wipe of ONE session's transcript
+                                                # (messages + their in-row embeddings; feedback
+                                                # follows by FK cascade) — the session row,
+                                                # runs, audit_log, approvals, inventory stay
 
 PR-5 uses this to PROVE Neo4j is a derived mirror: after a Postgres restore, the world
 model is reconstructed from inventory alone — no cloud read, no Neo4j backup needed.
@@ -16,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+import uuid
 
 
 async def _rebuild_world_model(args: list[str]) -> int:
@@ -88,10 +94,73 @@ async def _mark_unreachable(args: list[str]) -> int:
     return 0
 
 
+async def _purge_session(args: list[str]) -> int:
+    """On-demand privacy purge (PR-4 follow-up): the age-based retention sweep cannot target
+    one conversation, so an owner request ("wipe this session") needs an explicit command.
+    Deletes the session's `messages` rows — the per-message pgvector embedding is a COLUMN on
+    those rows, and `feedback` rows follow via the DB-level ON DELETE CASCADE. The session row
+    itself, runs, audit_log, approvals and inventory are untouched (the governance record
+    survives the purge), and the purge itself is recorded: an insert-only audit_log row plus a
+    structured log line."""
+    import structlog
+    from sqlalchemy import delete, select
+
+    from .db.models import Message, Session
+    from .db.repositories import AuditRepo
+    from .db.session import session_scope
+
+    positional, skip = [], False
+    for a in args:
+        if skip:
+            skip = False
+        elif a == "--org":
+            skip = True
+        elif not a.startswith("--"):
+            positional.append(a)
+    if not positional:
+        print("usage: purge-session <session_id> [--org <org_id>]", file=sys.stderr)
+        return 2
+    try:
+        sid = uuid.UUID(positional[0])
+    except ValueError:
+        print(f"invalid session id {positional[0]!r} (must be a UUID)", file=sys.stderr)
+        return 2
+    org_flag = _flag(args, "--org")
+    org_id: uuid.UUID | None = None
+    if org_flag:
+        try:
+            org_id = uuid.UUID(org_flag)
+        except ValueError:
+            print(f"invalid org id {org_flag!r} (must be a UUID)", file=sys.stderr)
+            return 2
+
+    async with session_scope() as s:
+        q = select(Session).where(Session.id == sid)
+        if org_id is not None:  # org-scoped when the operator names the tenant
+            q = q.where(Session.org_id == org_id)
+        sess = (await s.execute(q)).scalars().first()
+        if sess is None:
+            scope = f" in org {org_id}" if org_id is not None else ""
+            print(f"no session {sid}{scope}", file=sys.stderr)
+            return 1
+        result = await s.execute(delete(Message).where(
+            Message.session_id == sid, Message.org_id == sess.org_id))
+        deleted = int(result.rowcount or 0)
+        await AuditRepo.log(
+            s, org_id=sess.org_id, actor="admin-cli", action="session.purge_messages",
+            target=str(sid), detail={"messages_deleted": deleted},
+            correlation={"session_id": str(sid)})
+    out = {"session_id": str(sid), "org_id": str(sess.org_id), "messages_deleted": deleted}
+    structlog.get_logger(__name__).info("admin.purge_session", **out)
+    print(json.dumps(out))
+    return 0
+
+
 _COMMANDS = {
     "rebuild-world-model": _rebuild_world_model,
     "retention-sweep": _retention_sweep,
     "mark-unreachable": _mark_unreachable,
+    "purge-session": _purge_session,
 }
 
 
