@@ -11,18 +11,10 @@ export interface Opt {
   dot?: string;
 }
 
-export const orgOptions: Opt[] = [
-  { label: "Northwind Financial", sub: "Enterprise · 184 members" },
-  { label: "Acme Retail", sub: "Business · 42 members" },
-  { label: "Globex Health", sub: "Enterprise · 96 members" },
-];
-
-export const envOptions: Opt[] = [
-  { label: "Production" },
-  { label: "Staging" },
-  { label: "Development" },
-  { label: "Sandbox" },
-];
+// CLN-2: orgOptions/envOptions/regionOptions removed — zero references anywhere. The org
+// comes from the authenticated principal (S0), the env is fixed to Production in the store
+// (no picker ships — a four-eyes-relevant fact documented at STAB P0-3), and the region
+// selector never rendered a menu. Re-adding a picker means wiring real state, not a list.
 
 // U4: "Auto (ask me)" is the default — it maps to cloud=null on the wire, so an ambiguous
 // request (no cloud named) triggers the clarifying question instead of silently defaulting to AWS.
@@ -41,13 +33,6 @@ export const cloudOptions: Opt[] = [
   { label: "Kubernetes", sub: "8 clusters" },
   { label: "VMware", sub: "vSphere" },
 ].map((o) => ({ ...o, dot: cloudColor(o.label) }));
-
-export const regionOptions: Opt[] = [
-  { label: "us-east-1", sub: "N. Virginia" },
-  { label: "us-west-2", sub: "Oregon" },
-  { label: "eu-west-1", sub: "Ireland" },
-  { label: "ap-south-1", sub: "Mumbai" },
-];
 
 // U3: the model menu lists exactly the models the backend serves (Google Gemini today) and
 // sends the raw model id as `model` on /chat. The backend validates it against the same

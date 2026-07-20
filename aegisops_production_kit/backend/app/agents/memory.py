@@ -8,7 +8,6 @@ the full transcript sat unused in the `messages` table. This module threads it b
     threads are included verbatim; long threads get a two-part rendering that always fits the
     char budget: a digest of EVERY older user turn (so early facts survive) + the most recent
     turns in full. Never returns a lie like "no history" — "" simply means a fresh session.
-  prior_user_questions(session_id)  → ordered user turns (deterministic recall answers).
 
 Deterministic and DB-backed — no LLM in the memory path itself, so recall can't hallucinate.
 """
@@ -68,8 +67,8 @@ async def load_history(session_id: str, limit: int = 400) -> list[dict]:
         return []
 
 
-async def prior_user_questions(session_id: str) -> list[str]:
-    return [m["content"] for m in await load_history(session_id) if m["role"] == "user"]
+# CLN-2: prior_user_questions removed (P13 — unconsumed; M2's get_turn/detect_recall are
+# the real recall surface).
 
 
 # ── M2: positional recall (exact) ───────────────────────────────────────────────────────────

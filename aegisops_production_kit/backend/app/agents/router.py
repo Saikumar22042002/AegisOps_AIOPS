@@ -210,8 +210,5 @@ async def _create_ticket(state: AgentState, domain: str, intent: str, message: s
         log.warning("router.ticket_failed", error=str(e))
 
 
-def route_decision(state: AgentState) -> str:
-    """Conditional edge: pick the next node from the router's classification."""
-    if state.get("needs_clarification"):
-        return "general"
-    return state.get("domain", "general")
+# CLN-2: route_decision removed (P13 — the graph wires domain edges directly; the only
+# caller was a test exercising the dead function).

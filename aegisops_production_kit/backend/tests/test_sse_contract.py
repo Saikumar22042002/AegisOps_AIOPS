@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.agents.events import DONE, Emitter, RunChannel, create_channel, drop_channel, get_channel
+from app.agents.events import DONE, Emitter, RunChannel, create_channel, get_channel
 from app.api.chat import _sse
 
 
@@ -101,7 +101,7 @@ async def test_done_sentinel_stops_the_stream():
 
 
 def test_channel_registry_roundtrip():
+    # CLN-2: drop_channel removed with P13 — the registry contract is create/get; redis-mode
+    # terminal streams evict via TTL (B1), memory-mode channels live for the dev process.
     ch = create_channel("reg-1")
     assert get_channel("reg-1") is ch
-    drop_channel("reg-1")
-    assert get_channel("reg-1") is None

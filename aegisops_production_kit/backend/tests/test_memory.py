@@ -6,7 +6,6 @@ Target API (Phase B): `app.agents.memory` —
 
   build_transcript(session_id, max_chars=…) -> str   # "" when no history; recent window +
                                                      # older-topics digest for long threads
-  prior_user_questions(session_id) -> list[str]      # ordered user turns
 
 Uses the real Postgres (integration tier).
 """
@@ -63,11 +62,6 @@ async def test_transcript_contains_all_prior_turns(convo):
     assert "vpc-0d22ef2487a3ae2d6" in t          # assistant turns included too
     assert t.find(_Q1) < t.find(_Q2) < t.find(_Q3)  # chronological
 
-
-async def test_prior_user_questions_ordered(convo):
-    from app.agents import memory
-    qs = await memory.prior_user_questions(convo)
-    assert qs == [_Q1, _Q2, _Q3]
 
 
 async def test_empty_session_yields_empty_transcript(org_id):

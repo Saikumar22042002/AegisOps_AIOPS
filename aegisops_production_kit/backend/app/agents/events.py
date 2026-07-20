@@ -180,8 +180,9 @@ def get_channel(run_id: str):
     return _channels.get(run_id)
 
 
-def drop_channel(run_id: str) -> None:
-    _channels.pop(run_id, None)
+# CLN-2: drop_channel removed (P13 — "wired but unconsumed"; its only caller was a test).
+# Memory-mode channels live for the process (single-worker dev); the production posture is
+# the redis bus, where terminal streams evict via TTL (B1).
 
 
 class Emitter:

@@ -21,7 +21,6 @@ import pytest
 from app.agents import templates
 from app.agents.approval import approval_decision
 from app.agents.cloudops import resolve_cloud
-from app.agents.router import route_decision
 
 
 def _state(cloud=None, resource=None, ui_cloud=None):
@@ -127,13 +126,6 @@ def test_no_template_is_cross_cloud():
         assert t.key.split(".")[0] == t.cloud
 
 
-def test_route_decision_edges():
-    assert route_decision({"domain": "cloudops"}) == "cloudops"
-    assert route_decision({"domain": "sre"}) == "sre"
-    assert route_decision({"domain": "knowledge"}) == "knowledge"
-    # Ambiguous intent is diverted to a clarification (general), never to a side-effecting agent.
-    assert route_decision({"domain": "cloudops", "needs_clarification": True}) == "general"
-    assert route_decision({}) == "general"
 
 
 def test_approval_decision_gate():
