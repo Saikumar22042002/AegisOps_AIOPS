@@ -40,6 +40,8 @@ services:
       KEYCLOAK_URL: http://keycloak:8080
       KEYCLOAK_PUBLIC_URL: ${KEYCLOAK_PUBLIC_URL:-http://localhost:8080}
       LANGFUSE_HOST: http://langfuse:3000
+      # STAB P2-1: browser-facing origin for trace deep-links.
+      LANGFUSE_PUBLIC_URL: ${LANGFUSE_PUBLIC_URL:-http://localhost:3001}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       PROMETHEUS_URL: http://prometheus:9090
       GRAFANA_URL: http://grafana:3000

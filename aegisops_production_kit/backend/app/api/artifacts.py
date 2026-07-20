@@ -11,6 +11,7 @@ from sqlalchemy import select
 from ..db import repositories as repo
 from ..db.models import Approval, Message, Run, RunStep
 from ..db.session import session_scope
+from ..integrations.langfuse_client import langfuse_browser_base
 from ..logging_conf import get_logger
 from ..schemas.auth import User
 from ..security.deps import authorize_run, get_current_user, verify_stepup_auth
@@ -160,13 +161,25 @@ async def terraform(run_id: str, user: User = Depends(get_current_user)) -> dict
             "note": plan.get("_note") if plan.get("_compacted") else None}
 
 
+def _classification_log_lines(run) -> list[dict]:
+    """STAB P2-3: a continuation turn (params reply / DEP answer / approval resume) carries
+    no fresh classification — the run continues under the ORIGINAL intent. Say that honestly
+    instead of the live "intent classified: None (None) → routed None agent" (screenshot 5)."""
+    ts = run.created_at.strftime("%H:%M:%S")
+    if run.intent:
+        return [{"ts": ts, "lvl": "INFO", "lvlColor": "var(--cyan)",
+                 "msg": f"intent classified: {run.intent} ({run.confidence})"},
+                {"ts": ts, "lvl": "INFO", "lvlColor": "var(--cyan)",
+                 "msg": f"routed -> {run.domain} agent"}]
+    return [{"ts": ts, "lvl": "INFO", "lvlColor": "var(--cyan)",
+             "msg": "continuation turn — classification skipped, continuing the pending flow"
+                    + (f" ({run.domain} agent)" if run.domain else "")}]
+
+
 @router.get("/runs/{run_id}/logs")
 async def logs(run_id: str, user: User = Depends(get_current_user)) -> dict:
     run, _msg, approvals, _ = await _load(run_id, user)
-    lines = [{"ts": run.created_at.strftime("%H:%M:%S"), "lvl": "INFO", "lvlColor": "var(--cyan)",
-              "msg": f"intent classified: {run.intent} ({run.confidence})"},
-             {"ts": run.created_at.strftime("%H:%M:%S"), "lvl": "INFO", "lvlColor": "var(--cyan)",
-              "msg": f"routed -> {run.domain} agent"}]
+    lines = _classification_log_lines(run)
     if run.plan_json:
         summ = run.plan_json.get("summary", {})
         lines.append({"ts": run.created_at.strftime("%H:%M:%S"), "lvl": "INFO", "lvlColor": "var(--cyan)",
@@ -258,7 +271,7 @@ async def traces(run_id: str, user: User = Depends(get_current_user)) -> dict:
     run, _msg, _, steps = await _load(run_id, user)
     settings = get_settings()
     trace_id = run.trace_id or run_id
-    host = (settings.langfuse_host or "").rstrip("/")
+    host = langfuse_browser_base(settings)
     # Only the run-root remains when there are no timed steps → treat as "no spans" for the UI.
     spans, total = _trace_spans(run, steps) if steps else ([], None)
     return {

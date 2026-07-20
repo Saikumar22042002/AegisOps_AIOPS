@@ -329,3 +329,11 @@ def get_tracer(settings: Settings) -> LangfuseTracer:
     if _tracer is None:
         _tracer = LangfuseTracer(settings)
     return _tracer
+
+
+def langfuse_browser_base(settings) -> str:
+    """STAB P2-1: the origin browser-facing links must use. In compose the api reaches
+    Langfuse at http://langfuse:3000 — a hostname the user's browser can't resolve (live:
+    DNS_PROBE_FINISHED_NXDOMAIN on the Traces deep-link, screenshot 3). LANGFUSE_PUBLIC_URL
+    wins when set; the in-network host stays for server-side API calls only."""
+    return (settings.langfuse_public_url or settings.langfuse_host or "").rstrip("/")

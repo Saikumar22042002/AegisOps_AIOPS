@@ -100,6 +100,11 @@ class Settings(BaseSettings):
 
     # ── Langfuse ──
     langfuse_host: str = "http://localhost:3001"
+    # STAB P2-1 (KEYCLOAK_PUBLIC_URL pattern): browser-facing Langfuse origin for deep-links.
+    # In compose the api reaches Langfuse at http://langfuse:3000 (in-network), which a
+    # browser can't resolve (live: DNS_PROBE_FINISHED_NXDOMAIN, screenshot 3). "" = fall
+    # back to langfuse_host (correct outside compose).
+    langfuse_public_url: str = ""
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
     # O2: the project the keys MUST belong to. On startup we verify the configured keys resolve
