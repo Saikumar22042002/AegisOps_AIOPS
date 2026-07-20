@@ -2,7 +2,35 @@
 
 > **Evidence base:** all 23 screenshots in `aegisops_production_kit/Screenshots/` read in full;
 > file CREATED times cross-referenced against git commit times and the running Docker images.
-> Status: **STEP-1 deliverable — no fixes applied yet.**
+> Status: **PACK COMPLETE 2026-07-20** — all P0/P1/P2 items + CLN-2 landed; see §4 for the final table.
+
+## 4 · FINAL RESULTS TABLE (2026-07-20)
+
+Final baked stack: api `3e279fe080f2`, frontend `037d498f19df` (both `--no-cache`, app/+alembic/ sha256 byte-identical to checkout). Wave-end gates: **backend 888–890 passed / 3 skipped / 0 failed** (run twice), **vitest 37/37**, **tsc clean**, **canary 23–25 passed / 3 flaky-passed (live-LLM latency) / 5 by-design mobile skips / 0 failed**.
+
+| Item | Status | Root-cause class | Closing evidence |
+|---|---|---|---|
+| **P0-1** TF plugin-cache perms + latency | ✅ closed | **(c)** regr. 1d27bd4 + **(b)** hook gap + latent 9p-exec | Live UI: GCS planner 3.8s→approval card (was hard-fail), S3 18.8s (was 2m28s), EC2 19.1s. Fixes: own `tfplugins-test` volume + no-cache init fallback + `TF_DATA_ROOT` native-volume relocation. 11 regression tests incl. the compose-invariant that would've caught 1d27bd4. Commit f1a8a9e |
+| **P0-2** DEP ask convergence | ✅ closed | **(a)** stale runtime | Screenshots predate BUGFIX-2; fresh-stack Playwright 3/3 exact phrasings converge. Commit c5061c1. **Pending owner re-verify** |
+| **P0-3** HITL approve UX | ✅ closed | **(d)** vs N-01 + **(b)** + live **(c)** redis-bus | Live Playwright 3/3: visible four-eyes denial · dev→maya real S3 apply w/ live progress→`applied` · gated destroy. 4 fixes incl. the redis continuation-cursor. vitest 35→37. Commit 58d9ee8 |
+| **P1-1** honest OS refusal + name-substitution audit | ✅ closed | **(d)** COMP-c → CREATE | Live: "windows vm in gcp" → honest refusal naming aws.ec2/azure.vm. Verbatim-name guard kills the `mybucket-sai@…`→`-…` rewrite. Commit 0541018 |
+| **P1-2** structured/honest reads | ✅ closed | (a/b) **(d)** BUG-04 · (c) **new** | Live: the exact `sync_resources` question → read, no mutation narrative; broad inventory → markdown table; discovery-failed rows read "unverified". Commit 0541018 |
+| **P1-3** credential download | ✅ closed | **new** (chmod hint; download pre-existed) | chmod-600 hint beside a revealed key; create→apply→download rides the P0-3 live apply. Commit 51f37cb |
+| **P1-4** RDS identifier normalize | ✅ closed | **(d)** BUGFIX-1 family | Live: the mysql-attach turn no longer dies at plan on `Sai-test-v1`. Schema canonicalizes/refuses. Commit 0541018 |
+| **P1-5** honest DB-attach | ✅ closed | **(d)** new COMP scenario | Live: the attach half is no longer dropped — honest create→scope→connection-string decomposition. Commit 0541018 |
+| **P1-6** composer queue (no silent Enter drop) | ✅ closed | **new** (found by P0-2 harness) | Live Playwright 17.6s: queue chip shown, follow-up auto-sends as its own turn. Commits 51f37cb + 409b071 |
+| **P2-1** Langfuse browser origin | ✅ closed | **(b)** link presence tested, not origin | Live: `/runs/{id}/traces` deep_link = `http://localhost:3001/...` (browser-resolvable). `LANGFUSE_PUBLIC_URL`. Commit 1f391b9 |
+| **P2-2** per-cloud region labels | ✅ closed | **new** | Live SSE: "Queried AZURE · eastus" (was us-east-1). `display_region()`. Commit 0541018 |
+| **P2-3** honest continuation logs | ✅ closed | **new** | Live: continuation Logs tab reads "classification skipped, continuing the pending flow" (was "None (None)"). Commit 1f391b9 |
+| **P2-4** EKS DEP-before-params | ✅ closed | **(b)** resolver-layer test only | Live: EKS ask offers world-model VPCs ("accept-ec2-net"… or "new"), never raw `vpc-…`. Closure runs before validation. Commit 0541018 |
+| **CLN-2** dead-code sweep | ✅ closed | evidence-based | grep-proven zero-ref removals: `drop_channel`/`route_decision`/`prior_user_questions` (+dead tests), `orgOptions`/`envOptions`/`regionOptions`. Suite 888 green post-removal. Commit 16b82fd |
+
+**Deliberately left (documented, not dead code):** `gcp-gcs/.terraform.lock.hcl` (session-resolved provider lock — owner's call to commit); runtime module-dir `.terraform` copies (gitignored runtime state, superseded by P0-1 TF_DATA_ROOT but harmless — a destructive OneDrive `rm -rf` not worth it for disk hygiene).
+
+**Owner re-verify checklist (creds live during the run; re-run any UI flow):** P0-2 the three DEP phrasings · P0-3 four-eyes approve→live-progress · P1-1 windows-on-gcp · P1-2 the sync question + table · P2-4 EKS VPC offer.
+
+---
+
 
 ## 0 · Runtime timeline (what code was actually live when each screenshot was taken)
 
