@@ -112,8 +112,10 @@ services:
       - "../FIX.md:/app/FIX.md:ro"
       # STAB P0-1 guard: the compose-invariant test reads the real service/volume wiring —
       # a root-running service must never mount the api's plugin-cache volume again.
-      - "./docker-compose.yml:/app/docker-compose.yml:ro"
-      - "./docker-compose.override.yml:/app/docker-compose.override.yml:ro"
+      # Mounted under /compose, NOT /app: /app is the ./backend bind mount, so a /app target
+      # would materialize 0-byte stubs at backend/docker-compose*.yml on the host.
+      - "./docker-compose.yml:/compose/docker-compose.yml:ro"
+      - "./docker-compose.override.yml:/compose/docker-compose.override.yml:ro"
       # PR-1c: the hygiene posture test reads the real ignore rules.
       - "./.gitignore:/app/.gitignore:ro"
       # PR-5/6/7: structural tests read these repo artifacts (mounted under /app so the

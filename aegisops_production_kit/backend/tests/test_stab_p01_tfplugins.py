@@ -37,12 +37,15 @@ def _find_up(name: str) -> Path:
         cand = base / name
         if cand.is_file():
             return cand
-    mounted = Path("/app") / name
+    # api-test mounts the compose files under /compose (NOT /app — /app is the ./backend
+    # bind mount, so a /app/<name> target would materialize a 0-byte stub at backend/<name>
+    # on the host; found + fixed 2026-07-20).
+    mounted = Path("/compose") / name
     if mounted.is_file():
         return mounted
     raise FileNotFoundError(
         f"{name} not reachable — the P0-1 compose guard cannot run "
-        "(api-test mounts ./docker-compose*.yml to /app; keep those mounts)")
+        "(api-test mounts ./docker-compose*.yml to /compose; keep those mounts)")
 
 
 def _merged_services() -> dict:
