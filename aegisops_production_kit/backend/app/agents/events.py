@@ -54,6 +54,12 @@ class RunChannel:
             after = 0
         return [e for e in self.history if e["id"] > after]
 
+    async def current_cursor(self) -> int:
+        """STAB P0-3: the id of the newest already-published frame — a consumer that must
+        see ONLY what is published from now on starts after this. A fresh memory channel
+        is empty, so 0 (from-the-start) is equivalent here."""
+        return self.seq
+
     async def close(self) -> None:
         self.finished = True
         await self.queue.put(DONE)
@@ -80,6 +86,18 @@ class RedisChannel:
             self.key, {"event": event, "data": json.dumps(data)},
             maxlen=_STREAM_MAXLEN, approximate=True,
         )
+
+    async def current_cursor(self) -> str:
+        """STAB P0-3: the newest stream id already in the run's redis stream. The approval
+        continuation MUST tail from here — the stream still holds the ORIGINAL turn's frames
+        ending in ITS __eos__ marker, so a from-zero consumer replays the plan turn and stops
+        at that old marker, never delivering the apply/`done` frames (the live "stuck at
+        applying" on the multi-worker posture)."""
+        try:
+            entries = await self._redis().xrevrange(self.key, count=1)
+            return entries[0][0] if entries else "0"
+        except Exception:  # noqa: BLE001
+            return "0"
 
     def replay_after(self, last_id: Any) -> list[dict[str, Any]]:
         """Start the XREAD pump from `last_id` (a stream id, or 0/"" for the beginning) and return

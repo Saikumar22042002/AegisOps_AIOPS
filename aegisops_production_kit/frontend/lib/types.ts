@@ -102,6 +102,9 @@ export interface ChatMessage {
   // U7: one-click retry-with-fix carried on the error event ({label, retry_message, ...}).
   retry?: { label: string; retry_message: string; kind?: string } | null;
   done?: boolean;
+  // P0-3: the human's decision on this message's approval card — drives the instant
+  // card flip and the "applying/applied/rejected" state on the Terraform card.
+  decision?: "approved" | "rejected" | null;
   // Names of sensitive Terraform outputs revealable ONCE via POST /runs/{id}/credentials (N-02).
   sensitiveOutputs?: string[];
   tab?: "conversation" | "analysis";

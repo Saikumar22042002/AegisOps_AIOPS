@@ -198,7 +198,9 @@ function AiMessage({ m }: { m: ChatMessage }) {
                   </span>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", marginBottom: 3 }}>Terraform Plan</div>
-                    <div style={{ fontSize: 12.5, color: "var(--text-3)" }}>{String(m.interrupt?.workflow ?? "")} · approval required</div>
+                    <div style={{ fontSize: 12.5, color: "var(--text-3)" }}>
+                      {String(m.interrupt?.workflow ?? "")} · {m.decision === "approved" ? (m.done ? "applied" : "applying") : m.decision === "rejected" ? "rejected" : "approval required"}
+                    </div>
                   </div>
                   <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
                     <span style={chipMono("rgba(52,211,153,.12)", "var(--green)")}>+{summary.add}</span>
@@ -230,7 +232,26 @@ function AiMessage({ m }: { m: ChatMessage }) {
                   </div>
                 )}
 
-                {approval === "pending" && (
+                {/* P0-3: instant, in-place feedback the moment Approve & apply is clicked —
+                    the decision card is replaced by a live applying strip; per-step progress
+                    streams in the AI-activity block above and the console in the Logs tab. */}
+                {m.decision === "approved" && m.streaming && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", borderRadius: 12, border: "1px solid rgba(52,211,153,.25)", background: "rgba(52,211,153,.05)", marginTop: 11 }}>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" style={{ animation: "ao-spin 1s linear infinite", flexShrink: 0 }}><path d="M12 3a9 9 0 1 0 9 9" stroke="var(--green)" strokeWidth="2.6" strokeLinecap="round" /></svg>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 500, color: "var(--text)" }}>Approved — applying now</div>
+                      <div style={{ fontSize: 11.5, color: "var(--text-3)" }}>
+                        {m.steps?.length ? `Step ${m.steps.length}: ${m.steps[m.steps.length - 1]?.label}` : "Starting the apply…"} · console in the Logs tab
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {m.decision === "rejected" && !m.done && (
+                  <div style={{ padding: "10px 16px", borderRadius: 12, border: "1px solid var(--border-2)", background: "var(--surface)", marginTop: 11, fontSize: 12.5, color: "var(--text-3)" }}>
+                    Rejected — nothing was changed.
+                  </div>
+                )}
+                {approval === "pending" && !m.decision && (
                   <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", borderRadius: 12, border: "1px solid rgba(251,191,36,.25)", background: "rgba(251,191,36,.05)", marginTop: 11 }}>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontSize: 13.5, fontWeight: 500, color: "var(--text)" }}>Human approval required</div>

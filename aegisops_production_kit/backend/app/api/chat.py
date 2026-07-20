@@ -390,6 +390,13 @@ async def resolve_approval(run_id: str, body: ApprovalRequest,
                             "this run's approval is already being processed")
 
     channel = create_channel(run_id)  # fresh channel for the continuation stream
+    # STAB P0-3: tail the stream from NOW. On the redis bus the run's stream key still
+    # holds the original turn's frames ending in ITS __eos__ — a from-zero consumer
+    # replays the plan turn and stops at that old marker, so the browser never receives
+    # the apply progress or `done` (the exact live "approve then silence" on the
+    # multi-worker posture). The cursor is captured BEFORE the drive starts, so no
+    # continuation frame can be missed. Memory-mode channels are fresh (cursor 0).
+    continuation_cursor = await channel.current_cursor()
     resume_value = {"decision": body.decision, "user": user.username,
                     "role": user.display_roles[0] if user.display_roles else "", "rationale": body.rationale,
                     "can_execute": user.can_execute,  # S5: carry the approver's execute capability
@@ -426,7 +433,7 @@ async def resolve_approval(run_id: str, body: ApprovalRequest,
             await channel.close()
 
     get_supervisor().run(run_id, _drive)  # B2: tracked task + heartbeat (was fire-and-forget)
-    return EventSourceResponse(_sse(channel))
+    return EventSourceResponse(_sse(channel, replay_after=continuation_cursor))
 
 
 @router.get("/chat/stream/{run_id}")

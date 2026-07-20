@@ -203,6 +203,22 @@ export const useUI = create<UIState>((set, get) => ({
       const lastRunMsg = [...mapped].reverse().find((m) => m.isAI && m.runId);
       set({ messages: mapped, activeRunId: lastRunMsg?.runId ?? null,
             selectedMessageId: lastRunMsg?.id ?? null, artifactNonce: get().artifactNonce + 1 });
+      // P0-3: rebuild the approval card for a run still awaiting a decision. Four-eyes means
+      // the approver is a DIFFERENT person than the initiator whose window streamed the
+      // interrupt live — without this restore, a compliant Production approval was
+      // impossible from any freshly-opened session.
+      if (lastRunMsg?.runId) {
+        try {
+          const run = await api.get<any>(`/runs/${lastRunMsg.runId}`);
+          if (run.status === "awaiting_approval")
+            patchMsg(set, lastRunMsg.id, {
+              done: false,
+              interrupt: { runId: run.id, workflow: run.workflow, plan: run.plan_json },
+            });
+        } catch {
+          /* run unreadable (gone / cross-org 404) — keep the plain transcript */
+        }
+      }
     } catch (e) {
       set({ runError: e instanceof Error ? e.message : "failed to load conversation" });
     }
@@ -354,6 +370,13 @@ export const useUI = create<UIState>((set, get) => ({
                   activeArtifact: "timeline", artifactNonce: s.artifactNonce + 1 }));
     const ai = get().messages.find((m) => m.runId === runId && m.isAI);
     const aiId = ai?.id;
+    // P0-3: the card flips INSTANTLY (decision on the message) and an approved apply puts
+    // the message back into the live streaming render — expanded activity + spinner on the
+    // current step — exactly like a sendText run. Before this, minutes of terraform apply
+    // rendered nothing in the conversation and read as hung.
+    if (aiId) patchMsg(set, aiId, { decision, done: false,
+                                    streaming: decision === "approved",
+                                    showTimeline: decision === "approved" });
     try {
       await streamSSE(`/approvals/${runId}`, { decision }, (ev) => {
         if (!aiId) return;
@@ -363,8 +386,13 @@ export const useUI = create<UIState>((set, get) => ({
           patchMsg(set, aiId, { consoleLines: [...(m.consoleLines ?? []), { stream: String(ev.data.stream), line: String(ev.data.line) }] });
         else if (ev.event === "token")
           patchMsg(set, aiId, { text: (m.text ?? "") + String(ev.data.text ?? "") });
-        else if (ev.event === "step")
-          patchMsg(set, aiId, { steps: [...(m.steps ?? []), { label: String(ev.data.label) }] });
+        else if (ev.event === "step") {
+          // stepIdx follows the newest step so its spinner is live (P0-3); the timeline
+          // artifact refetches per step so the docked panel advances with the apply.
+          const steps = [...(m.steps ?? []), { label: String(ev.data.label) }];
+          patchMsg(set, aiId, { steps, stepIdx: steps.length - 1 });
+          set((s) => ({ artifactNonce: s.artifactNonce + 1 }));
+        }
         else if (ev.event === "done") {
           // Terminal: clear the MESSAGE's streaming flag so the artifact panel hands off from
           // the live spinner to the persisted timeline (N-01 — the "Verification" hang was this
@@ -377,7 +405,12 @@ export const useUI = create<UIState>((set, get) => ({
           set({ runError: String(ev.data.message) });
       });
     } catch (e) {
-      set({ runError: e instanceof Error ? e.message : "approval failed" });
+      const msg = e instanceof Error ? e.message : "approval failed";
+      // P0-3: a DENIED decision must be loudly visible — the live four-eyes 403 used to
+      // render as pure silence (the "minutes of zero feedback"). The error lands on the
+      // message and the card comes back so a legitimate approver can still act.
+      set({ runError: msg, approval: "pending" });
+      if (aiId) patchMsg(set, aiId, { decision: null, streaming: false, done: true, error: msg });
     } finally {
       // Defensive: even if `done` was missed (disconnect), never leave the live spinner up.
       if (aiId) patchMsg(set, aiId, { streaming: false });

@@ -170,3 +170,129 @@ describe("openSession — history restore keeps each message's own run", () => {
     expect(useUI.getState().selectedMessageId).toBe("ma2");
   });
 });
+
+describe("approveRun — P0-3 live apply UX (mid-apply progress, never a silent hang)", () => {
+  const seedInterrupted = () =>
+    useUI.setState({
+      activeRunId: "r1", approval: "pending",
+      messages: [
+        { id: "u1", isUser: true, text: "create an s3 bucket" },
+        { id: "ai1", isAI: true, text: "", runId: "r1", streaming: false, showTimeline: false,
+          interrupt: { runId: "r1", workflow: "aws.s3" }, steps: [{ label: "Ran terraform plan" }],
+          stepIdx: 0, consoleLines: [], references: [], tab: "conversation" },
+      ],
+    });
+
+  it("flips the card instantly and re-enters the live streaming render BEFORE any event", async () => {
+    seedInterrupted();
+    let atStreamStart: any;
+    mockStream.mockImplementation(async () => { atStreamStart = { ...aiMsg() }; });
+    await useUI.getState().approveRun("approved");
+    expect(atStreamStart.decision).toBe("approved");
+    expect(atStreamStart.streaming).toBe(true);
+    expect(atStreamStart.showTimeline).toBe(true);
+  });
+
+  it("streams apply steps + console live; done lands the success state", async () => {
+    seedInterrupted();
+    const n0 = useUI.getState().artifactNonce;
+    scriptStream([
+      { event: "step", data: { label: "Applying approved plan" } } as any,
+      { event: "console", data: { stream: "stdout", line: "aws_s3_bucket.this: Creating..." } } as any,
+      { event: "step", data: { label: "Verified live resource" } } as any,
+      { event: "token", data: { text: "Created **bucket**." } } as any,
+      { event: "done", data: { runId: "r1", messageId: "m1", outcome: {} } } as any,
+    ]);
+    await useUI.getState().approveRun("approved");
+    const m = aiMsg();
+    expect((m.steps ?? []).map((s) => s.label))
+      .toEqual(["Ran terraform plan", "Applying approved plan", "Verified live resource"]);
+    expect(m.consoleLines?.at(-1)?.line).toContain("Creating");
+    expect(m.text).toContain("Created");
+    expect(m.done).toBe(true);
+    expect(m.streaming).toBe(false);
+    // the docked timeline refetches per step, so it advances DURING the apply
+    expect(useUI.getState().artifactNonce).toBeGreaterThanOrEqual(n0 + 2);
+  });
+
+  it("the spinner follows the NEWEST step mid-apply (stepIdx advances)", async () => {
+    seedInterrupted();
+    let midIdx = -1;
+    mockStream.mockImplementation(async (_p, _b, onEvent) => {
+      onEvent({ event: "step", data: { label: "Applying approved plan" } } as any);
+      midIdx = aiMsg().stepIdx ?? -1;
+      onEvent({ event: "done", data: { runId: "r1", messageId: "m1", outcome: {} } } as any);
+    });
+    await useUI.getState().approveRun("approved");
+    expect(midIdx).toBe(1);
+  });
+
+  it("a rejection flips the card but never enters the applying render", async () => {
+    seedInterrupted();
+    let atStreamStart: any;
+    mockStream.mockImplementation(async (_p, _b, onEvent) => {
+      atStreamStart = { ...aiMsg() };
+      onEvent({ event: "done", data: { runId: "r1", messageId: "m1", outcome: {} } } as any);
+    });
+    await useUI.getState().approveRun("rejected");
+    expect(atStreamStart.decision).toBe("rejected");
+    expect(atStreamStart.streaming).toBe(false);
+    expect(aiMsg().done).toBe(true);
+  });
+});
+
+describe("approveRun — P0-3 denial visibility + openSession card restoration", () => {
+  const seedInterrupted = () =>
+    useUI.setState({
+      activeRunId: "r1", approval: "pending",
+      messages: [
+        { id: "ai1", isAI: true, text: "", runId: "r1", streaming: false, showTimeline: false,
+          interrupt: { runId: "r1", workflow: "aws.s3" }, steps: [{ label: "plan" }], stepIdx: 0,
+          consoleLines: [], references: [], tab: "conversation" },
+      ],
+    });
+
+  it("a DENIED decision is loudly visible and the card comes back (the four-eyes silence bug)", async () => {
+    seedInterrupted();
+    mockStream.mockImplementation(async () => {
+      throw new Error("Production changes require a different approver (four-eyes)");
+    });
+    await useUI.getState().approveRun("approved");
+    const m = aiMsg();
+    expect(m.error).toContain("four-eyes");
+    expect(m.decision).toBeNull();                       // the decision card returns
+    expect(m.streaming).toBe(false);                     // never a phantom applying strip
+    expect(useUI.getState().approval).toBe("pending");
+    expect(useUI.getState().runError).toContain("four-eyes");
+  });
+
+  it("openSession rebuilds the approval card for a run still awaiting a decision", async () => {
+    mockApi.get.mockImplementation(async (path: string) => {
+      if (path.startsWith("/sessions/")) return { messages: [
+        { id: "u1", role: "user", content: "create it" },
+        { id: "a1", role: "assistant", content: "Drafted a plan.", run_id: "r9" },
+      ] } as any;
+      if (path === "/runs/r9") return { id: "r9", status: "awaiting_approval", workflow: "aws.s3",
+                                        plan_json: { summary: { add: 4, change: 0, destroy: 0 } } } as any;
+      return { sessions: [], projects: 0, incidents: 0, org: { name: "n" } } as any;
+    });
+    await useUI.getState().openSession("s1");
+    const m = aiMsg();
+    expect(m.interrupt).toMatchObject({ runId: "r9", workflow: "aws.s3" });
+    expect((m.interrupt as any).plan.summary.add).toBe(4);
+    expect(m.done).toBe(false);
+  });
+
+  it("a completed run restores as a plain transcript — no phantom card", async () => {
+    mockApi.get.mockImplementation(async (path: string) => {
+      if (path.startsWith("/sessions/")) return { messages: [
+        { id: "a1", role: "assistant", content: "done", run_id: "r9" } ] } as any;
+      if (path === "/runs/r9") return { id: "r9", status: "completed", workflow: "aws.s3",
+                                        plan_json: {} } as any;
+      return { sessions: [], projects: 0, incidents: 0, org: { name: "n" } } as any;
+    });
+    await useUI.getState().openSession("s1");
+    expect(aiMsg().interrupt).toBeUndefined();
+    expect(aiMsg().done).toBe(true);
+  });
+});
