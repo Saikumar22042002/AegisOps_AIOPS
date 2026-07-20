@@ -296,3 +296,28 @@ describe("approveRun — P0-3 denial visibility + openSession card restoration",
     expect(aiMsg().done).toBe(true);
   });
 });
+
+describe("sendText — P1-6 queue instead of silent drop", () => {
+  it("a message sent mid-stream is queued visibly and auto-sends when the turn finishes", async () => {
+    const calls: string[] = [];
+    mockStream.mockImplementation(async (_p, body: any, onEvent) => {
+      calls.push(body.message);
+      if (calls.length === 1) {
+        // mid-first-turn: the user types the follow-up — it must QUEUE, not vanish
+        await useUI.getState().sendText("the follow-up");
+        expect(useUI.getState().queued).toBe("the follow-up");
+        expect(calls).toHaveLength(1);                    // no second POST yet
+      }
+      onEvent({ event: "done", data: { runId: `r${calls.length}`, messageId: "m", outcome: {} } } as any);
+    });
+    await useUI.getState().sendText("the first turn");
+    expect(calls).toEqual(["the first turn", "the follow-up"]); // auto-sent on completion
+    expect(useUI.getState().queued).toBeNull();
+  });
+
+  it("nothing queued → nothing extra sent", async () => {
+    scriptStream([{ event: "done", data: { runId: "r1", messageId: "m", outcome: {} } } as any]);
+    await useUI.getState().sendText("solo");
+    expect(useUI.getState().queued).toBeNull();
+  });
+});

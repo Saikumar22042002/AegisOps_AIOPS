@@ -80,6 +80,8 @@ interface UIState {
   selectedMessageId: string | null;
   sessionId: string | null;
   runError: string | null;
+  // P1-6: a message typed while a turn streams — queued visibly, auto-sent on completion.
+  queued: string | null;
   sessions: SessionMeta[];
   overview: Overview | null;
   artifactNonce: number;
@@ -144,6 +146,7 @@ export const useUI = create<UIState>((set, get) => ({
   selectedMessageId: null,
   sessionId: null,
   runError: null,
+  queued: null,
   sessions: [],
   overview: null,
   artifactNonce: 0,
@@ -259,7 +262,14 @@ export const useUI = create<UIState>((set, get) => ({
   sendText: async (text) => {
     const t = (text || "").trim();
     const s0 = get();
-    if (!t || s0.streaming) return;
+    if (!t) return;
+    // STAB P1-6: typing Enter while a turn streams used to be a SILENT no-op (the text sat
+    // in the box, the turn was lost — surfaced by the P0-2 retest harness). The message is
+    // now QUEUED with visible feedback and auto-sends the moment the current turn finishes.
+    if (s0.streaming) {
+      set({ queued: t, input: "" });
+      return;
+    }
     const aiId = "ai" + Date.now();
     set((s) => ({
       input: "", streaming: true, runError: null,
@@ -360,6 +370,12 @@ export const useUI = create<UIState>((set, get) => ({
       if (m && !m.interrupt) patchMsg(set, aiId, { streaming: false });
       // Refresh the sidebar so the new/updated session (real title) and badge counts appear.
       void get().loadSidebar();
+      // P1-6: a message queued mid-stream sends now, as its own real turn.
+      const q = get().queued;
+      if (q) {
+        set({ queued: null });
+        void get().sendText(q);
+      }
     }
   },
 
@@ -417,6 +433,12 @@ export const useUI = create<UIState>((set, get) => ({
       // Refetch the artifact tabs (timeline/logs/approvals) and badges for the resolved run.
       set((s) => ({ streaming: false, artifactNonce: s.artifactNonce + 1 }));
       void get().loadSidebar();
+      // P1-6: a message typed during the apply sends now, as its own real turn.
+      const q = get().queued;
+      if (q) {
+        set({ queued: null });
+        void get().sendText(q);
+      }
     }
   },
 

@@ -390,6 +390,12 @@ function CredentialReveal({ runId, outputs }: { runId: string; outputs: string[]
             {st.value && (
               <pre style={{ margin: 0, padding: "9px 11px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 9, overflowX: "auto", maxHeight: 140, fontSize: 11, fontFamily: "'IBM Plex Mono',monospace", color: "var(--text-3)" }}>{st.value}</pre>
             )}
+            {/* P1-3: the downloaded key is only usable after chmod 600 — say so here, once. */}
+            {st.value && name.includes("key") && (
+              <div style={{ fontSize: 11, color: "var(--text-4)" }}>
+                After saving: <code style={{ fontFamily: "'IBM Plex Mono',monospace", color: "var(--text-3)" }}>chmod 600 {name}.pem</code> — SSH refuses world-readable keys.
+              </div>
+            )}
             {st.error && <div style={{ fontSize: 11.5, color: "var(--amber)" }}>{st.error}</div>}
           </div>
         );
@@ -457,6 +463,7 @@ function ParamRequestCard({ req }: { req: ParamRequest }) {
 
 function Composer({ chatMaxWidth }: { chatMaxWidth: string }) {
   const input = useUI((s) => s.input);
+  const queued = useUI((s) => s.queued);
   const setInput = useUI((s) => s.setInput);
   const sendText = useUI((s) => s.sendText);
   const streaming = useUI((s) => s.streaming);
@@ -499,6 +506,15 @@ function Composer({ chatMaxWidth }: { chatMaxWidth: string }) {
               style={{ padding: "7px 13px", borderRadius: 99, border: "1px solid var(--border-2)", background: "var(--surface)", color: "var(--text-3)", fontSize: 12.5, cursor: "pointer", whiteSpace: "nowrap" }}>{sug}</button>
           ))}
         </div>
+        {/* P1-6: a message typed while a turn streams is queued VISIBLY, never silently lost. */}
+        {queued && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", marginBottom: 8, borderRadius: 10, border: "1px solid rgba(129,140,248,.3)", background: "rgba(99,102,241,.08)", fontSize: 12, color: "var(--text-2)" }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}><circle cx="12" cy="12" r="9" stroke="var(--accent-2)" strokeWidth="2" /><path d="M12 7v5l3 3" stroke="var(--accent-2)" strokeWidth="2" strokeLinecap="round" /></svg>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              Queued — sends when the current turn finishes: “{queued}”
+            </span>
+          </div>
+        )}
         <div style={{ border: "1px solid var(--border-2)", borderRadius: 16, background: "var(--surface-2)", padding: "14px 15px 11px" }}>
           <textarea value={input} onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendText(input); } }}
