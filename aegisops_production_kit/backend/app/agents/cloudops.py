@@ -162,6 +162,10 @@ def _apply_modification(base: dict, changes: dict) -> tuple[dict, list[str]]:
     return merged, desc
 
 
+# STAB P1-1: identity fields where the user's literal token is the only honest value.
+_NAME_FIELDS = {"name", "bucket_name", "identifier", "account_name", "cluster_name"}
+
+
 async def _extract_inputs(settings, template, message: str, *, org_id: str | None = None,
                           user_id: str | None = None) -> dict:
     """Extract this module's parameter values from NL via Gemini, merged with free-form parsing.
@@ -193,6 +197,19 @@ async def _extract_inputs(settings, template, message: str, *, org_id: str | Non
         try:
             extracted = await llm.classify_json(settings, system, message)
             clean = {k: v for k, v in extracted.items() if v not in (None, "")}
+            # STAB P1-1: a NAME is never invented or silently "fixed". The live case:
+            # the reply `mybucket-sai@22042792002` was extracted as the DIFFERENT (valid)
+            # name `mybucket-sai-22042792002` and planned without a word. If the model's
+            # value for a name-like field isn't literally in the message, drop it — the
+            # params ask then states the naming rule and the user decides. Choice fields
+            # (os, engine, …) are exempt: synonym normalization there is the desired
+            # behavior and is guarded by their allowlist validators instead.
+            for k in list(clean):
+                if (k in _NAME_FIELDS and isinstance(clean[k], str)
+                        and clean[k].strip().strip("\"'`").lower() not in (message or "").lower()):
+                    log.warning("cloudops.extracted_name_not_verbatim",
+                                field=k, value=clean[k])
+                    clean.pop(k)
             inputs = {**clean, **inputs}  # explicit free-form key=value wins over the LLM
         except Exception as e:  # noqa: BLE001
             log.warning("cloudops.extract_failed", error=str(e))
@@ -239,6 +256,18 @@ def _defaulted_dependencies(cloud: str, resource: str, validated: dict, resource
             out.append({"name": "Resource group", "value": f"{validated.get('name', '')}-rg (auto-created)",
                         "note": "no resource group specified — a dedicated one is auto-created"})
     return out
+
+
+def display_region(cloud: str, inputs: dict | None, ui_region: str | None) -> str:
+    """STAB P2-2: the region/location shown beside a cloud is that CLOUD'S OWN — from the
+    user's inputs when given, else the cloud's default — never the UI context's AWS-style
+    region (live: "Queried AZURE · us-east-1", "Queried GCP · us-east-1", screenshots 5/7)."""
+    inputs = inputs or {}
+    if cloud == "azure":
+        return str(inputs.get("location") or "eastus")
+    if cloud == "gcp":
+        return str(inputs.get("region") or "us-central1")
+    return str(inputs.get("region") or ui_region or "us-east-1")
 
 
 def resolve_cloud(state: AgentState) -> tuple[str | None, str]:
@@ -393,6 +422,28 @@ def _comp_intercept(state: AgentState) -> dict | None:
             "• Azure Blob → `blobfuse2 mount /mnt/<dir> --container-name=<c>`\n"
             "Want me to create the bucket now? I won't wire a fake attachment.")
 
+    # (b2) STAB P1-5: attach a DATABASE to an instance (live screenshot 21: «Create a mysql
+    # db in the aws and attach the Sai-test-v1» — the attach half was silently dropped and
+    # only the DB planned). A managed database is *connected to*, never attached: the honest
+    # decomposition is (1) create the DB, (2) day-2 modify scoping its allowed CIDR/SG to
+    # that instance, (3) the app's connection string does the rest. Half a request is never
+    # silently discarded.
+    if (_ATTACH.search(message)
+            and any(k in f" {message.lower()} " for k in _COMP_CATEGORIES["database"])
+            # "connect the DB to my vpc/subnet" is a private-access placement ask, not an
+            # instance attach — the network/DEP paths own it.
+            and not any(k in f" {message.lower()} " for k in _COMP_CATEGORIES["network"])):
+        return _answer(
+            "I can **create** the database as its own governed resource, but “attach it to "
+            "an instance” isn't one wired step here — a managed database is *connected to*, "
+            "not attached. The honest path: **(1)** create the database now (its connection "
+            "string + credentials arrive on the success card, revealed once), **(2)** as a "
+            "day-2 modify I can scope the DB's allowed source (its security group / allowed "
+            "CIDR) to that instance, **(3)** point the app on the instance at the connection "
+            "string — in-guest client setup stays outside my Terraform scope.\n"
+            "Want me to start with the database create? I won't silently drop the attach half.",
+            clarify=True)
+
     # (a) compound INDEPENDENT resources (no dependency linkage → not a DEP DAG). Offer to do
     # them one at a time; never silently pick one.
     if action == "create" and not _DEP_LINK.search(message):
@@ -508,7 +559,13 @@ async def cloudops_plan(state: AgentState, config) -> dict:
         collected["project"] = settings.google_cloud_project
 
     # Missing decision-critical params → ask for exactly those (never for defaulted VPC/subnet).
-    missing = params.missing_required(template.key, collected)
+    # STAB P2-4: DEP-slot-covered fields (EKS vpc_id/subnet_ids, NLB vpc_id, RG names…) are
+    # NEVER demanded as raw ids on the params card — the dependency closure below fills them
+    # from the world model, asks with the real candidates, or drafts the create-first DAG
+    # (live: the EKS card demanded "Existing VPC id (vpc-…)" + subnet ids, screenshots 18-19).
+    dep_fields = dependency.slot_fields(template.key)
+    missing = [m for m in params.missing_required(template.key, collected)
+               if m.name not in dep_fields]
     if missing:
         req = params.request_payload(template.key, collected)
         msg = params.summary_text(template.key, collected)
@@ -522,6 +579,63 @@ async def cloudops_plan(state: AgentState, config) -> dict:
         return {"needs_change": False, "approval_status": "not_required", "collecting": True,
                 "cloud": cloud, "resource": resource, "answer": msg, "param_request": req,
                 "parsed_inputs": collected, "confidentiality": {"level": cc.level, "score": cc.score}}
+
+    # ── DEP: dependency closure (strict order: named → world model → stated default →
+    # create-first DAG). Runs BEFORE schema validation (STAB P2-4): slot-covered required
+    # fields (EKS vpc_id/subnet_ids…) are filled here from the world model — the schema then
+    # validates the ENRICHED inputs, so the user is never asked for raw provider ids.
+    # An ambiguous parent ASKS with the real candidates; a missing required parent yields an
+    # ordered create-first plan (executed by the executive loop, U6).
+    # BUGFIX-2 (live acceptance run 2): when the PREVIOUS turn was that ask, map this turn's
+    # reply ("new" / a candidate's name — exactly the forms the ask suggests) back onto the
+    # slot; before this, the reply was re-resolved from scratch and the ask repeated forever.
+    dep_choice = dependency.choice_from_reply(state.get("message", ""),
+                                              pending_rec.get("dep_ask"))
+    if dep_choice:
+        await emitter.step(4, f"Placement answered · {dep_choice['parent_type']} → "
+                              f"{'a new one' if dep_choice['choice'] == '__new__' else dep_choice['choice']}")
+    closure = dependency.resolve_closure(
+        template.key, collected,
+        await inventory.list_active(state["org_id"]), message=state.get("message", ""),
+        dep_choice=dep_choice)
+    if closure.status == "ask":
+        if session_id:
+            rec = _pending_record(collected)
+            # persist WHICH slot asked + the real candidates, so the next turn's bare reply
+            # can be mapped honestly instead of being re-classified (BUGFIX-2)
+            rec["dep_ask"] = {"parent_type": closure.parent_type, "options": closure.options}
+            await params.save_pending(session_id, rec)
+        await emitter.step(4, "Placement is ambiguous — asking")
+        await emitter.token(closure.question)
+        cc = classify(closure.question)
+        await emitter.confidentiality(cc.level, cc.score)
+        await timing.end_step(run_id, "cloudops_agent", status="done")
+        return {"needs_change": False, "approval_status": "not_required", "collecting": True,
+                "cloud": cloud, "resource": resource, "answer": closure.question,
+                "parsed_inputs": collected,
+                "confidentiality": {"level": cc.level, "score": cc.score}}
+    if closure.status == "dag":
+        if settings.aegisops_exec_loop == "on":
+            # U6: hand the create-first DAG to the Governed Executive Loop — per-step plans +
+            # ONE whole-DAG approval; execution happens post-approval in the execute node.
+            from . import exec_loop
+            return await exec_loop.plan_goal_dag(state, config, closure.dag)
+        steps_txt = " → ".join(f"{i+1}) {s['template_key']}"
+                               f" “{s['inputs'].get('name') or s['inputs'].get('cluster_name') or s['inputs'].get('account_name') or ''}”"
+                               for i, s in enumerate(closure.dag))
+        msg = (f"**{template.key}** needs a {closure.dag[0]['provides']} that doesn't exist yet. "
+               f"Ordered plan (parents first): {steps_txt} — the child is wired to the parent's "
+               "real outputs. Multi-step execution runs through the governed executive loop; "
+               "each plan is applied only after your approval.")
+        await emitter.step(4, "Create-first plan drafted (dependency closure)")
+        await emitter.token(msg)
+        cc = classify(msg)
+        await emitter.confidentiality(cc.level, cc.score)
+        await timing.end_step(run_id, "cloudops_agent", status="done")
+        return {"needs_change": False, "approval_status": "not_required", "answer": msg,
+                "goal_dag": closure.dag, "cloud": cloud, "resource": resource,
+                "confidentiality": {"level": cc.level, "score": cc.score}}
+    collected = closure.inputs
 
     # All required present → validate the concrete Terraform variables against the module schema.
     if session_id:
@@ -571,8 +685,11 @@ async def cloudops_plan(state: AgentState, config) -> dict:
                     "confidentiality": {"level": cc.level, "score": cc.score}}
 
     # ── Availability (real SDK reads) ──
-    await emitter.step(4, f"Queried {cloud.upper()} · {region}")
-    avail = await _availability(settings, cloud, region, emitter)
+    # P2-2: the label carries the CLOUD'S OWN region/location (from the validated inputs),
+    # never the UI context's AWS-style default.
+    region_label = display_region(cloud, validated, region)
+    await emitter.step(4, f"Queried {cloud.upper()} · {region_label}")
+    avail = await _availability(settings, cloud, region_label, emitter)
     for c in avail["checks"]:
         await emitter.console("stdout", f"availability: {c['name']} = {'ok' if c['passed'] else 'n/a'} {c.get('detail','')}")
     await timing.end_step(run_id, "cloudops_agent", status="done")
@@ -611,60 +728,8 @@ async def cloudops_plan(state: AgentState, config) -> dict:
                 "cloud": cloud, "resource": resource, "answer": msg, "parsed_inputs": collected,
                 "confidentiality": {"level": cc.level, "score": cc.score}}
 
-    # ── DEP: dependency closure (strict order: named → world model → stated default →
-    # create-first DAG). An ambiguous parent ASKS with the real candidates; a missing required
-    # parent yields an ordered create-first plan (executed by the executive loop, U6) — the
-    # single-step path proceeds with the resolved inputs + provenance notes for the card.
-    # BUGFIX-2 (live acceptance run 2): when the PREVIOUS turn was that ask, map this turn's
-    # reply ("new" / a candidate's name — exactly the forms the ask suggests) back onto the
-    # slot; before this, the reply was re-resolved from scratch and the ask repeated forever.
-    dep_choice = dependency.choice_from_reply(state.get("message", ""),
-                                              pending_rec.get("dep_ask"))
-    if dep_choice:
-        await emitter.step(4, f"Placement answered · {dep_choice['parent_type']} → "
-                              f"{'a new one' if dep_choice['choice'] == '__new__' else dep_choice['choice']}")
-    closure = dependency.resolve_closure(
-        template.key, validated,
-        await inventory.list_active(state["org_id"]), message=state.get("message", ""),
-        dep_choice=dep_choice)
-    if closure.status == "ask":
-        if session_id:
-            rec = _pending_record(collected)
-            # persist WHICH slot asked + the real candidates, so the next turn's bare reply
-            # can be mapped honestly instead of being re-classified (BUGFIX-2)
-            rec["dep_ask"] = {"parent_type": closure.parent_type, "options": closure.options}
-            await params.save_pending(session_id, rec)
-        await emitter.step(4, "Placement is ambiguous — asking")
-        await emitter.token(closure.question)
-        cc = classify(closure.question)
-        await emitter.confidentiality(cc.level, cc.score)
-        await timing.end_step(run_id, "cloudops_agent", status="done")
-        return {"needs_change": False, "approval_status": "not_required", "collecting": True,
-                "cloud": cloud, "resource": resource, "answer": closure.question,
-                "parsed_inputs": collected,
-                "confidentiality": {"level": cc.level, "score": cc.score}}
-    if closure.status == "dag":
-        if settings.aegisops_exec_loop == "on":
-            # U6: hand the create-first DAG to the Governed Executive Loop — per-step plans +
-            # ONE whole-DAG approval; execution happens post-approval in the execute node.
-            from . import exec_loop
-            return await exec_loop.plan_goal_dag(state, config, closure.dag)
-        steps_txt = " → ".join(f"{i+1}) {s['template_key']}"
-                               f" “{s['inputs'].get('name') or s['inputs'].get('cluster_name') or s['inputs'].get('account_name') or ''}”"
-                               for i, s in enumerate(closure.dag))
-        msg = (f"**{template.key}** needs a {closure.dag[0]['provides']} that doesn't exist yet. "
-               f"Ordered plan (parents first): {steps_txt} — the child is wired to the parent's "
-               "real outputs. Multi-step execution runs through the governed executive loop; "
-               "each plan is applied only after your approval.")
-        await emitter.step(4, "Create-first plan drafted (dependency closure)")
-        await emitter.token(msg)
-        cc = classify(msg)
-        await emitter.confidentiality(cc.level, cc.score)
-        await timing.end_step(run_id, "cloudops_agent", status="done")
-        return {"needs_change": False, "approval_status": "not_required", "answer": msg,
-                "goal_dag": closure.dag, "cloud": cloud, "resource": resource,
-                "confidentiality": {"level": cc.level, "score": cc.score}}
-    validated = closure.inputs
+    # (P2-4: the DEP closure now runs BEFORE schema validation — see above. The inputs
+    # here are already slot-enriched and schema-validated.)
     # MODSEED: environment-aware defaults (e.g. NLB deletion_protection ON for Production) —
     # resolved after validation, stated on the card, never silent; explicit choices win.
     env_notes = templates.apply_env_defaults(template.key, validated,
@@ -880,6 +945,7 @@ async def _read_path(state, config) -> dict:
 
     await emitter.step(3, f"Querying {', '.join(c.upper() for c in clouds)} · read-only")
     sections: list[str] = []
+    failed_clouds: set[str] = set()   # P1-2c: their inventory rows must read UNVERIFIED
     for cloud in clouds:
         try:
             found = await (_discover_aws(settings, kind, region) if cloud == "aws"
@@ -890,6 +956,7 @@ async def _read_path(state, config) -> dict:
                 await emitter.console("stdout", f"discovery[{cloud}]: {f}")
         except Exception as e:  # noqa: BLE001 - one cloud failing must not sink the others
             log.warning("cloudops.discovery_failed", cloud=cloud, error=str(e))
+            failed_clouds.add(cloud)
             f = provider_errors.classify_provider_error(str(e))
             sections.append(f"**{cloud.upper()}**: discovery failed — "
                             + (f"{f.title}. {f.next_step}" if f else str(e)[:140]))
@@ -900,9 +967,15 @@ async def _read_path(state, config) -> dict:
         mine = await inventory.list_active(state["org_id"], clouds=clouds)
         if inventory.is_broad_ref(state.get("target")) or intent_guard.is_broad_inventory_question(message):
             # Broad = everything created, across ALL clouds (not just the ones asked about).
-            sections.append("\n" + _render_inventory_list(await inventory.list_active(state["org_id"])))
+            sections.append("\n" + _render_inventory_list(await inventory.list_active(state["org_id"]),
+                                                          unverified_clouds=failed_clouds))
         elif mine:
-            names = ", ".join(f"{m['name']} ({m['cloud']} {m['resource_type']})" for m in mine[:8])
+            # P1-2c: a row on a cloud whose live discovery just failed is not "active" as far
+            # as anyone can verify right now — say so inline, never imply it was checked.
+            names = ", ".join(
+                f"{m['name']} ({m['cloud']} {m['resource_type']})"
+                + (" ⚠ unverified" if m["cloud"] in failed_clouds else "")
+                for m in mine[:8])
             sections.append(f"**Provisioned by AegisOps**: {len(mine)} active — {names}")
         else:
             sections.append("**Provisioned by AegisOps**: none recorded for these clouds")
@@ -917,35 +990,35 @@ async def _read_path(state, config) -> dict:
         summary="Read-only discovery via cloud SDK reads plus the AegisOps inventory — no "
                 "infrastructure was changed and no approval was needed.",
         cards=[{"title": "Read-only query", "conf": "",
-                "body": f"kind={kind} · clouds={', '.join(clouds)} · region={region}"}])
+                # P2-2: only the AWS reader is region-scoped — never stamp an AWS-style
+                # region on an Azure/GCP query (live: "Queried AZURE · us-east-1").
+                "body": f"kind={kind} · clouds={', '.join(clouds)}"
+                        + (f" · aws region={region}" if "aws" in clouds else "")}])
     return {"needs_change": False, "approval_status": "not_required", "answer": text,
             "confidentiality": {"level": c.level, "score": c.score}}
 
 
-def _render_inventory_list(matches: list[dict]) -> str:
-    """Human summary of every active inventoried resource, grouped by cloud (BUG-04)."""
+def _render_inventory_list(matches: list[dict], unverified_clouds: set[str] | frozenset = frozenset()) -> str:
+    """Inventory listing as a real markdown TABLE (STAB P1-2a). The old version joined
+    “• ”-prefixed lines with single newlines — markdown collapses those into the one dense
+    paragraph the owner saw live (screenshots 9/17). `unverified_clouds` (P1-2c): clouds
+    whose live discovery just FAILED — their rows must say so, never read as verified."""
     if not matches:
         return ("I haven't provisioned any resources in this workspace yet — nothing is recorded "
                 "in the inventory. (Failed applies leave no active resource, and destroyed ones "
                 "are removed from this list.) Ask me to create something — e.g. "
                 "“create an EC2 instance in AWS”.")
-    by_cloud: dict[str, list[dict]] = {}
-    for m in matches:
-        by_cloud.setdefault(m["cloud"], []).append(m)
-    lines = [f"I've provisioned **{len(matches)}** active resource(s):"]
-    for cloud in sorted(by_cloud):
-        lines.append(f"\n**{cloud.upper()}**")
-        for m in by_cloud[cloud]:
-            bits = [f"• **{m['name']}** — {m['resource_type']}"]
-            if m.get("provider_id"):
-                bits.append(f"(`{m['provider_id']}`)")
-            if m.get("region"):
-                bits.append(f"· {m['region']}")
-            created = (m.get("created_at") or "")[:16].replace("T", " ")
-            if created:
-                bits.append(f"· created {created}")
-            lines.append(" ".join(bits))
-    lines.append("\nAsk about any of them by name for full details (IPs, VPC, ports, …).")
+    lines = [f"I've provisioned **{len(matches)}** active resource(s):", "",
+             "| Name | Type | Cloud | Region | Created | Id | Status |",
+             "|---|---|---|---|---|---|---|"]
+    for m in sorted(matches, key=lambda x: (x.get("cloud") or "", x.get("name") or "")):
+        created = (m.get("created_at") or "")[:16].replace("T", " ") or "—"
+        pid = f"`{m['provider_id']}`" if m.get("provider_id") else "—"
+        status = ("⚠ unverified — live discovery failed"
+                  if (m.get("cloud") or "") in unverified_clouds else (m.get("status") or "active"))
+        lines.append(f"| **{m.get('name')}** | {m.get('resource_type')} | {m.get('cloud')} "
+                     f"| {m.get('region') or '—'} | {created} | {pid} | {status} |")
+    lines += ["", "Ask about any of them by name for full details (IPs, VPC, ports, …)."]
     return "\n".join(lines)
 
 

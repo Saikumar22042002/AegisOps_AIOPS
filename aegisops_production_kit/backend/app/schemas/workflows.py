@@ -138,6 +138,19 @@ class AWSRDSInputs(WorkflowInputs):
     identifier: str
     engine: str = "postgres"
     engine_version: str = ""            # "" = provider default (old) · "latest" · explicit pin
+
+    # STAB P1-4 (BUGFIX-1 family): canonicalize case, refuse the rest honestly — Terraform
+    # is never the validator. Live (screenshot 21): `Sai-test-v1` reached `terraform plan`
+    # and died with a raw provider error instead of a per-field re-ask.
+    @field_validator("identifier")
+    @classmethod
+    def _norm_identifier(cls, v: str) -> str:
+        v = (v or "").strip().lower()
+        if not re.fullmatch(r"[a-z][a-z0-9-]{0,62}", v) or "--" in v or v.endswith("-"):
+            raise ValueError(
+                f"'{v}' is not a valid RDS identifier — 1-63 chars, letters/digits/hyphens, "
+                "starts with a letter, no trailing or double hyphen (e.g. payments-db)")
+        return v
     instance_class: str = "db.t3.medium"
     allocated_storage: int = Field(default=20, ge=20, le=4096)
     region: str = "us-east-1"
@@ -532,6 +545,20 @@ class GCPComputeInputs(WorkflowInputs):
         if v.strip().lower() not in ("", "running", "stopped"):
             raise ValueError("power_state must be empty, running, or stopped")
         return v.strip().lower()
+
+    # STAB P1-1: the module is genuinely Linux-only. Without this validator the extractor's
+    # normalized "windows-2022" sailed through Pydantic and the module's image lookup fell
+    # back to Linux — a silent substitution the user never asked for (live, screenshot 7-8).
+    # An unsupported OS is an HONEST REFUSAL naming where the request IS supported.
+    @field_validator("os")
+    @classmethod
+    def _valid_os(cls, v: str) -> str:
+        allowed = ("debian-12", "ubuntu-22.04", "ubuntu-24.04")
+        if v not in allowed:
+            raise ValueError(
+                f"gcp.vm is Linux-only ({', '.join(allowed)}) — Windows Server is available "
+                "on aws.ec2 or azure.vm; say which you'd like instead")
+        return v
 
     @field_validator("machine_type")
     @classmethod

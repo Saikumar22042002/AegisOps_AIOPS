@@ -91,9 +91,13 @@ _RESOURCE_NOUN = re.compile(
 )
 
 # Intent labels that imply a side effect (used to rewrite a mislabelled read).
+# STAB P1-2b: sync/refresh/reconcile-family added — live (screenshot 9), "Did any instances
+# are running in aws ?" was classified action=read + intent=sync_resources, which slipped
+# this rewrite and carried a state-mutation narrative into the timeline. A QUESTION must
+# never wear a sync/write-shaped intent label.
 _SIDE_EFFECT_INTENT = re.compile(
     r"^(?:destroy|delete|remove|terminate|teardown|create|provision|deploy|launch|modify|"
-    r"update|scale)_",
+    r"update|scale|sync|resync|refresh|reconcile|upsert|write|record|mark|import)_",
     re.IGNORECASE,
 )
 

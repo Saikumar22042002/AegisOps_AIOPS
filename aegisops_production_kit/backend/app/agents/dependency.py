@@ -133,6 +133,18 @@ _REPLY_NEW = re.compile(r"^\s*(?:a\s+|the\s+)?(?:new|fresh)"
                         re.IGNORECASE)
 
 
+def slot_fields(template_key: str) -> set[str]:
+    """STAB P2-4: every child input a DEP slot can fill (the slot's own field + its
+    companions). The params card must never demand these as raw provider ids — the
+    closure fills them from the world model, asks with real candidates, or drafts the
+    create-first DAG (live: the EKS card demanded vpc-… + subnet ids, screenshots 18-19)."""
+    out: set[str] = set()
+    for slot in SLOTS.get(template_key, []):
+        out.add(slot.field)
+        out.update(slot.companion_fields.keys())
+    return out
+
+
 def choice_from_reply(message: str, dep_ask: dict | None) -> dict | None:
     """Map a follow-up reply onto the pending DEP ask (BUGFIX-2, live acceptance run 2).
 
