@@ -572,6 +572,11 @@ async def get_run(run_id: str, user: User = Depends(get_current_user)) -> dict:
             "mode": run.mode, "status": run.status, "plan_json": run.plan_json,
             "input_json": run.input_json, "outcome": run.outcome, "snow_id": run.snow_id,
             "context_id": run.context_id,
+            # GW-1: a `?run=<id>` deep link (the link a chat channel sends when it withholds or
+            # truncates an answer) must be able to find the conversation the run belongs to.
+            # Same org-authorized payload — `authorize_run` above already gated it.
+            "session_id": str(run.session_id) if run.session_id else None,
+            "source": run.source,
         }
 
 

@@ -110,6 +110,8 @@ interface UIState {
   renameSession: (id: string, title: string) => Promise<void>;
   deleteSession: (id: string) => Promise<void>;
   restoreLast: () => Promise<void>;
+  /** GW-1: honor `?run=…` / `?session=…` / `&tab=…`; true when a link was consumed. */
+  openDeepLink: () => Promise<boolean>;
   openCmdk: () => void;
   closeCmdk: () => void;
   setCmdkQuery: (v: string) => void;
@@ -252,11 +254,44 @@ export const useUI = create<UIState>((set, get) => ({
   },
 
   restoreLast: async () => {
+    // GW-1: a deep link wins over the remembered thread. When a chat channel truncates or
+    // withholds an answer it sends `?run=<id>[&tab=…]`, and that link must actually land on
+    // the run — otherwise "open it in AegisOps" is a promise the app doesn't keep.
+    if (await get().openDeepLink()) return;
     await get().loadSidebar();
     const last = readLast();
     if (last && get().sessions.some((s) => s.id === last)) {
       await get().openSession(last);
     }
+  },
+
+  openDeepLink: async () => {
+    if (typeof window === "undefined") return false;
+    const params = new URLSearchParams(window.location.search);
+    const runId = params.get("run");
+    const sessionId = params.get("session");
+    const tab = params.get("tab") as ArtifactTab | null;
+    if (!runId && !sessionId) return false;
+
+    await get().loadSidebar();
+    let sid = sessionId;
+    if (!sid && runId) {
+      try {
+        sid = (await api.get<{ session_id?: string | null }>(`/runs/${runId}`)).session_id ?? null;
+      } catch {
+        sid = null; // gone, or another org's run (404) — fall through to a clean workspace
+      }
+    }
+    if (sid) await get().openSession(sid);
+    if (runId) {
+      set((s) => ({ activeNav: "workspace", activeRunId: runId, artifactOpen: true,
+                    activeArtifact: tab ?? "timeline", artifactNonce: s.artifactNonce + 1 }));
+    } else if (tab) {
+      set({ artifactOpen: true, activeArtifact: tab });
+    }
+    // Drop the query so a refresh doesn't re-drive the link (and the URL stays shareable-clean).
+    window.history.replaceState({}, "", window.location.pathname);
+    return true;
   },
 
   sendText: async (text) => {
