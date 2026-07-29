@@ -353,7 +353,12 @@ def build_drive(prepared: PreparedRun, channel: RunChannel) -> Callable[[], Awai
             msg_id = await _persist_result(run_id, session_id, org_id, state, status_)
             AGENT_RUNS.labels(domain=state.get("domain", "general"), workflow=state.get("workflow", "-"),
                               status=status_, env=prepared.env or "na").inc()
-            if not res["interrupted"]:
+            if res["interrupted"]:
+                # GW-1: a run parked at the gate is pushed to every LINKED, ELIGIBLE approver's
+                # channel, whichever gateway started it — so a browser-initiated change is
+                # approvable from a phone and vice versa. Best-effort by contract.
+                await _notify_gateways_awaiting_approval(prepared, state)
+            else:
                 await emitter.done({
                     "messageId": msg_id, "runId": run_id, "traceId": run_id,
                     "contextId": state.get("context_id", run_id), "snowId": state.get("snow_id"),
@@ -378,6 +383,20 @@ def build_drive(prepared: PreparedRun, channel: RunChannel) -> Callable[[], Awai
             await channel.close()
 
     return _drive
+
+
+async def _notify_gateways_awaiting_approval(prepared: PreparedRun, state: dict) -> None:
+    """Hand an awaiting-approval run to the gateway push layer. Best-effort by contract: a
+    messaging problem must never change what happens to the run."""
+    try:
+        from ..gateways import notify as gw_notify
+        await gw_notify.approval_pending(
+            run_id=prepared.run_id, org_id=prepared.org_id, env=prepared.env,
+            initiator_user_id=prepared.initiator_user_id,
+            initiator_username=(state.get("user") or {}).get("username"),
+            interrupt_payload=state.get("interrupt_payload") or {})
+    except Exception as exc:  # noqa: BLE001 — a push failure must never affect the run
+        log.warning("chat.gateway_notify_failed", run_id=prepared.run_id, error=str(exc))
 
 
 @router.post("/chat")

@@ -25,7 +25,7 @@ import structlog
 from fastapi import HTTPException
 
 from ..settings import Settings
-from . import identity, render
+from . import identity, notify, render
 from .transport import Transport, TransportError
 
 log = structlog.get_logger(__name__)
@@ -41,6 +41,19 @@ class Inbound:
     text: str
     username: str | None = None
     message_id: str | None = None
+
+
+@dataclass
+class Callback:
+    """One normalized inline-button press from any channel."""
+
+    channel: str
+    channel_user_id: str
+    chat_id: str
+    callback_id: str
+    token: str
+    message_id: str | None = None
+    username: str | None = None
 
 
 @dataclass
@@ -207,13 +220,19 @@ async def _run_turn(inbound: Inbound, transport: Transport, settings: Settings,
     await _deliver(inbound, transport, settings, result)
 
 
-async def _consume(run_id: str, channel) -> RunOutcome:
-    """Drain the run's event frames — the same ones the browser receives — into a RunOutcome."""
+async def _consume(run_id: str, channel, *, replay_after=0) -> RunOutcome:
+    """Drain the run's event frames — the same ones the browser receives — into a RunOutcome.
+
+    `replay_after` matters for an approval continuation: on the redis bus the run's stream still
+    holds the ORIGINAL turn's frames, so a from-zero consumer would replay the plan and stop at
+    that turn's terminal marker, never seeing the apply (STAB P0-3). The cursor comes from
+    `resolve_approval_core`, captured before the drive started.
+    """
     from ..api.chat import iter_events
 
     out = RunOutcome(run_id=run_id)
     tokens: list[str] = []
-    async for frame in iter_events(channel, 0):
+    async for frame in iter_events(channel, replay_after):
         event, data = frame.get("event"), frame.get("data") or {}
         if event == "run":
             out.session_id = data.get("sessionId") or out.session_id
@@ -246,8 +265,109 @@ async def _deliver(inbound: Inbound, transport: Transport, settings: Settings,
         body = f"⚠️ {result.error}"
     if not body:
         body = "(the run produced no answer — open it in AegisOps for the full timeline)"
+    buttons = None
     if result.interrupt is not None:
         body = f"{body}\n\n{render.approval_card(result.interrupt, settings=settings, run_id=result.run_id or '')}"
+        # The sender may or may not be allowed to approve — the buttons are offered either way
+        # and the CALLBACK decides, because capability must be re-checked at click time, not at
+        # render time (roles change, and a card can sit in a chat for days).
+        buttons = notify.approval_buttons(result.run_id) if result.run_id else None
     text = render.outbound(body, limit=transport.max_text_len,
                            level=result.confidentiality, deep_link=deep)
-    await transport.send(inbound.chat_id, text)
+    await transport.send(inbound.chat_id, text, buttons=buttons)
+
+
+# ── approval callbacks (inline buttons) ──────────────────────────────────────────────────────
+
+
+def parse_approval_token(token: str) -> tuple[str, str] | None:
+    """`apv:<run_id>:<approved|rejected>` → (run_id, decision), or None if it isn't one.
+
+    Purely structural. The token grants nothing: `handle_callback` re-resolves who pressed it
+    and re-runs every server-side check.
+    """
+    parts = (token or "").split(":")
+    if len(parts) != 3 or parts[0] != "apv":
+        return None
+    run_id, decision = parts[1].strip(), parts[2].strip()
+    if not run_id or decision not in {"approved", "rejected"}:
+        return None
+    return run_id, decision
+
+
+async def handle_callback(cb: Callback, transport: Transport, settings: Settings) -> None:
+    """Handle one inline-button press. Never raises."""
+    try:
+        await _handle_callback(cb, transport, settings)
+    except Exception as exc:  # noqa: BLE001 — the poller must survive any single bad press
+        log.error("gateway.callback_failed", channel=cb.channel, error=str(exc))
+        try:
+            await transport.answer_callback(cb.callback_id,
+                                            "Something went wrong — nothing was changed.",
+                                            alert=True)
+        except TransportError:
+            pass
+
+
+async def _handle_callback(cb: Callback, transport: Transport, settings: Settings) -> None:
+    from ..api.chat import resolve_approval_core
+
+    parsed = parse_approval_token(cb.token)
+    if parsed is None:
+        await transport.answer_callback(cb.callback_id, "Unrecognized action.", alert=True)
+        return
+    run_id, decision = parsed
+
+    # Identity is re-resolved on every press: an Unlink (or a binding that never existed) means
+    # this press has no platform identity at all, whatever the button says.
+    bound = await identity.resolve(cb.channel, cb.channel_user_id)
+    if bound is None:
+        await transport.answer_callback(cb.callback_id, "This chat isn't linked to AegisOps.",
+                                       alert=True)
+        await transport.send(cb.chat_id, render.how_to_link(settings))
+        return
+
+    user = bound.auth_user()
+    # RBAC at CLICK time. resolve_approval_core re-checks this too (and org scope, four-eyes,
+    # awaiting-approval state and the in-flight lock) — answering here first just gives the
+    # presser an immediate, specific reason instead of a generic failure.
+    if not user.can_approve:
+        await transport.answer_callback(
+            cb.callback_id, "Approval requires Cloud Architect, Org Admin, or Platform Admin.",
+            alert=True)
+        return
+
+    try:
+        channel, cursor = await resolve_approval_core(
+            run_id, decision=decision,
+            rationale=f"via {cb.channel} by {bound.username}",
+            user=user, settings=settings)
+    except HTTPException as exc:
+        # Every refusal the web endpoint would give, verbatim: four-eyes (403), cross-org (404),
+        # already decided / not awaiting (409), a decision already in flight (409).
+        detail = str(exc.detail)
+        await transport.answer_callback(cb.callback_id, detail, alert=True)
+        await transport.send(cb.chat_id, render.refusal(detail))
+        return
+
+    await transport.answer_callback(
+        cb.callback_id, "Approved — applying." if decision == "approved" else "Rejected.")
+    # Re-render the card without buttons so the decision can't be double-pressed from the chat.
+    if cb.message_id:
+        try:
+            await transport.edit(cb.chat_id, cb.message_id,
+                                 f"{'✅ Approved' if decision == 'approved' else '🚫 Rejected'}"
+                                 f" by **{bound.username}** via {cb.channel}.\n"
+                                 f"{render.web_run_link(settings, run_id)}")
+        except TransportError:
+            pass  # the card may be too old to edit — the decision already stands
+
+    # The continuation (apply/destroy, or the halt on reject) streams back through the SAME
+    # delivery path a chat turn uses.
+    inbound = Inbound(channel=cb.channel, channel_user_id=cb.channel_user_id,
+                      chat_id=cb.chat_id, text="", username=cb.username)
+    result = await _consume(run_id, channel, replay_after=cursor)
+    if not result.answer.strip() and not result.error:
+        result.answer = ("Applied." if decision == "approved"
+                         else "Rejected — nothing was changed.")
+    await _deliver(inbound, transport, settings, result)

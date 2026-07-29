@@ -23,7 +23,7 @@ import structlog
 
 from ...settings import Settings
 from ..transport import TransportError
-from .api import TelegramClient, TelegramConflict, sleep_backoff, to_inbound
+from .api import TelegramClient, TelegramConflict, sleep_backoff, to_callback, to_inbound
 
 log = structlog.get_logger(__name__)
 
@@ -141,10 +141,16 @@ class TelegramGateway:
         task.add_done_callback(self._turns.discard)
 
     async def _handle(self, update: dict) -> None:
-        """Route one update. Wrapped so a single bad turn can never kill the poller."""
-        from ..driver import handle_inbound
+        """Route one update (message or inline-button press). Wrapped so a single bad turn can
+        never kill the poller."""
+        from ..driver import handle_callback, handle_inbound
 
         try:
+            cb = to_callback(update)
+            if cb is not None:
+                async with self._sem:
+                    await handle_callback(cb, self.client, self.settings)
+                return
             inbound = to_inbound(update)
             if inbound is None:
                 return

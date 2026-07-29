@@ -264,6 +264,32 @@ def to_inbound(update: dict, channel: str = "telegram"):
     )
 
 
+def to_callback(update: dict, channel: str = "telegram"):
+    """Map a Telegram `callback_query` (inline-button press) to the channel-agnostic `Callback`.
+
+    Returns None when the update isn't a button press or lacks the ids we need to answer it.
+    """
+    from ..driver import Callback
+
+    query = update.get("callback_query")
+    if not isinstance(query, dict):
+        return None
+    sender = query.get("from") or {}
+    message = query.get("message") or {}
+    chat = message.get("chat") or {}
+    if not query.get("id") or not sender.get("id") or not chat.get("id"):
+        return None
+    return Callback(
+        channel=channel,
+        channel_user_id=str(sender["id"]),
+        chat_id=str(chat["id"]),
+        callback_id=str(query["id"]),
+        token=str(query.get("data") or ""),
+        message_id=str(message.get("message_id")) if message.get("message_id") else None,
+        username=sender.get("username") or sender.get("first_name"),
+    )
+
+
 async def sleep_backoff(attempt: int, *, base: float = 1.0, cap: float = 30.0) -> None:
     """Bounded exponential backoff for a failing poll loop."""
     await asyncio.sleep(min(cap, base * (2 ** max(0, attempt - 1))))
