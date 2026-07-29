@@ -43,13 +43,22 @@ test("Settings → Connected accounts exposes the Telegram link control", async 
   await expect(panel.getByText(/Telegram/)).toBeVisible();
 
   // The Preferences list above it carries the same fact, so the two cannot disagree.
-  await expect(page.getByText(/your roles and approval rules follow the link|not enabled on this deployment/))
+  await expect(page.getByText(/your roles and approval rules follow the link|TELEGRAM_BOT_TOKEN is not set|not enabled on this deployment/))
     .toBeVisible();
 
   if (!status.enabled) {
-    // Honest disabled posture: the control is present, explained, and inert.
-    await expect(panel.getByText("disabled")).toBeVisible();
-    await expect(panel.getByText(/Not enabled on this deployment/)).toBeVisible();
+    // Honest blocked posture: the control is present, inert, and names the ACTUAL blocker —
+    // a missing bot token must not be reported as "the flag is off".
+    expect(status.reason).toMatch(/^(no_token|flag_off)$/);
+    if (status.reason === "no_token") {
+      await expect(panel.getByText("no bot token")).toBeVisible();
+      await expect(panel.getByText(/TELEGRAM_BOT_TOKEN is empty/)).toBeVisible();
+      // And it says out loud that the UI is not where a token lives.
+      await expect(panel.getByText(/never shown or stored here/)).toBeVisible();
+    } else {
+      await expect(panel.getByText("disabled")).toBeVisible();
+      await expect(panel.getByText(/Not enabled on this deployment/)).toBeVisible();
+    }
     await expect(panel.getByTestId("telegram-generate")).toBeDisabled();
     await expect(panel.getByTestId("telegram-code")).toHaveCount(0);
   } else if (status.linked) {

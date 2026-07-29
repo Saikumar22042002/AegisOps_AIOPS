@@ -175,7 +175,8 @@ async def _settings(s, oid, user, settings):
         tg_linked = (await s.execute(select(ChannelIdentity).where(
             ChannelIdentity.channel == "telegram", ChannelIdentity.org_id == oid,
             ChannelIdentity.user_id == uuid.UUID(user.user_id)))).scalar_one_or_none() is not None
-    tg_enabled = settings.aegisops_telegram == "on" and bool(settings.telegram_bot_token)
+    tg_flag_on = settings.aegisops_telegram == "on"
+    tg_enabled = tg_flag_on and bool(settings.telegram_bot_token)
     stats = [_stat("Role", user.display_roles[0] if user.display_roles else "—", "RBAC"),
              _stat("Approval mode", "Required", "for production", "var(--amber)"),
              _stat("Can approve", "Yes" if user.can_approve else "No", "side-effecting", "var(--green)" if user.can_approve else "var(--text-3)"),
@@ -184,8 +185,13 @@ async def _settings(s, oid, user, settings):
             _row("var(--cyan)", "Connected account", user.username, "Keycloak"),
             _row("var(--green)" if tg_linked else "var(--text-4)", "Telegram",
                  "message AegisOps from your phone · your roles and approval rules follow the link"
-                 if tg_enabled else "not enabled on this deployment",
-                 "linked" if tg_linked else ("not linked" if tg_enabled else "disabled")),
+                 if tg_enabled
+                 # Name the real blocker: flag-off and token-missing need different fixes.
+                 else ("TELEGRAM_BOT_TOKEN is not set (the token is never shown in the UI)"
+                       if tg_flag_on else "not enabled on this deployment"),
+                 "linked" if tg_linked
+                 else ("not linked" if tg_enabled
+                       else ("no bot token" if tg_flag_on else "disabled"))),
             _row("var(--accent-3)", "Default agent mode", "Approval required in production", "enabled")]
     return stats, rows
 

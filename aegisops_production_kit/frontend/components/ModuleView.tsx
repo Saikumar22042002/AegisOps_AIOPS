@@ -85,6 +85,9 @@ type ProposalRow = {
 
 type TelegramStatus = {
   channel: string; linked: boolean; enabled: boolean;
+  // Which blocker is in the way when !enabled: the flag, or a missing bot token. They need
+  // different operator actions, so the panel never collapses them into one message.
+  reason?: "flag_off" | "no_token" | null;
   account?: string | null; linked_at?: string | null; linked_by?: string | null;
   code_pending: boolean; code_expires_at?: string | null; bot_username?: string | null;
 };
@@ -144,7 +147,15 @@ function ConnectedAccounts() {
   };
 
   const dot = st?.linked ? "var(--green)" : st?.enabled ? "var(--amber)" : "var(--text-4)";
-  const label = st?.linked ? "linked" : st?.enabled ? "not linked" : "disabled";
+  const label = st?.linked ? "linked"
+    : st?.enabled ? "not linked"
+    : st?.reason === "no_token" ? "no bot token"
+    : "disabled";
+  // The bot token is an OPERATOR secret and is never shown here (no route returns it) — the
+  // panel only ever reports whether one is configured, and names the file to put it in.
+  const blocked = st?.reason === "no_token"
+    ? "AEGISOPS_TELEGRAM is on but TELEGRAM_BOT_TOKEN is empty. Paste the token from @BotFather into .env and restart the API — the token is never shown or stored here."
+    : "Not enabled on this deployment (set AEGISOPS_TELEGRAM=on and TELEGRAM_BOT_TOKEN).";
 
   return (
     <div style={{ marginTop: 26 }} data-testid="connected-accounts">
@@ -167,7 +178,7 @@ function ConnectedAccounts() {
                 ? `${st.account ?? "account"} · linked ${st.linked_at ? new Date(st.linked_at).toLocaleString() : ""}`
                 : st?.enabled
                   ? "Message AegisOps from your phone. Unlinked senders get no access."
-                  : "Not enabled on this deployment (AEGISOPS_TELEGRAM=off)."}
+                  : blocked}
             </div>
           </div>
           <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, color: dot }}>

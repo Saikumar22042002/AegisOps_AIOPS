@@ -35,8 +35,24 @@ async def _org_id(user: User) -> str:
         return str(org.id)
 
 
+def _posture(settings: Settings) -> tuple[bool, str | None]:
+    """(enabled, blocking_reason). The reason names the ACTUAL blocker.
+
+    "Not enabled" has two causes that need different operator actions, so they are reported
+    separately: the flag is off, or the flag is on but no bot token is configured. Collapsing
+    them into one message sends the operator to fix the wrong thing.
+
+    The token itself is never returned by any route — only whether one exists.
+    """
+    if settings.aegisops_telegram != "on":
+        return False, "flag_off"
+    if not settings.telegram_bot_token:
+        return False, "no_token"
+    return True, None
+
+
 def _enabled(settings: Settings) -> bool:
-    return settings.aegisops_telegram == "on" and bool(settings.telegram_bot_token)
+    return _posture(settings)[0]
 
 
 @router.get("/telegram")
@@ -46,6 +62,7 @@ async def telegram_status(user: User = Depends(get_current_user),
     the UI can say so instead of offering a control that cannot work."""
     org_id = await _org_id(user)
     st = await identity.status(org_id, user.user_id or "", channel=CHANNEL)
+    enabled, reason = _posture(settings)
     gw = None
     try:
         from ..gateways.telegram import poller
@@ -53,7 +70,13 @@ async def telegram_status(user: User = Depends(get_current_user),
         gw = live.bot_username if live else None
     except Exception:  # noqa: BLE001 — a status read must never fail the panel
         gw = None
-    return {**st, "enabled": _enabled(settings), "bot_username": gw}
+    # Deliberately NOT reported: "is a poller listening". It can only be answered for THIS
+    # worker, and the production posture runs several — exactly one wins the getUpdates race
+    # (the others log Conflict once and stay idle by design), so a per-worker answer would tell
+    # a user "the bot isn't listening" while it is perfectly reachable. `bot_username` is
+    # present when this worker built a gateway; the authoritative reachability signal is the
+    # startup log, not a field that looks like it answers more than it can.
+    return {**st, "enabled": enabled, "reason": reason, "bot_username": gw}
 
 
 @router.post("/telegram/code")
