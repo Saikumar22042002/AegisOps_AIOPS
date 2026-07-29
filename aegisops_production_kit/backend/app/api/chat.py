@@ -6,6 +6,13 @@ POST /approvals/{id}  RBAC-gated; resumes the checkpointed graph (approve→appl
                       reject→halt) as an SSE stream of the continuation.
 GET  /chat/stream/{id} reconnect/replay (Last-Event-ID) for an in-flight run.
 GET  /runs/{id}        full run state.
+
+GW-1: the run-driving core is factored into `prepare_run` / `build_drive` /
+`resolve_approval_core`, and the HTTP routes below are thin callers of them. A messaging
+gateway (`app/gateways/`) calls the SAME three functions, so a Telegram turn and a browser turn
+are the same code — there is no second, laxer path to a plan or an apply. (Same reasoning as
+waku's dashboard, where the non-streaming `chat()` drives `chat_stream` rather than
+reimplementing it, because the two copies had already drifted.)
 """
 
 from __future__ import annotations
@@ -13,6 +20,8 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
@@ -59,20 +68,31 @@ class ApprovalRequest(BaseModel):
     rationale: str | None = None
 
 
-async def _sse(channel: RunChannel, replay_after: int = 0):
+async def iter_events(channel: RunChannel, replay_after: Any = 0):
+    """Yield a run's raw `{"id","event","data"}` frames: replay first, then live, de-duped.
+
+    The ONE consumer contract. `_sse` frames these for the browser; a messaging gateway renders
+    the same frames into a chat — so a Telegram turn cannot see a different event stream than
+    the web UI does.
+    """
     # Track ids replayed from history so an event that is both in the ring buffer and still
     # pending in the queue (e.g. the leading `run` event emitted before this consumer starts)
     # is delivered exactly once, never duplicated.
-    seen: set[int] = set()
+    seen: set = set()
     for past in channel.replay_after(replay_after):
         seen.add(past["id"])
-        yield {"event": past["event"], "data": json.dumps(past["data"]), "id": str(past["id"])}
+        yield past
     while True:
         item = await channel.queue.get()
         if item is DONE:
             break
         if item["id"] in seen:
             continue
+        yield item
+
+
+async def _sse(channel: RunChannel, replay_after: Any = 0):
+    async for item in iter_events(channel, replay_after):
         yield {"event": item["event"], "data": json.dumps(item["data"]), "id": str(item["id"])}
 
 
@@ -208,16 +228,35 @@ async def _persist_result(run_id: str, session_id: str, org_id: str, state: dict
     return msg_id
 
 
-@router.post("/chat")
-async def chat(body: ChatRequest, request: Request, user: User = Depends(require_initiator),
-               settings: Settings = Depends(get_settings)):
-    # S3: read-only roles (auditor/read-only) cannot initiate a run — they can still view
-    # (GET endpoints stay on get_current_user). require_initiator → 403 with a clear message.
+@dataclass
+class PreparedRun:
+    """Everything `build_drive` needs, produced by `prepare_run` (which owns every refusal)."""
+
+    run_id: str
+    session_id: str
+    org_id: str
+    resolved_model: str
+    env: str | None
+    source: str
+    initiator_user_id: str | None
+    initial: dict = field(default_factory=dict)
+
+
+async def prepare_run(*, user: User, message: str, context: ChatContext,
+                      session_id: str | None, model: str | None, settings: Settings,
+                      source: str = "web") -> PreparedRun:
+    """Validate + persist the start of a run. Raises HTTPException for every refusal.
+
+    This is the ONE place a run is admitted: model validation (U3), active-run limits (PR-2a),
+    org-scoped session resolution (S0), the user message row, and the `Run` governance row (A5).
+    `source` tags which gateway initiated it. Callers must already have enforced initiator RBAC
+    (the HTTP route via `require_initiator`; the gateway via the bound user's `can_initiate`).
+    """
     # U3: the requested model is validated against the real provider catalog up front. An
     # unknown model fails loudly (400) instead of being silently ignored; the resolved id is
     # bound to this run so the model the operator picked is the model the run actually uses.
     try:
-        _provider, resolved_model = get_provider(settings, body.model)
+        _provider, resolved_model = get_provider(settings, model)
     except UnknownModelError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
     async with session_scope() as s:
@@ -238,48 +277,57 @@ async def chat(body: ChatRequest, request: Request, user: User = Depends(require
                                 f"You have {user_active} runs in progress "
                                 f"(limit {settings.max_active_runs_per_user}). Retry when one "
                                 "completes.")
-        if body.sessionId:
+        if session_id:
             # The caller may only continue a session that exists in THEIR org (S0).
             try:
-                sess = await s.get(Session, uuid.UUID(body.sessionId))
+                sess = await s.get(Session, uuid.UUID(session_id))
             except ValueError:
                 raise HTTPException(404, "session not found") from None
             if not sess or sess.org_id != org.id:
                 raise HTTPException(404, "session not found")
-            session_id = body.sessionId
+            resolved_session_id = session_id
         else:
             sess = Session(org_id=org.id, user_id=owner_id,
-                           title=body.message[:80] or "New conversation")
+                           title=message[:80] or "New conversation", source=source)
             s.add(sess)
             await s.flush()
-            session_id = str(sess.id)
-        user_msg = Message(org_id=org.id, session_id=uuid.UUID(session_id), role="user",
-                           content=body.message)
+            resolved_session_id = str(sess.id)
+        user_msg = Message(org_id=org.id, session_id=uuid.UUID(resolved_session_id), role="user",
+                           content=message)
         s.add(user_msg)
-        run = Run(org_id=org.id, session_id=uuid.UUID(session_id), status="running",
+        run = Run(org_id=org.id, session_id=uuid.UUID(resolved_session_id), status="running",
                   mode=settings.default_execution_mode,
-                  initiated_by=owner_id, env=body.context.env)  # A5: governance facts
+                  initiated_by=owner_id, env=context.env,  # A5: governance facts
+                  source=source)                           # GW-1: channel provenance
         s.add(run)
         await s.flush()
         run_id = str(run.id)
         user_msg_id = str(user_msg.id)
     # M2: embed the user message for semantic recall (best-effort, background).
     from ..agents import memory as _memory
-    asyncio.create_task(_memory.embed_message(user_msg_id, body.message, settings))
+    asyncio.create_task(_memory.embed_message(user_msg_id, message, settings))
 
-    bind_correlation(run_id=run_id, session_id=session_id)
-    channel = create_channel(run_id)
-    user_ctx = {**user.model_dump(), "env": body.context.env, "cloud": body.context.cloud,
-                "region": body.context.region}
+    bind_correlation(run_id=run_id, session_id=resolved_session_id)
+    user_ctx = {**user.model_dump(), "env": context.env, "cloud": context.cloud,
+                "region": context.region, "source": source}
     initial = {
-        "message": body.message, "org_id": org_id, "user": user_ctx,
-        "session_id": session_id, "run_id": run_id, "context_id": run_id, "trace_id": run_id,
-        "messages": [HumanMessage(content=body.message)],
+        "message": message, "org_id": org_id, "user": user_ctx,
+        "session_id": resolved_session_id, "run_id": run_id, "context_id": run_id,
+        "trace_id": run_id, "messages": [HumanMessage(content=message)],
     }
+    return PreparedRun(run_id=run_id, session_id=resolved_session_id, org_id=org_id,
+                       resolved_model=resolved_model, env=context.env, source=source,
+                       initiator_user_id=user.user_id, initial=initial)
 
-    async def _drive():
+
+def build_drive(prepared: PreparedRun, channel: RunChannel) -> Callable[[], Awaitable[None]]:
+    """The run drive, identical for every caller. Hand the result to `get_supervisor().run`."""
+
+    run_id, session_id, org_id = prepared.run_id, prepared.session_id, prepared.org_id
+
+    async def _drive() -> None:
         from ..agents.events import Emitter
-        set_run_model(resolved_model)  # U3: bind the chosen model for this run's async context
+        set_run_model(prepared.resolved_model)  # U3: bind the model for this run's async context
         emitter = Emitter(channel)
         try:
             # Lead with the run identity so the client binds its live artifact panel to THIS
@@ -287,7 +335,7 @@ async def chat(body: ChatRequest, request: Request, user: User = Depends(require
             # step/token. This is what lets the timeline update live and lets the persisted
             # message link to its run from the moment it starts.
             await emitter.run({"runId": run_id, "sessionId": session_id})
-            res = await run_graph(run_id, channel, initial=initial)
+            res = await run_graph(run_id, channel, initial=prepared.initial)
             state = res["state"]
             error = res.get("error")
             # A graph failure must be persisted as FAILED with a real message — never as an
@@ -304,7 +352,7 @@ async def chat(body: ChatRequest, request: Request, user: User = Depends(require
                          "outcome": state.get("outcome") or {"status": "failed", "error": error}}
             msg_id = await _persist_result(run_id, session_id, org_id, state, status_)
             AGENT_RUNS.labels(domain=state.get("domain", "general"), workflow=state.get("workflow", "-"),
-                              status=status_, env=body.context.env or "na").inc()
+                              status=status_, env=prepared.env or "na").inc()
             if not res["interrupted"]:
                 await emitter.done({
                     "messageId": msg_id, "runId": run_id, "traceId": run_id,
@@ -329,7 +377,20 @@ async def chat(body: ChatRequest, request: Request, user: User = Depends(require
         finally:
             await channel.close()
 
-    get_supervisor().run(run_id, _drive)  # B2: tracked task + heartbeat (was fire-and-forget)
+    return _drive
+
+
+@router.post("/chat")
+async def chat(body: ChatRequest, request: Request, user: User = Depends(require_initiator),
+               settings: Settings = Depends(get_settings)):
+    # S3: read-only roles (auditor/read-only) cannot initiate a run — they can still view
+    # (GET endpoints stay on get_current_user). require_initiator → 403 with a clear message.
+    prepared = await prepare_run(user=user, message=body.message, context=body.context,
+                                 session_id=body.sessionId, model=body.model,
+                                 settings=settings, source="web")
+    channel = create_channel(prepared.run_id)
+    # B2: tracked task + heartbeat (was fire-and-forget)
+    get_supervisor().run(prepared.run_id, build_drive(prepared, channel))
     return EventSourceResponse(_sse(channel))
 
 
@@ -345,11 +406,21 @@ def _record_approval_wait(domain: str | None, decision: str, started_at) -> None
     APPROVAL_WAIT.labels(domain=domain or "unknown", decision=decision).observe(max(wait, 0.0))
 
 
-@router.post("/approvals/{run_id}")
-async def resolve_approval(run_id: str, body: ApprovalRequest,
-                           user: User = Depends(require_approver), settings: Settings = Depends(get_settings)):
-    if body.decision not in {"approved", "rejected"}:
+async def resolve_approval_core(run_id: str, *, decision: str, rationale: str | None,
+                                user: User, settings: Settings) -> tuple[Any, Any]:
+    """Record + drive an approval decision. Returns (channel, continuation_cursor).
+
+    Every refusal is an HTTPException raised from here, so the HTTP route and a messaging
+    gateway refuse identically: unknown decision (400), cross-org run (404), four-eyes
+    violation (403), not-awaiting-approval (409), concurrent decision in flight (409). RBAC
+    (`can_approve`) is the caller's guard — the HTTP route via `require_approver`, a gateway by
+    re-checking the bound user at click time.
+    """
+    if decision not in {"approved", "rejected"}:
         raise HTTPException(400, "decision must be 'approved' or 'rejected'")
+    if not user.can_approve:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Approval requires Cloud Architect, Org Admin, or Platform Admin.")
     async with session_scope() as s:
         try:
             run = await s.get(Run, uuid.UUID(run_id))
@@ -374,7 +445,7 @@ async def resolve_approval(run_id: str, body: ApprovalRequest,
             step = (await s.execute(
                 select(RunStep).where(RunStep.run_id == run.id, RunStep.name == "approval")
             )).scalar_one_or_none()
-            _record_approval_wait(run.domain, body.decision, step.started_at if step else None)
+            _record_approval_wait(run.domain, decision, step.started_at if step else None)
         except Exception as exc:  # noqa: BLE001 — metrics never block an approval
             log.warning("approval.wait_metric_failed", run_id=run_id, error=str(exc))
 
@@ -397,8 +468,8 @@ async def resolve_approval(run_id: str, body: ApprovalRequest,
     # multi-worker posture). The cursor is captured BEFORE the drive starts, so no
     # continuation frame can be missed. Memory-mode channels are fresh (cursor 0).
     continuation_cursor = await channel.current_cursor()
-    resume_value = {"decision": body.decision, "user": user.username,
-                    "role": user.display_roles[0] if user.display_roles else "", "rationale": body.rationale,
+    resume_value = {"decision": decision, "user": user.username,
+                    "role": user.display_roles[0] if user.display_roles else "", "rationale": rationale,
                     "can_execute": user.can_execute,  # S5: carry the approver's execute capability
                     "email": user.email}              # P17: notify the APPROVER, never the sender
 
@@ -419,7 +490,7 @@ async def resolve_approval(run_id: str, body: ApprovalRequest,
                 "messageId": msg_id, "runId": run_id, "traceId": run_id,
                 "contextId": state.get("context_id", run_id), "snowId": state.get("snow_id"),
                 "outcome": state.get("outcome") or ({"status": "failed", "error": error} if error
-                                                    else {"status": body.decision}),
+                                                    else {"status": decision}),
             })
         except Exception as exc:  # noqa: BLE001 — B5: a failed continuation must still terminate
             log.error("chat.approval_drive_failed", run_id=run_id, error=str(exc))
@@ -433,7 +504,16 @@ async def resolve_approval(run_id: str, body: ApprovalRequest,
             await channel.close()
 
     get_supervisor().run(run_id, _drive)  # B2: tracked task + heartbeat (was fire-and-forget)
-    return EventSourceResponse(_sse(channel, replay_after=continuation_cursor))
+    return channel, continuation_cursor
+
+
+@router.post("/approvals/{run_id}")
+async def resolve_approval(run_id: str, body: ApprovalRequest,
+                           user: User = Depends(require_approver),
+                           settings: Settings = Depends(get_settings)):
+    channel, cursor = await resolve_approval_core(
+        run_id, decision=body.decision, rationale=body.rationale, user=user, settings=settings)
+    return EventSourceResponse(_sse(channel, replay_after=cursor))
 
 
 @router.get("/chat/stream/{run_id}")

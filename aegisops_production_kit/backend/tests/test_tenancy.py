@@ -355,10 +355,22 @@ class TestTwoOrgIsolation:
         assert c.get("/runs/not-a-uuid/timeline").status_code == 404
         assert c.get("/sessions/not-a-uuid/messages").status_code == 404
 
-    def test_four_eyes_blocks_prod_self_approval(self, two_orgs, as_member, client):
+    def test_four_eyes_blocks_prod_self_approval(self, two_orgs, as_member, client, monkeypatch):
         """A5: the initiator of a Production run cannot approve it; a different approver
         passes the 4-eyes gate; non-Production runs are exempt. (Runs are created in a
-        non-awaiting status so the gate is exercised without driving the graph.)"""
+        non-awaiting status so the gate is exercised without driving the graph.)
+
+        The flag is PINNED on for the duration of this test. Without pinning, the assertion
+        depends on the operator's `.env`: an install with AEGISOPS_FOUR_EYES_FOR_PRODUCTION=false
+        makes this test fail (409 past the gate instead of 403 at it) even though the code is
+        correct — and, worse, silently stops covering A5 at all wherever the flag is off. The
+        gate's behaviour is what we assert here; whether a given deployment enables it is a
+        deployment decision, tested by the settings default.
+        """
+        from app.settings import get_settings
+
+        monkeypatch.setattr(get_settings(), "aegisops_four_eyes_for_production", True)
+
         async def _mk(env: str):
             from app.db.models import Run
             from app.db.session import session_scope

@@ -25,7 +25,17 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from . import __version__
 from .agents.checkpointer import close_checkpointer, init_checkpointer
 from .agents.graph import init_graph
-from .api import artifacts, auth, chat, health, integrations, knowledge, modules, sessions
+from .api import (
+    artifacts,
+    auth,
+    chat,
+    gateways,
+    health,
+    integrations,
+    knowledge,
+    modules,
+    sessions,
+)
 from .cache import redis as redis_client
 from .db import session as db
 from .graph_db import neo4j as neo4j_client
@@ -80,6 +90,15 @@ async def lifespan(app: FastAPI):
             log.error("startup.reconciler_failed", error=str(exc))
     else:
         log.info("reconciler.disabled")
+    # GW-1: messaging gateways. Long-polling, so no public URL and no inbound port. Gated by
+    # AEGISOPS_TELEGRAM (default off) and never able to break startup — `start_in_background`
+    # catches everything and returns False rather than raising (waku's contract).
+    try:
+        from .gateways.telegram.poller import start_in_background as start_telegram
+        if await start_telegram(settings):
+            log.info("startup.telegram_gateway", detail="listening (long-poll)")
+    except Exception as exc:  # noqa: BLE001 — a gateway must never take the API down
+        log.error("startup.telegram_failed", error=str(exc))
     log.info("app.startup", version=__version__, env=settings.app_env)
     try:
         yield
@@ -88,6 +107,13 @@ async def lifespan(app: FastAPI):
         # persist failed) while the datastores are still open, then close everything.
         from .agents.reconciler import get_reconciler
         from .agents.supervisor import get_supervisor
+        try:
+            # GW-1: stop accepting new channel turns before draining runs, so a message
+            # arriving mid-shutdown doesn't start a run we are about to cancel.
+            from .gateways.telegram.poller import stop_background as stop_telegram
+            await stop_telegram()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("shutdown.telegram_stop_failed", error=str(exc))
         try:
             await get_reconciler().stop()
             await get_supervisor().drain()
@@ -167,6 +193,7 @@ def create_app() -> FastAPI:
     app.include_router(artifacts.router)
     app.include_router(modules.router)
     app.include_router(knowledge.router)
+    app.include_router(gateways.router)
 
     @app.get("/metrics", include_in_schema=False)
     async def metrics() -> Response:

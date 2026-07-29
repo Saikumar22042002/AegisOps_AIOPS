@@ -76,6 +76,9 @@ class Session(Base):
     user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     title: Mapped[str] = mapped_column(String(300), default="New conversation")
     status: Mapped[str] = mapped_column(String(20), default="active")  # active | closed
+    # GW-1: which gateway opened this conversation (web | telegram | …). Sessions are
+    # per-channel, so channel provenance is a session-level fact.
+    source: Mapped[str] = mapped_column(String(20), default="web")
     snow_id: Mapped[str | None] = mapped_column(String(60), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -127,6 +130,9 @@ class Run(Base):
     # gates the credential reveal on initiator-or-approver.
     initiated_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     env: Mapped[str | None] = mapped_column(String(20), nullable=True)  # Production | Staging | …
+    # GW-1: which gateway initiated this run (web | telegram | …) — a governance fact, so an
+    # audit can answer "was this Production change started from a phone?".
+    source: Mapped[str] = mapped_column(String(20), default="web")
     intent: Mapped[str | None] = mapped_column(String(80), nullable=True)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     routing_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -274,6 +280,59 @@ class UserMemory(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class ChannelIdentity(Base):
+    """GW-1: a messaging-channel account BOUND to a platform user (org-scoped).
+
+    Identity is the binding, never a chat-id allowlist. An unbound sender has no identity on
+    this platform and receives only the how-to-link reply — it cannot start a run, read
+    anything, or approve anything. Once bound, RBAC, tenancy and four-eyes follow the bound
+    user everywhere, exactly as they do on the web.
+
+    `active_session_id` gives the channel "one chat = one session per user"; `/new` clears it.
+    """
+
+    __tablename__ = "channel_identities"
+    __table_args__ = (
+        # One channel account may map to at most one platform user…
+        UniqueConstraint("channel", "channel_user_id", name="uq_channel_identity_account"),
+        # …and one platform user holds at most one account per channel.
+        UniqueConstraint("channel", "user_id", name="uq_channel_identity_user"),
+    )
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    channel: Mapped[str] = mapped_column(String(24), nullable=False)          # "telegram"
+    channel_user_id: Mapped[str] = mapped_column(String(64), nullable=False)  # numeric id, as text
+    channel_chat_id: Mapped[str] = mapped_column(String(64), nullable=False)  # where replies go
+    channel_username: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    active_session_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True)
+    linked_by: Mapped[str | None] = mapped_column(String(160), nullable=True)  # web user who linked
+    linked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ChannelLinkCode(Base):
+    """GW-1: a one-time, short-lived code that binds a channel account to its issuer.
+
+    The code is a bearer secret the user types into a third-party chat app, so only its
+    SHA-256 hash is stored — reading this table cannot harvest a live code. Single-use
+    (`used_at`) and expiring (`expires_at`); both are enforced in `gateways.identity`.
+    """
+
+    __tablename__ = "channel_link_codes"
+    __table_args__ = (UniqueConstraint("code_hash", name="uq_channel_link_code_hash"),)
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    channel: Mapped[str] = mapped_column(String(24), nullable=False)
+    code_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    used_by_channel_user_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class ModuleProposal(Base):

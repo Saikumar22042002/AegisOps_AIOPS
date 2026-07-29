@@ -167,12 +167,25 @@ async def _admin(s, oid, user, settings):
 
 
 async def _settings(s, oid, user, settings):
+    # GW-1: the real Telegram binding for THIS user, so the Preferences list is honest about
+    # whether a channel is connected (the control itself is the Connected accounts panel).
+    tg_linked = False
+    if user.user_id:
+        from ..db.models import ChannelIdentity
+        tg_linked = (await s.execute(select(ChannelIdentity).where(
+            ChannelIdentity.channel == "telegram", ChannelIdentity.org_id == oid,
+            ChannelIdentity.user_id == uuid.UUID(user.user_id)))).scalar_one_or_none() is not None
+    tg_enabled = settings.aegisops_telegram == "on" and bool(settings.telegram_bot_token)
     stats = [_stat("Role", user.display_roles[0] if user.display_roles else "—", "RBAC"),
              _stat("Approval mode", "Required", "for production", "var(--amber)"),
              _stat("Can approve", "Yes" if user.can_approve else "No", "side-effecting", "var(--green)" if user.can_approve else "var(--text-3)"),
              _stat("Email", user.email or "—", "")]
     rows = [_row("var(--green)", "Notification rules", "in-app + email (when SMTP configured)", "configured"),
             _row("var(--cyan)", "Connected account", user.username, "Keycloak"),
+            _row("var(--green)" if tg_linked else "var(--text-4)", "Telegram",
+                 "message AegisOps from your phone · your roles and approval rules follow the link"
+                 if tg_enabled else "not enabled on this deployment",
+                 "linked" if tg_linked else ("not linked" if tg_enabled else "disabled")),
             _row("var(--accent-3)", "Default agent mode", "Approval required in production", "enabled")]
     return stats, rows
 

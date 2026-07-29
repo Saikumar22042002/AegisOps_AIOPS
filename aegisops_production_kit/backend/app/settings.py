@@ -160,6 +160,23 @@ class Settings(BaseSettings):
     servicenow_user: str = ""
     servicenow_password: str = ""
 
+    # ── GW-1: messaging gateways (channel-agnostic seam; Telegram is the first adapter) ──
+    # OFF by default: no poller starts, no route answers, until an operator turns it on.
+    aegisops_telegram: Literal["on", "off"] = "off"
+    telegram_bot_token: str = ""
+    telegram_api_base: str = "https://api.telegram.org"
+    # Long-poll wait (seconds) handed to getUpdates. No public URL, no webhook — the API
+    # calls Telegram, exactly like waku's gateway.
+    telegram_poll_timeout_s: int = 25
+    # One-time link code lifetime. Short: it is a bearer secret typed into a third-party chat.
+    gateway_link_code_ttl_seconds: int = 600
+    # Progressive-streaming throttle for edit-based streaming (Telegram rate-limits edits).
+    gateway_edit_min_interval_ms: int = 1000
+    gateway_edit_min_chars: int = 50
+    # Browser-facing web origin used for deep links sent to a chat channel ("open in AegisOps").
+    # "" ⇒ the first CORS origin, which is the browser origin in every posture we ship.
+    web_public_url: str = ""
+
     # ── Email / notifications ──
     smtp_host: str = ""
     smtp_port: int = 587
@@ -227,6 +244,16 @@ class Settings(BaseSettings):
     @property
     def keycloak_jwks_url(self) -> str:
         return f"{self.keycloak_realm_url}/protocol/openid-connect/certs"
+
+    @property
+    def web_base_url(self) -> str:
+        """The origin a deep link sent to a chat channel must use. Same reasoning as
+        `keycloak_browser_url` / `langfuse_public_url`: an in-network service name is
+        unreachable from the user's phone."""
+        if self.web_public_url:
+            return self.web_public_url.rstrip("/")
+        origins = self.cors_origin_list
+        return origins[0].rstrip("/") if origins else "http://localhost:3000"
 
 
 @lru_cache

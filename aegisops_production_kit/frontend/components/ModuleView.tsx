@@ -83,6 +83,135 @@ type ProposalRow = {
   created_by?: string | null; reviewed_by?: string | null; created: string;
 };
 
+type TelegramStatus = {
+  channel: string; linked: boolean; enabled: boolean;
+  account?: string | null; linked_at?: string | null; linked_by?: string | null;
+  code_pending: boolean; code_expires_at?: string | null; bot_username?: string | null;
+};
+
+function countdown(iso?: string | null): string {
+  if (!iso) return "";
+  const left = Math.floor((new Date(iso).getTime() - Date.now()) / 1000);
+  if (left <= 0) return "expired";
+  return `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
+}
+
+// GW-1: per-user identity — bind a Telegram account to THIS Keycloak user. The code is a
+// one-time bearer secret shown exactly once (the API never re-serves it), so the countdown and
+// the plaintext live only in this component's state.
+function ConnectedAccounts() {
+  const [st, setSt] = useState<TelegramStatus | null>(null);
+  const [code, setCode] = useState<string>("");
+  const [expiresAt, setExpiresAt] = useState<string | null>(null);
+  const [left, setLeft] = useState<string>("");
+  const [err, setErr] = useState<string>("");
+  const [busy, setBusy] = useState(false);
+
+  const load = () =>
+    api.get<TelegramStatus>("/gateways/telegram").then(setSt).catch(() => setSt(null));
+  useEffect(() => { load(); }, []);
+
+  // One ticking countdown for whichever expiry is live (a freshly issued code, or a pending
+  // one the API reports after a page refresh).
+  const expiry = expiresAt ?? st?.code_expires_at ?? null;
+  useEffect(() => {
+    if (!expiry) { setLeft(""); return; }
+    const tick = () => {
+      const v = countdown(expiry);
+      setLeft(v);
+      if (v === "expired") { setCode(""); setExpiresAt(null); load(); }
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [expiry]);
+
+  const generate = async () => {
+    setErr(""); setBusy(true);
+    try {
+      const d = await api.post<{ code: string; expires_at: string }>("/gateways/telegram/code");
+      setCode(d.code); setExpiresAt(d.expires_at);
+      load();
+    } catch (e: any) { setErr(String(e?.message ?? e)); }
+    finally { setBusy(false); }
+  };
+
+  const unlink = async () => {
+    setErr(""); setBusy(true);
+    try { await api.del("/gateways/telegram"); setCode(""); setExpiresAt(null); load(); }
+    catch (e: any) { setErr(String(e?.message ?? e)); }
+    finally { setBusy(false); }
+  };
+
+  const dot = st?.linked ? "var(--green)" : st?.enabled ? "var(--amber)" : "var(--text-4)";
+  const label = st?.linked ? "linked" : st?.enabled ? "not linked" : "disabled";
+
+  return (
+    <div style={{ marginTop: 26 }} data-testid="connected-accounts">
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+        <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text)" }}>Connected accounts</span>
+        <span style={{ fontSize: 11, color: "var(--text-4)" }}>
+          your identity on other channels · your roles, org and approval rules follow the link
+        </span>
+      </div>
+      {err && <div style={{ fontSize: 12, color: "var(--red-2)", marginBottom: 10 }}>{err}</div>}
+      <div style={{ border: "1px solid var(--border)", borderRadius: 14, background: "var(--surface)", padding: "16px 18px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{ width: 34, height: 34, borderRadius: 9, background: "var(--surface-2)", border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, flexShrink: 0 }}>✈</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, color: "var(--text)", fontWeight: 500 }}>
+              Telegram{st?.bot_username ? ` · @${st.bot_username}` : ""}
+            </div>
+            <div style={{ fontSize: 11, color: "var(--text-4)" }}>
+              {st?.linked
+                ? `${st.account ?? "account"} · linked ${st.linked_at ? new Date(st.linked_at).toLocaleString() : ""}`
+                : st?.enabled
+                  ? "Message AegisOps from your phone. Unlinked senders get no access."
+                  : "Not enabled on this deployment (AEGISOPS_TELEGRAM=off)."}
+            </div>
+          </div>
+          <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, color: dot }}>
+            <span style={{ width: 6, height: 6, borderRadius: 99, background: dot }} />{label}
+          </span>
+          {st?.linked ? (
+            <button onClick={unlink} disabled={busy} className="ao-h-b3" data-testid="telegram-unlink"
+              style={{ padding: "6px 13px", borderRadius: 8, border: "1px solid rgba(248,113,113,.35)", background: "rgba(248,113,113,.08)", color: "var(--red-2)", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+              Unlink
+            </button>
+          ) : (
+            <button onClick={generate} disabled={busy || !st?.enabled} className="ao-h-b3" data-testid="telegram-generate"
+              style={{ padding: "6px 13px", borderRadius: 8, border: "1px solid rgba(129,140,248,.3)", background: "rgba(99,102,241,.1)", color: "var(--accent-fg)", fontSize: 12, fontWeight: 600, cursor: st?.enabled ? "pointer" : "not-allowed", opacity: st?.enabled ? 1 : 0.5 }}>
+              Generate code
+            </button>
+          )}
+        </div>
+
+        {code && (
+          <div data-testid="telegram-code" style={{ marginTop: 14, padding: "13px 15px", borderRadius: 10, border: "1px dashed var(--border-2)", background: "var(--surface-2)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 19, letterSpacing: ".14em", color: "var(--accent-3)", fontWeight: 600 }}>{code}</span>
+              <span style={{ fontSize: 11.5, color: left === "expired" ? "var(--red-2)" : "var(--amber)" }}>
+                expires in {left}
+              </span>
+            </div>
+            <div style={{ fontSize: 12, color: "var(--text-3)", marginTop: 9, lineHeight: 1.6 }}>
+              Send <code style={{ fontFamily: "'IBM Plex Mono',monospace", color: "var(--text-2)" }}>/link {code}</code> to the AegisOps bot
+              {st?.bot_username ? <> (<span style={{ color: "var(--text-2)" }}>@{st.bot_username}</span>)</> : null}.
+              Single-use. Shown once — generate a new one if you lose it.
+            </div>
+          </div>
+        )}
+
+        {!code && st?.code_pending && (
+          <div style={{ marginTop: 12, fontSize: 11.5, color: "var(--text-4)" }}>
+            A code is already live (expires in {left}) but is shown only once — generate a new one to replace it.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function ModuleView() {
   const activeNav = useUI((s) => s.activeNav);
   const navTo = useUI((s) => s.navTo);
@@ -119,6 +248,7 @@ export function ModuleView() {
   };
 
   const isAdmin = activeNav === "admin";
+  const isSettings = activeNav === "settings";
 
   return (
     <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
@@ -227,6 +357,9 @@ export function ModuleView() {
                 <MemoryPanel />
               </div>
             )}
+
+            {/* GW-1: the Link Telegram control lives here — Settings → Connected accounts. */}
+            {isSettings && <ConnectedAccounts />}
           </>
         )}
       </div>
