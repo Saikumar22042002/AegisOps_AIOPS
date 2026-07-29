@@ -170,9 +170,10 @@ async def test_approved_press_drives_the_shared_path_and_disables_the_card(monke
                     can_approve=user.can_approve, user_id=user.user_id)
         return ("CHANNEL", "1691234-0")     # (channel, continuation cursor)
 
-    async def _consume(run_id, channel, *, replay_after=0):
+    async def _consume(run_id, channel, *, replay_after=0, stream=None):
         seen["replay_after"] = replay_after
         seen["channel"] = channel
+        seen["streamed"] = stream is not None
         return driver.RunOutcome(run_id=run_id, answer="✅ Applied: 3 resources created.",
                                  confidentiality="Low")
 
@@ -188,11 +189,15 @@ async def test_approved_press_drives_the_shared_path_and_disables_the_card(monke
     assert "telegram" in seen["rationale"] and "sai" in seen["rationale"]
     # STAB P0-3: the continuation is tailed from the cursor, never from zero.
     assert seen["replay_after"] == "1691234-0"
-    # The card is rewritten without buttons, so it cannot be double-pressed from the chat.
-    assert t.edits and t.edits[-1].buttons is None
-    assert "Approved" in t.edits[-1].text and "sai" in t.edits[-1].text
-    # The continuation's result comes back to the chat.
-    assert "Applied" in t.last_text
+    # …and it streams through the same preview-edit path a chat turn uses.
+    assert seen["streamed"] is True
+    # The CARD (message 999) is rewritten without buttons, so the decision cannot be
+    # double-pressed from the chat.
+    card_edits = t.edits_to("999")
+    assert card_edits and card_edits[-1].buttons is None
+    assert "Approved" in card_edits[-1].text and "sai" in card_edits[-1].text
+    # The continuation's result comes back to the chat, in the streaming preview.
+    assert "Applied" in t.delivered
 
 
 async def test_rejected_press_reports_nothing_changed(monkeypatch):
@@ -202,13 +207,13 @@ async def test_rejected_press_reports_nothing_changed(monkeypatch):
     monkeypatch.setattr(identity, "resolve", _returns(_bound(["org-admin"])))
     monkeypatch.setattr("app.api.chat.resolve_approval_core", _core, raising=False)
     monkeypatch.setattr(driver, "_consume",
-                        lambda run_id, channel, replay_after=0: _returns(
+                        lambda run_id, channel, replay_after=0, stream=None: _returns(
                             driver.RunOutcome(run_id=run_id, answer=""))())
 
     t = FakeTransport()
     await driver.handle_callback(_cb("apv:run-5:rejected"), t, _settings())
     assert "Rejected" in t.callbacks[-1][1]
-    assert "nothing was changed" in t.last_text.lower()
+    assert "nothing was changed" in t.delivered.lower()
 
 
 async def test_an_uneditable_card_does_not_lose_the_decision(monkeypatch):
@@ -220,12 +225,14 @@ async def test_an_uneditable_card_does_not_lose_the_decision(monkeypatch):
     monkeypatch.setattr(identity, "resolve", _returns(_bound(["org-admin"])))
     monkeypatch.setattr("app.api.chat.resolve_approval_core", _core, raising=False)
     monkeypatch.setattr(driver, "_consume",
-                        lambda run_id, channel, replay_after=0: _returns(
+                        lambda run_id, channel, replay_after=0, stream=None: _returns(
                             driver.RunOutcome(run_id=run_id, answer="Applied."))())
 
+    # Every edit fails: the card cannot be disabled AND the preview cannot be rewritten, so the
+    # answer must arrive as a plain message. The decision itself already stands server-side.
     t = FakeTransport(fail_edit_from=1)
     await driver.handle_callback(_cb(), t, _settings())
-    assert "Applied." in t.last_text
+    assert any("Applied." in m.text for m in t.sent)
 
 
 async def test_malformed_token_is_answered_not_crashed():

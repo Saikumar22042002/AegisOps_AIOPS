@@ -165,7 +165,7 @@ async def test_turn_uses_shared_driver_and_tags_source(monkeypatch):
         def run(self, run_id, drive):
             seen["supervisor_run"] = run_id
 
-    async def _consume(run_id, channel):
+    async def _consume(run_id, channel, *, replay_after=0, stream=None):
         return driver.RunOutcome(run_id=run_id, session_id=_Prepared.session_id,
                                  answer="Bucket planned.", confidentiality="Low")
 
@@ -188,7 +188,9 @@ async def test_turn_uses_shared_driver_and_tags_source(monkeypatch):
     assert seen["model"] is None                   # a chat turn never overrides the model
     assert seen["context"].cloud is None           # U4: never silently default the cloud
     assert seen["supervisor_run"] == _Prepared.run_id
-    assert "Bucket planned." in t.last_text
+    # The answer lands as the final edit of the streaming preview, not as a second message.
+    assert "Bucket planned." in t.delivered
+    assert len(t.sent) == 1
 
 
 async def test_new_command_clears_the_conversation(monkeypatch):

@@ -26,7 +26,8 @@ from fastapi import HTTPException
 
 from ..settings import Settings
 from . import identity, notify, render
-from .transport import Transport, TransportError
+from .stream import PreviewStream
+from .transport import Button, Transport, TransportError
 
 log = structlog.get_logger(__name__)
 
@@ -216,12 +217,18 @@ async def _run_turn(inbound: Inbound, transport: Transport, settings: Settings,
 
     channel = create_channel(prepared.run_id)
     get_supervisor().run(prepared.run_id, build_drive(prepared, channel))
-    result = await _consume(prepared.run_id, channel)
-    await _deliver(inbound, transport, settings, result)
+    # Stream the answer AS it is generated: one preview message, rewritten under a throttle,
+    # with step/tool progress folded in above the text (see gateways/stream.py).
+    stream = PreviewStream(transport, inbound.chat_id, settings)
+    await stream.start()
+    result = await _consume(prepared.run_id, channel, stream=stream)
+    await _deliver(inbound, transport, settings, result, stream=stream)
 
 
-async def _consume(run_id: str, channel, *, replay_after=0) -> RunOutcome:
-    """Drain the run's event frames — the same ones the browser receives — into a RunOutcome.
+async def _consume(run_id: str, channel, *, replay_after=0,
+                   stream: PreviewStream | None = None) -> RunOutcome:
+    """Drain the run's event frames — the same ones the browser receives — into a RunOutcome,
+    pushing progress and tokens into `stream` AS they arrive.
 
     `replay_after` matters for an approval continuation: on the redis bus the run's stream still
     holds the ORIGINAL turn's frames, so a from-zero consumer would replay the plan and stop at
@@ -240,8 +247,13 @@ async def _consume(run_id: str, channel, *, replay_after=0) -> RunOutcome:
             label = data.get("label")
             if label:
                 out.steps.append(str(label))
+                if stream is not None:
+                    await stream.progress(str(label))
         elif event == "token":
-            tokens.append(data.get("text") or "")
+            text = data.get("text") or ""
+            tokens.append(text)
+            if stream is not None:
+                await stream.token(text)
         elif event == "params":
             out.params = data
         elif event == "confidentiality":
@@ -256,13 +268,15 @@ async def _consume(run_id: str, channel, *, replay_after=0) -> RunOutcome:
     return out
 
 
-async def _deliver(inbound: Inbound, transport: Transport, settings: Settings,
-                   result: RunOutcome) -> None:
-    """Render the finished turn as one channel-safe message."""
-    deep = render.web_run_link(settings, result.run_id) if result.run_id else None
+def final_body(result: RunOutcome, settings: Settings) -> tuple[str, list[Button] | None]:
+    """The finished turn's text + any inline buttons (pure, so it is directly testable)."""
     body = result.answer.strip()
     if not body and result.error:
         body = f"⚠️ {result.error}"
+    if not body and result.steps:
+        # A run that only emitted progress (a plan that ended at the gate, an apply with no
+        # narration) still says what it did rather than "no answer".
+        body = "· " + "\n· ".join(result.steps[-3:])
     if not body:
         body = "(the run produced no answer — open it in AegisOps for the full timeline)"
     buttons = None
@@ -272,6 +286,17 @@ async def _deliver(inbound: Inbound, transport: Transport, settings: Settings,
         # and the CALLBACK decides, because capability must be re-checked at click time, not at
         # render time (roles change, and a card can sit in a chat for days).
         buttons = notify.approval_buttons(result.run_id) if result.run_id else None
+    return body, buttons
+
+
+async def _deliver(inbound: Inbound, transport: Transport, settings: Settings,
+                   result: RunOutcome, *, stream: PreviewStream | None = None) -> None:
+    """Land the finished turn: the final edit in place, or one plain message without a preview."""
+    deep = render.web_run_link(settings, result.run_id) if result.run_id else None
+    body, buttons = final_body(result, settings)
+    if stream is not None:
+        await stream.finish(body, level=result.confidentiality, deep_link=deep, buttons=buttons)
+        return
     text = render.outbound(body, limit=transport.max_text_len,
                            level=result.confidentiality, deep_link=deep)
     await transport.send(inbound.chat_id, text, buttons=buttons)
@@ -363,11 +388,14 @@ async def _handle_callback(cb: Callback, transport: Transport, settings: Setting
             pass  # the card may be too old to edit — the decision already stands
 
     # The continuation (apply/destroy, or the halt on reject) streams back through the SAME
-    # delivery path a chat turn uses.
+    # preview-edit path a chat turn uses — so "terraform apply running" appears live rather
+    # than after a minute of silence.
     inbound = Inbound(channel=cb.channel, channel_user_id=cb.channel_user_id,
                       chat_id=cb.chat_id, text="", username=cb.username)
-    result = await _consume(run_id, channel, replay_after=cursor)
-    if not result.answer.strip() and not result.error:
+    stream = PreviewStream(transport, cb.chat_id, settings)
+    await stream.start()
+    result = await _consume(run_id, channel, replay_after=cursor, stream=stream)
+    if not result.answer.strip() and not result.error and not result.steps:
         result.answer = ("Applied." if decision == "approved"
                          else "Rejected — nothing was changed.")
-    await _deliver(inbound, transport, settings, result)
+    await _deliver(inbound, transport, settings, result, stream=stream)

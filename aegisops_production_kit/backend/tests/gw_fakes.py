@@ -63,6 +63,10 @@ class FakeTransport:
 
     _next_id: int = 1
     _clock: float = 0.0
+    #: Every edit ATTEMPT, including the ones that raised. The knobs above are keyed off this,
+    #: not off len(self.edits) — a raising condition must fire on its nominated attempt and then
+    #: let the next one through, otherwise "429 on edit 1" would 429 forever.
+    edit_attempts: int = 0
 
     # A monotonic clock the streaming layer can be pointed at, so throttling is asserted
     # deterministically instead of with real sleeps.
@@ -81,7 +85,8 @@ class FakeTransport:
 
     async def edit(self, chat_id: str, message_id: str, text: str, *,
                    buttons: list[Button] | None = None) -> None:
-        n = len(self.edits) + 1
+        self.edit_attempts += 1
+        n = self.edit_attempts
         if self.not_modified_at and n == self.not_modified_at:
             raise EditNotModified("message is not modified")
         if self.rate_limit_edit_at and n == self.rate_limit_edit_at:
@@ -117,6 +122,20 @@ class FakeTransport:
     @property
     def all_text(self) -> str:
         return "\n".join(m.text for m in self.sent)
+
+    @property
+    def delivered(self) -> str:
+        """What the user finally sees.
+
+        With the streaming ladder the answer normally lands as the FINAL EDIT of the preview
+        message, not as a new send — so a test that asserts on content must look here, not at
+        `last_text`, which would still be the "⏳ Working…" placeholder.
+        """
+        return self.edits[-1].text if self.edits else self.last_text
+
+    def edits_to(self, message_id: str) -> list[EditCall]:
+        """Every edit made to one specific message (e.g. an approval card vs. the preview)."""
+        return [e for e in self.edits if e.message_id == str(message_id)]
 
 
 def bot_api(routes: dict[str, Any]) -> httpx.MockTransport:
