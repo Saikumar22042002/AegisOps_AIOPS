@@ -55,6 +55,24 @@ def _enabled(settings: Settings) -> bool:
     return _posture(settings)[0]
 
 
+#: The operator-facing sentence for each blocker. Single-sourced: this message is emitted from
+#: more than one place (the code route's 400, and — via `reason` — the Settings panel), and the
+#: first two versions of it drifted into blaming the flag for a missing token.
+BLOCKED_MESSAGE: dict[str, str] = {
+    "flag_off": ("The Telegram gateway is not enabled on this deployment "
+                 "(set AEGISOPS_TELEGRAM=on and TELEGRAM_BOT_TOKEN)."),
+    "no_token": ("AEGISOPS_TELEGRAM is on but TELEGRAM_BOT_TOKEN is empty — paste the token from "
+                 "@BotFather into .env and restart the API. The token is never shown or stored "
+                 "in the UI."),
+}
+
+
+def blocked_message(settings: Settings) -> str | None:
+    """The accurate reason this gateway cannot be used, or None when it can."""
+    enabled, reason = _posture(settings)
+    return None if enabled else BLOCKED_MESSAGE[reason or "flag_off"]
+
+
 @router.get("/telegram")
 async def telegram_status(user: User = Depends(get_current_user),
                           settings: Settings = Depends(get_settings)) -> dict:
@@ -83,9 +101,9 @@ async def telegram_status(user: User = Depends(get_current_user),
 async def telegram_link_code(user: User = Depends(get_current_user),
                              settings: Settings = Depends(get_settings)) -> dict:
     """Issue a one-time link code for the CALLING user. Returned once, never re-servable."""
-    if not _enabled(settings):
-        raise HTTPException(400, "The Telegram gateway is not enabled on this deployment "
-                                 "(set AEGISOPS_TELEGRAM=on and TELEGRAM_BOT_TOKEN).")
+    blocked = blocked_message(settings)
+    if blocked:
+        raise HTTPException(400, blocked)
     if not user.user_id:
         raise HTTPException(403, "Your account is not resolved to a platform user yet — "
                                 "sign out and back in, then try again.")

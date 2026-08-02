@@ -36,6 +36,24 @@ def test_posture_names_the_real_blocker(flag, token, expected):
     assert _posture(_settings(aegisops_telegram=flag, telegram_bot_token=token)) == expected
 
 
+def test_the_blocked_message_names_the_right_file_for_each_cause():
+    """Third instance of one bug class, so it is pinned: the operator sentence must not blame
+    the flag when the token is what is missing. Both callers read it from BLOCKED_MESSAGE."""
+    from app.api.gateways import blocked_message
+
+    flag_off = blocked_message(_settings(aegisops_telegram="off"))
+    assert flag_off and "AEGISOPS_TELEGRAM=on" in flag_off
+
+    no_token = blocked_message(_settings(aegisops_telegram="on", telegram_bot_token=""))
+    assert no_token and "TELEGRAM_BOT_TOKEN is empty" in no_token
+    assert "@BotFather" in no_token and ".env" in no_token
+    assert "never shown or stored" in no_token
+    # It must NOT tell the operator to turn on a flag that is already on.
+    assert "set AEGISOPS_TELEGRAM=on" not in no_token
+
+    assert blocked_message(_settings(aegisops_telegram="on", telegram_bot_token=SECRET)) is None
+
+
 def test_a_missing_token_is_never_reported_as_flag_off():
     """The regression this test exists for: the panel used to say 'AEGISOPS_TELEGRAM=off' while
     the flag was ON and only the token was missing."""
