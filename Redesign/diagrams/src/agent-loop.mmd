@@ -8,7 +8,7 @@ flowchart TB
     CTX --> LLM["model call<br/>(purpose-routed, native tool calling)"]
     LLM --> Q{"response"}
     Q -- "tool calls" --> POL{"policy check<br/>per action"}
-    POL -- "approval required" --> PARK["durable approval interrupt<br/>(artifact · four-eyes if prod)"] --> RESUME["resume on decision<br/>(any worker, any day)"] --> BG
+    POL -- "approval required" --> PARK["durable approval interrupt<br/>(artifact · HITL review)"] --> RESUME["resume on decision<br/>(any worker, any day)"] --> BG
     POL -- "denied" --> OBSD["denial → observation"] --> BG
     POL -- "allowed" --> EXEC["execute via registry middleware<br/>tenancy · rbac · rate · timeout ·<br/>execute · redact · audit · observe"]
     EXEC --> OBS["result / error → observation<br/>(never an exception)"] --> STUCK{"stuck<br/>detector"}

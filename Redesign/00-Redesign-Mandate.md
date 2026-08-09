@@ -35,7 +35,7 @@ The goal is **not** unrestricted autonomy. The goal is **bounded operational int
 |---|---|
 | Permission boundaries | Policy engine, evaluated per action selection (never per prompt) |
 | Security boundaries | Tenancy, RBAC/ABAC, credential scoping, redaction — inherited from today's governed core |
-| Approval policies | Durable approval interrupts; four-eyes for production; deviation re-approval |
+| Approval policies | Durable approval interrupts; **human-in-the-loop by default** (the initiating human may review and approve their own plan; four-eyes/dual-control is an optional enterprise policy, not a core invariant); deviation re-approval |
 | Cost budgets | Token/dollar ledger with halt-at-safe-boundary semantics |
 | Iteration budgets | Hard per-run and per-loop iteration ceilings |
 | Tool limits | Per-run tool-call budgets; per-tool timeouts, retry policies |
@@ -146,8 +146,10 @@ The current system's governance core is its moat and survives every change in th
    day-2 verb registry.
 2. **Durable human-approval interrupt** — resumable cross-process, days later.
 3. **Plan guard re-asserted at the mutation choke-point** (create may not delete, etc.).
-4. **Strict tenancy, RBAC, four-eyes for production** — re-checked at routes, approval core,
-   mutation choke-point, and per gateway interaction.
+4. **Strict tenancy, RBAC, human-in-the-loop approval** — identity and authorization re-checked at
+   routes, approval core, mutation choke-point, and per gateway interaction. The initiating human
+   may approve their own plan (`initiator == approver` is valid); four-eyes/dual-control is an
+   optional org-level policy flag, never a default requirement.
 5. **Per-step idempotency; cancel at boundaries, never mid-apply; honest partial reporting.**
 6. **Redaction on every egress; trace_id == run_id; immutable approval and audit records.**
 

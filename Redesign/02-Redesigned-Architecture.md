@@ -81,7 +81,7 @@ flowchart TB
     subgraph CP["CONTROL PLANE (stateless FastAPI)"]
         ADM["prepare_run admission<br/>OIDC · strict tenancy · RBAC · limits<br/>RoutePlan pinned · budget reserved"]
         TRM["Task / Run Manager<br/>create · track · resume · cancel ·<br/>steer · schedule · history"]
-        APRC["Approval core<br/>click-time re-check · four-eyes"]
+        APRC["Approval core<br/>click-time re-check · HITL<br/>(optional four-eyes policy)"]
     end
 
     subgraph AP["AGENT PLANE — AGENT HARNESS"]
@@ -309,7 +309,7 @@ sequenceDiagram
     H->>E: propose_goal_dag (data only)
     E->>E: compile: catalog/wiring/guard/compensation/lock closures
     E->>A: approval artifact (plans·policy·cost·blast·verify·rollback·flags)
-    A-->>E: approve (four-eyes if prod)
+    A-->>E: approve (HITL — initiator may approve; optional four-eyes policy)
     E->>E: wave execution: VPC→EKS→deploy · idempotent · observed
     alt step failure
         E->>H: failure observation

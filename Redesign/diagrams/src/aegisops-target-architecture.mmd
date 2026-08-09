@@ -13,7 +13,7 @@ flowchart TB
         direction LR
         ADM["prepare_run admission<br/>OIDC · strict tenancy · RBAC · limits<br/>RoutePlan pinned · budget reserved"]
         TRM["Task / Run Manager<br/>create · track · resume · cancel ·<br/>steer · schedule · history"]
-        APRC["Approval core<br/>click-time re-check · four-eyes"]
+        APRC["Approval core<br/>click-time re-check · HITL<br/>(optional four-eyes policy)"]
     end
 
     subgraph AP["AGENT PLANE — AGENT HARNESS (Intelligent Shell, zero mutation authority)"]

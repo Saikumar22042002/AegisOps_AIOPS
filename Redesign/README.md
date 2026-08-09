@@ -36,7 +36,9 @@ Hermes `NousResearch/hermes-agent@3f83297`, OpenClaw `v2026.8.1`.
 7. No behavioral eval gate — 741 tests, none catch a routing-quality regression.
 8. Verification is tool-success-shaped and AWS-skewed; Azure/GCP resources can be created but barely seen.
 9. Multi-tenancy stops at Postgres — one global long-lived cloud credential set for all tenants.
-10. Governance posture drifts silently via `.env` (four-eyes off in the shipped install).
+10. Governance posture drifts silently via `.env` — flags change with zero visibility to approvers.
+    *(Historical note: the four-eyes flag cited at audit time is optional org policy under the
+    corrected HITL model; the silent-drift defect itself stands and is fixed by stamping.)*
 
 ## 2. Target architectural principles (02 §1)
 
@@ -82,7 +84,7 @@ global credential set · LangChain direct import · secrets/state residue in the
 ## 16. Must be preserved (00 §7, 01 §5)
 
 Terraform-only catalog mutation · durable approval interrupt · plan_guard at the choke-point ·
-strict tenancy/RBAC/four-eyes · per-step idempotency · boundary-only cancel · honest partials ·
+strict tenancy/RBAC · HITL approval (initiator may approve; four-eyes optional org policy) · per-step idempotency · boundary-only cancel · honest partials ·
 redaction on egress · trace==run · immutable approvals · investigation registry's read-only
 boundary · TF state isolation · supervisor/reconciler recovery · GW-1 transport seam + click-time
 re-checks · the 70/30 transcript budgeter · SSE replay/cursor mechanics.
@@ -105,6 +107,6 @@ replay resume · SRE PromQL → per-service templates.
 ## 19. Decisions requiring human approval (08 consolidated)
 
 Harness-first inversion (pre-P4) · LangGraph end-state (post-P4 gate) · Neo4j fold-in (P5 gate) ·
-credential brokering design (pre-P5.3) · four-eyes re-enable or signed waiver (**now**) ·
+credential brokering design (pre-P5.3) · ~~four-eyes re-enable~~ **resolved: HITL default, four-eyes optional org policy (operator directive)** ·
 AUTONOMOUS mode + pre-approved verb lists (pre-P4.5/P5.4) · Temporal (standing gate, default no) ·
 max_steps raise + concurrency caps (pre-P3.9).

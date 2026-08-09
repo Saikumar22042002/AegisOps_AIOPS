@@ -13,7 +13,7 @@ flowchart TB
     MW["middleware chain<br/>tenancy → rbac → rate limit → timeout →<br/>execute → validate → redact → audit → observe"]
     OBS["ToolObservation (ok | error)<br/>→ run log → next context<br/>(never an exception)"]
     ART["approval artifact<br/>plans · real policy table · cost · blast radius ·<br/>verify plan · rollback plan · governance-flag stamp ·<br/>bound plan hash"]
-    INT["durable interrupt (park)<br/>web / Telegram / Slack · click-time re-check ·<br/>four-eyes in prod · approver ≠ initiator"]
+    INT["durable interrupt (park)<br/>web / Telegram / Slack · click-time re-check ·<br/>HITL: initiator may approve ·<br/>optional four-eyes org policy"]
     DEC{"decision"}
     EXECG["engine executes EXACTLY the bound hash<br/>drift ⇒ deviation ⇒ fresh approval"]
     REJ["honest close (rejected)"]

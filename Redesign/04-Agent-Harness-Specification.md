@@ -115,7 +115,7 @@ flowchart TB
     CTX --> LLM["model call (purpose-routed,<br/>native tool calling)"]
     LLM --> Q{response}
     Q -- "tool calls" --> POL{policy check<br/>per action}
-    POL -- "approval required" --> PARK["durable approval interrupt<br/>(artifact; four-eyes if prod)"] --> RESUME["resume on decision<br/>(any worker, any day)"] --> BG
+    POL -- "approval required" --> PARK["durable approval interrupt<br/>(artifact · HITL review)"] --> RESUME["resume on decision<br/>(any worker, any day)"] --> BG
     POL -- denied --> OBSD["denial → observation"] --> BG
     POL -- allowed --> EXEC["execute via registry<br/>(middleware: tenancy·rbac·rate·timeout·<br/>execute·redact·audit·observe)"]
     EXEC --> OBS["result/error → observation<br/>(never an exception)"] --> STUCK{stuck detector}
@@ -332,8 +332,10 @@ policy, change window, **governance-flag stamp** (four-eyes/tenancy/mode/event-b
 visible). Approval **binds to the exact compiled plan hash**; any drift at execution time
 (precondition change, param revision, world divergence) is a deviation requiring fresh approval —
 the existing deviation rule, extended with args-hash binding (OpenClaw deny-on-drift).
-Four-eyes for production enforced at the approval core for every interrupting tier; click-time
-re-checks on every channel (GW-1, kept).
+Approval is **human-in-the-loop**: the initiating human may review and approve their own plan
+(`initiator == approver` is valid). Four-eyes is an optional org-level policy flag (default off);
+when an org enables it, it is enforced at the approval core for every interrupting tier.
+Click-time identity re-checks on every channel (GW-1, kept) apply regardless.
 
 ### 8.5 Permission / approval flow diagram
 
@@ -347,7 +349,7 @@ flowchart TB
     DENY["deny → observation<br/>(loop may re-plan)"]
     APPR["approval_required"]
     ART["artifact: plans · real policy table · cost ·<br/>blast radius · verify plan · rollback plan ·<br/>governance-flag stamp · bound plan hash"]
-    INT["durable interrupt (park)<br/>web / Telegram / Slack — click-time re-check ·<br/>four-eyes (prod) · approver ≠ initiator"]
+    INT["durable interrupt (park)<br/>web / Telegram / Slack — click-time re-check ·<br/>HITL: initiator may approve ·<br/>optional four-eyes org policy"]
     DEC{decision}
     EXECG["engine executes EXACTLY the bound hash<br/>drift ⇒ deviation ⇒ fresh approval"]
     REJ["honest close (rejected)"]
