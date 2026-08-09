@@ -1,0 +1,90 @@
+---
+title: "AegisOps — Target Architecture (Redesign/02)"
+---
+flowchart TB
+    subgraph CH["CHANNEL PLANE"]
+        direction LR
+        WEB["Web SPA"]
+        TGW["Telegram · Slack · Teams<br/>(one Transport Protocol)"]
+        AW["Alert webhook ingress<br/>(source = alert)"]
+    end
+
+    subgraph CP["CONTROL PLANE — stateless FastAPI"]
+        direction LR
+        ADM["prepare_run admission<br/>OIDC · strict tenancy · RBAC · limits<br/>RoutePlan pinned · budget reserved"]
+        TRM["Task / Run Manager<br/>create · track · resume · cancel ·<br/>steer · schedule · history"]
+        APRC["Approval core<br/>click-time re-check · four-eyes"]
+    end
+
+    subgraph AP["AGENT PLANE — AGENT HARNESS (Intelligent Shell, zero mutation authority)"]
+        LOOP["Intelligent loop<br/>observe → reason → plan → select →<br/>policy check → act → observe → verify<br/>diagnose · re-plan · retry · ask · delegate"]
+        CTXE["Context engine<br/>per-iteration assembly · compaction"]
+        BUD["Budget governor (HALTS)<br/>tokens · dollars · iterations ·<br/>tool calls · runtime · mutations"]
+        HK["Hook chain<br/>before/after: run · tool · mutation ·<br/>compaction · approval · on_failure/retry"]
+        SUB["Subagent supervisor<br/>isolated context · typed results ·<br/>shared budgets · depth 1"]
+        VER["Verification orchestrator<br/>evidence cards · goal validation"]
+    end
+
+    subgraph PACKS["CAPABILITY PACKS (thin: tools + knowledge + verify strategies)"]
+        direction LR
+        CO["CloudOps<br/>AWS | Azure | GCP"]
+        DO["DevOps<br/>GitHub · Actions · registries"]
+        SO["SREOps<br/>K8s · metrics · logs · traces · alerts"]
+    end
+
+    TREG["TOOL REGISTRY (typed, frozen per run)<br/>schemas · effects read/propose · risk · policy middleware ·<br/>timeouts · discovery/filtering · audit"]
+
+    subgraph LLM["MODEL PROVIDER LAYER (app/llm)"]
+        direction LR
+        RTR["Purpose router +<br/>capability registry<br/>RoutePlan per run · eval-gated bindings"]
+        EXEC["Resilient executor<br/>retry · shared breaker ·<br/>visible fallback · budget gate"]
+        ADP["Adapters: anthropic · openai-compat ·<br/>google · bedrock · azure-openai<br/>(OpenRouter · Ollama · self-hosted via base_url)"]
+        LED[("llm_usage ledger<br/>append-only · org-scoped")]
+    end
+
+    subgraph GC["GOVERNED CORE (app/engine) — deterministic, the trust boundary"]
+        direction LR
+        CMP["compile_goal_dag<br/>catalog · wiring · guard ·<br/>compensation · lock closures"]
+        APR["Approval artifact + durable interrupt<br/>plans · policy table · cost · blast radius ·<br/>verify plan · rollback plan · governance flags"]
+        ENG["Wave scheduler +<br/>saga rollback"]
+        EXE["Executors:<br/>Terraform · K8s · day-2 verbs"]
+    end
+
+    subgraph ST["STATE & MEMORY"]
+        direction LR
+        PG[("PostgreSQL<br/>run log · approvals · audit ·<br/>memory tiers · pgvector · ledger")]
+        RD[("Redis<br/>event bus · locks ·<br/>liveness · idempotency")]
+        WM[("World model<br/>impact_of · drift")]
+    end
+
+    subgraph QP["CONTROL / QUALITY PLANE"]
+        direction LR
+        OBS["Langfuse · Prometheus · Grafana<br/>trace == run"]
+        EVAL["Eval: dataset → judge →<br/>regression gate → release"]
+        AUD["Audit / compliance"]
+    end
+
+    CH --> ADM --> TRM --> LOOP
+    APRC --- TRM
+    LOOP <--> CTXE
+    LOOP --- BUD
+    LOOP --- HK
+    LOOP --- VER
+    LOOP <--> SUB
+    LOOP -->|"tool schemas + calls"| TREG
+    PACKS -->|"contribute tools / knowledge"| TREG
+    LOOP <-->|"purpose-routed calls"| RTR
+    RTR --> EXEC --> ADP
+    EXEC --> LED
+    LOOP -->|"GoalDAG draft — data only"| CMP
+    CMP --> APR --> ENG --> EXE
+    ENG --> WM
+    TREG -->|"read tools"| ST
+    GC --> PG
+    LOOP --> PG
+    TRM --> RD
+    AP -.-> OBS
+    GC -.-> OBS
+    LED -.-> EVAL
+    OBS --> EVAL
+    APR -.-> AUD

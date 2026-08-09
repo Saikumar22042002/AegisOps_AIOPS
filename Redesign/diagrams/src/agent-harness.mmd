@@ -1,0 +1,47 @@
+---
+title: "AegisOps — Agent Harness Close-up (Redesign/04)"
+---
+flowchart TB
+    SPEC["AgentSpec (declaration only)<br/>purpose — the ONLY model coupling ·<br/>versioned prompt ref · tool policy<br/>(NONE | READ_ONLY_FROZEN | GOVERNED_PROPOSE) ·<br/>budgets · context recipe"]
+
+    subgraph KERNEL["Kernel — one loop for every agent (≤ 500 lines, no SDKs, no domain code)"]
+        L1["1 · budget check<br/>(iterations · cost · wall-clock w/ grace)"]
+        L2["2 · per-iteration context assembly<br/>cache-stable prefix · volatile tail"]
+        L3["3 · llm.stream(purpose, tools)<br/>native tool calling"]
+        L4["4 · policy verdict per action<br/>(layered pipeline · hardline deny)"]
+        L5["5 · middleware execute<br/>errors are observations"]
+        L6["6 · checkpoint to run log<br/>(resume = replay)"]
+        L1 --> L2 --> L3 --> L4 --> L5 --> L6 --> L1
+    end
+
+    HOOKS["Hook chain (fail-closed)<br/>before/after run · tool · mutation ·<br/>compaction · approval (observers only)"]
+    BUDG["Budget governor<br/>halts at safe boundaries ·<br/>one grace summary call"]
+    STK["Stuck detection<br/>3rd identical → nudge ·<br/>5th → terminate"]
+    SUBA["Subagents<br/>isolated context · typed size-capped results ·<br/>untrusted evidence · shared budget pool · depth 1"]
+    VERI["Verification<br/>evidence cards · verification-stop nudges ·<br/>goal validation vs success criteria"]
+
+    subgraph PROV["Provider layer (app/llm)"]
+        PR["purpose router → RoutePlan (pinned per run)"]
+        PX["resilient executor<br/>taxonomy retries · credential rotation →<br/>turn-local fallback (visible) · shared breaker"]
+        PA["6 adapter families — the only SDK importers"]
+        PL[("llm_usage ledger")]
+        PR --> PX --> PA
+        PX --> PL
+    end
+
+    subgraph TOOLS["Typed tool registry (frozen per run)"]
+        TD["ToolDef: schema · effect (read/propose) ·<br/>risk · timeout · retry · verify · credentials ref"]
+        MW["middleware: tenancy → rbac → rate →<br/>timeout → execute → redact → audit → observe"]
+    end
+
+    TRUST["TRUST BOUNDARY<br/>proposals cross as data (GoalDAG draft) →<br/>engine compiles · human approves · engine executes"]
+
+    SPEC --> KERNEL
+    HOOKS --- KERNEL
+    BUDG --- KERNEL
+    STK --- KERNEL
+    SUBA --- KERNEL
+    VERI --- KERNEL
+    L3 <--> PROV
+    L5 <--> TOOLS
+    KERNEL -->|"propose effects only"| TRUST

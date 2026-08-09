@@ -1,0 +1,44 @@
+---
+title: "AegisOps — End-to-End: EKS + GitHub Deploy (Redesign/02 §8)"
+---
+sequenceDiagram
+    autonumber
+    actor U as User
+    participant CPl as Control plane
+    participant H as Harness loop
+    participant D as DevOps subagent
+    participant C as CloudOps tools (read)
+    participant P as Policy engine
+    participant A as Approver
+    participant E as Engine (TF / K8s)
+    participant S as SREOps verify
+
+    U->>CPl: "Create an EKS cluster and deploy my GitHub repo"
+    CPl->>CPl: admission: tenancy · RBAC · limits · RoutePlan · budget
+    CPl->>H: start run (durable)
+    H->>D: spawn — inspect repo (Dockerfile? manifests? workflows?)
+    D-->>H: AgentResult{buildable, image target, deploy needs}
+    H->>C: inspect AWS: region · VPC/subnets · IAM · existing EKS · TF state
+    C-->>H: observations (failures included, as observations)
+    H->>H: reason: requirements known? → draft GoalDAG
+    alt genuinely missing info
+        H->>U: ask (only what discovery cannot answer)
+        U-->>H: answer (steering queue)
+    end
+    H->>P: policy check (mode · risk · env)
+    H->>E: propose_goal_dag (data only — the trust boundary)
+    E->>E: compile: catalog · wiring · guard · compensation · lock closures
+    E->>A: approval artifact (plans · policy · cost · blast · verify · rollback · flags)
+    A-->>E: approve (four-eyes if production)
+    E->>E: wave execution: VPC → EKS → deploy (idempotent, observed)
+    alt step failure
+        E->>H: failure observation
+        H->>H: diagnose → gather evidence → re-plan
+        H->>E: deviation proposal → re-approval → retry
+    end
+    E->>S: verification plan
+    S-->>E: evidence cards (cluster healthy · rollout complete · endpoint 200 · telemetry clean)
+    E->>H: outcome + evidence
+    H->>H: goal validation vs success criteria
+    H->>CPl: persist lessons as memory proposals (human-accepted)
+    CPl->>U: evidence-backed result (honest, partial-capable)

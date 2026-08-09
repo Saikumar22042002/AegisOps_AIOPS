@@ -1,0 +1,29 @@
+---
+title: "AegisOps — Tool & Policy Flow (Redesign/04 §8, 05 §3)"
+---
+flowchart TB
+    SCH["schemas_for(spec, turn)<br/>policy-filtered · availability-gated ·<br/>progressive disclosure past ~10% context"]
+    MODEL["model selects action<br/>(native tool calling)"]
+    PIPE["policy pipeline (deterministic)<br/>platform baseline → org pack → environment →<br/>role → mode → agent spec → subagent → turn scope"]
+    RISK{"risk × mode × env ×<br/>blast radius"}
+    HARD["HARDLINE DENY — unappealable<br/>cross-org · credential-exfil-shaped ·<br/>mutation-named MCP · IAM escalation"]
+    ALLOW["allow"]
+    DENY["deny → observation<br/>(loop may re-plan)"]
+    APPR["approval required"]
+    MW["middleware chain<br/>tenancy → rbac → rate limit → timeout →<br/>execute → validate → redact → audit → observe"]
+    OBS["ToolObservation (ok | error)<br/>→ run log → next context<br/>(never an exception)"]
+    ART["approval artifact<br/>plans · real policy table · cost · blast radius ·<br/>verify plan · rollback plan · governance-flag stamp ·<br/>bound plan hash"]
+    INT["durable interrupt (park)<br/>web / Telegram / Slack · click-time re-check ·<br/>four-eyes in prod · approver ≠ initiator"]
+    DEC{"decision"}
+    EXECG["engine executes EXACTLY the bound hash<br/>drift ⇒ deviation ⇒ fresh approval"]
+    REJ["honest close (rejected)"]
+    ESTOP["ESTOP sentinel<br/>pauses NEW runs/mutations platform-wide ·<br/>in-flight applies always finish"]
+
+    SCH --> MODEL --> PIPE --> RISK
+    RISK --> HARD
+    RISK --> ALLOW --> MW --> OBS --> MODEL
+    RISK --> DENY --> MODEL
+    RISK --> APPR --> ART --> INT --> DEC
+    DEC -- "approve" --> EXECG
+    DEC -- "reject" --> REJ
+    ESTOP -.-> PIPE

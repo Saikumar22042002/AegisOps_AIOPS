@@ -1,0 +1,35 @@
+---
+title: "AegisOps — Task / Run Lifecycle (Redesign/06 §8)"
+---
+stateDiagram-v2
+    [*] --> running
+    running --> awaiting_approval : NeedsApproval (durable park)
+    running --> awaiting_input : NeedsInput (ask user)
+    awaiting_approval --> scheduled : approved, outside change window
+    awaiting_approval --> executing : approved
+    awaiting_approval --> completed : rejected — honest close
+    awaiting_input --> running : answer received (steering queue)
+    scheduled --> executing : window opens — stale approval re-validated
+    executing --> verifying : steps done
+    executing --> awaiting_approval : deviation (drift / precondition / verify-fail fix)
+    verifying --> completed : goal validated (evidence-backed)
+    verifying --> executing : re-plan (bounded)
+    running --> failed : budget or error — honest partial
+    executing --> rolled_back : on_failure = rollback (saga, pre-approved compensation)
+    running --> cancelled : boundary cancel
+    executing --> cancelled : boundary cancel — never mid-apply
+    completed --> [*]
+    failed --> [*]
+    cancelled --> [*]
+    rolled_back --> [*]
+
+    note right of running
+        PLAN_ONLY mode: same loop,
+        ends completed(plan_ready) —
+        zero approval, zero mutation
+    end note
+    note right of executing
+        run_events (append-only) is the
+        source of truth; resume = replay;
+        per-step idempotency; kill -9 safe
+    end note

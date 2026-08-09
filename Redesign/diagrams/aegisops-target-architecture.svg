@@ -1,0 +1,235 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1560 1910" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#4a5c74"/>
+    </marker>
+    <marker id="arrd" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#9aa7b8"/>
+    </marker>
+  </defs>
+  <rect width="1560" height="1910" fill="#ffffff"/>
+
+  <!-- Title -->
+  <rect x="430" y="28" width="700" height="64" rx="10" fill="#1a2b45"/>
+  <text x="780" y="55" text-anchor="middle" fill="#ffffff" font-size="24" font-weight="700">AEGISOPS — Target Architecture</text>
+  <text x="780" y="78" text-anchor="middle" fill="#c9d6ea" font-size="13">Harness-first intelligent operations platform · Redesign/02 · grounded at a974290</text>
+
+  <!-- BAND 1: CHANNELS -->
+  <rect x="60" y="116" width="1440" height="108" rx="12" fill="#f2f6fc" stroke="#9db2cc" stroke-width="1.5"/>
+  <text x="84" y="140" font-size="13" font-weight="700" fill="#3b5b8c" letter-spacing="1">CHANNEL PLANE</text>
+  <rect x="90" y="152" width="300" height="56" rx="8" fill="#ffffff" stroke="#3b5b8c"/>
+  <text x="240" y="176" text-anchor="middle" font-size="14" font-weight="600" fill="#1a2433">Web SPA</text>
+  <text x="240" y="195" text-anchor="middle" font-size="12" fill="#55606e">chat · runs · approvals · settings</text>
+  <rect x="430" y="152" width="330" height="56" rx="8" fill="#ffffff" stroke="#3b5b8c"/>
+  <text x="595" y="176" text-anchor="middle" font-size="14" font-weight="600" fill="#1a2433">Telegram · Slack · Teams</text>
+  <text x="595" y="195" text-anchor="middle" font-size="12" fill="#55606e">one Transport Protocol · click-time re-checks</text>
+  <rect x="800" y="152" width="300" height="56" rx="8" fill="#ffffff" stroke="#3b5b8c"/>
+  <text x="950" y="176" text-anchor="middle" font-size="14" font-weight="600" fill="#1a2433">Alert webhook ingress</text>
+  <text x="950" y="195" text-anchor="middle" font-size="12" fill="#55606e">Alertmanager → incident runs (source = alert)</text>
+  <text x="1300" y="176" text-anchor="middle" font-size="12" fill="#55606e" font-style="italic">the channel proves who clicked;</text>
+  <text x="1300" y="193" text-anchor="middle" font-size="12" fill="#55606e" font-style="italic">the core decides whether it counts</text>
+
+  <line x1="780" y1="224" x2="780" y2="252" stroke="#4a5c74" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- BAND 2: CONTROL PLANE -->
+  <rect x="60" y="254" width="1440" height="118" rx="12" fill="#f2f6fc" stroke="#9db2cc" stroke-width="1.5"/>
+  <text x="84" y="278" font-size="13" font-weight="700" fill="#3b5b8c" letter-spacing="1">CONTROL PLANE — stateless FastAPI</text>
+  <rect x="90" y="290" width="430" height="66" rx="8" fill="#ffffff" stroke="#3b5b8c"/>
+  <text x="305" y="312" text-anchor="middle" font-size="14" font-weight="600" fill="#1a2433">prepare_run admission</text>
+  <text x="305" y="330" text-anchor="middle" font-size="12" fill="#55606e">OIDC · strict tenancy · RBAC · limits</text>
+  <text x="305" y="346" text-anchor="middle" font-size="12" fill="#55606e">RoutePlan pinned · budget reserved</text>
+  <rect x="560" y="290" width="430" height="66" rx="8" fill="#ffffff" stroke="#3b5b8c"/>
+  <text x="775" y="312" text-anchor="middle" font-size="14" font-weight="600" fill="#1a2433">Task / Run Manager</text>
+  <text x="775" y="330" text-anchor="middle" font-size="12" fill="#55606e">create · track · resume · cancel · steer</text>
+  <text x="775" y="346" text-anchor="middle" font-size="12" fill="#55606e">schedule · history · durable parks</text>
+  <rect x="1030" y="290" width="440" height="66" rx="8" fill="#ffffff" stroke="#3b5b8c"/>
+  <text x="1250" y="312" text-anchor="middle" font-size="14" font-weight="600" fill="#1a2433">Approval core</text>
+  <text x="1250" y="330" text-anchor="middle" font-size="12" fill="#55606e">click-time re-check on every channel</text>
+  <text x="1250" y="346" text-anchor="middle" font-size="12" fill="#55606e">four-eyes for production · immutable records</text>
+
+  <line x1="780" y1="372" x2="780" y2="400" stroke="#4a5c74" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- BAND 3: AGENT PLANE -->
+  <rect x="60" y="402" width="1440" height="470" rx="12" fill="#f5f2fb" stroke="#8a7cc0" stroke-width="1.5"/>
+  <text x="84" y="426" font-size="13" font-weight="700" fill="#5c4d99" letter-spacing="1">AGENT PLANE — AGENT HARNESS · Intelligent Shell, zero mutation authority</text>
+
+  <!-- loop box -->
+  <rect x="90" y="442" width="500" height="290" rx="10" fill="#ffffff" stroke="#5c4d99" stroke-width="2"/>
+  <text x="340" y="468" text-anchor="middle" font-size="15" font-weight="700" fill="#1a2433">Intelligent loop</text>
+  <text x="340" y="492" text-anchor="middle" font-size="13" fill="#1a2433">observe → reason → plan → select action</text>
+  <text x="340" y="512" text-anchor="middle" font-size="13" fill="#1a2433">→ policy check → act → observe result → verify</text>
+  <line x1="130" y1="526" x2="550" y2="526" stroke="#d5cfe8"/>
+  <text x="340" y="548" text-anchor="middle" font-size="12.5" fill="#55606e">on failure: diagnose → gather evidence → re-plan</text>
+  <text x="340" y="566" text-anchor="middle" font-size="12.5" fill="#55606e">→ retry | alternative action | ask user</text>
+  <line x1="130" y1="580" x2="550" y2="580" stroke="#d5cfe8"/>
+  <text x="340" y="602" text-anchor="middle" font-size="12" fill="#55606e">L1 policy before action · L2 budgets inside the loop</text>
+  <text x="340" y="620" text-anchor="middle" font-size="12" fill="#55606e">L3 errors are observations · L4 re-plan = re-reason</text>
+  <text x="340" y="638" text-anchor="middle" font-size="12" fill="#55606e">L5 durable per iteration · L6 steer at boundaries · L7 ask</text>
+  <line x1="130" y1="652" x2="550" y2="652" stroke="#d5cfe8"/>
+  <text x="340" y="674" text-anchor="middle" font-size="12" fill="#55606e">native tool calling · stuck detection · verification-stop</text>
+  <text x="340" y="692" text-anchor="middle" font-size="12" fill="#55606e">goal validation vs success criteria · honest partials</text>
+  <text x="340" y="718" text-anchor="middle" font-size="11.5" fill="#8a7cc0" font-style="italic">kernel ≤ 500 lines · no SDKs · no domain code</text>
+
+  <!-- support components 2col -->
+  <rect x="620" y="442" width="420" height="62" rx="8" fill="#ffffff" stroke="#8a7cc0"/>
+  <text x="830" y="466" text-anchor="middle" font-size="13.5" font-weight="600" fill="#1a2433">Budget governor — HALTS</text>
+  <text x="830" y="484" text-anchor="middle" font-size="11.5" fill="#55606e">tokens · dollars · iterations · tool calls · runtime · mutations</text>
+  <rect x="620" y="518" width="420" height="62" rx="8" fill="#ffffff" stroke="#8a7cc0"/>
+  <text x="830" y="542" text-anchor="middle" font-size="13.5" font-weight="600" fill="#1a2433">Context engine</text>
+  <text x="830" y="560" text-anchor="middle" font-size="11.5" fill="#55606e">per-iteration assembly · cache-stable prefix · compaction</text>
+  <rect x="620" y="594" width="420" height="62" rx="8" fill="#ffffff" stroke="#8a7cc0"/>
+  <text x="830" y="618" text-anchor="middle" font-size="13.5" font-weight="600" fill="#1a2433">Hook chain — fail-closed</text>
+  <text x="830" y="636" text-anchor="middle" font-size="11.5" fill="#55606e">before/after run · tool · mutation · compaction · approval (observe-only)</text>
+  <rect x="1070" y="442" width="400" height="62" rx="8" fill="#ffffff" stroke="#8a7cc0"/>
+  <text x="1270" y="466" text-anchor="middle" font-size="13.5" font-weight="600" fill="#1a2433">Subagent supervisor</text>
+  <text x="1270" y="484" text-anchor="middle" font-size="11.5" fill="#55606e">isolated context · typed results · shared budgets · depth 1</text>
+  <rect x="1070" y="518" width="400" height="62" rx="8" fill="#ffffff" stroke="#8a7cc0"/>
+  <text x="1270" y="542" text-anchor="middle" font-size="13.5" font-weight="600" fill="#1a2433">Verification orchestrator</text>
+  <text x="1270" y="560" text-anchor="middle" font-size="11.5" fill="#55606e">evidence cards · goal validation · tool success ≠ task success</text>
+  <rect x="1070" y="594" width="400" height="62" rx="8" fill="#ffffff" stroke="#8a7cc0"/>
+  <text x="1270" y="618" text-anchor="middle" font-size="13.5" font-weight="600" fill="#1a2433">Policy engine</text>
+  <text x="1270" y="636" text-anchor="middle" font-size="11.5" fill="#55606e">READ_ONLY · PLAN_ONLY · APPROVAL_REQUIRED · AUTONOMOUS · hardline · ESTOP</text>
+
+  <!-- packs row -->
+  <rect x="620" y="678" width="850" height="176" rx="10" fill="#faf7ef" stroke="#c0a45c" stroke-width="1.5"/>
+  <text x="644" y="702" font-size="12.5" font-weight="700" fill="#8a6d1f" letter-spacing="0.5">CAPABILITY PACKS — thin: tools + knowledge + verify strategies · no loops, no control flow</text>
+  <rect x="644" y="716" width="256" height="118" rx="8" fill="#ffffff" stroke="#c0a45c"/>
+  <text x="772" y="740" text-anchor="middle" font-size="14" font-weight="600" fill="#1a2433">CloudOps</text>
+  <text x="772" y="760" text-anchor="middle" font-size="12" fill="#55606e">AWS | Azure | GCP</text>
+  <text x="772" y="778" text-anchor="middle" font-size="11.5" fill="#55606e">read tools · templates · day-2 verbs</text>
+  <text x="772" y="794" text-anchor="middle" font-size="11.5" fill="#55606e">verify strategies · parity-gated</text>
+  <text x="772" y="818" text-anchor="middle" font-size="11" fill="#8a6d1f" font-style="italic">per-org brokered credentials</text>
+  <rect x="930" y="716" width="256" height="118" rx="8" fill="#ffffff" stroke="#c0a45c"/>
+  <text x="1058" y="740" text-anchor="middle" font-size="14" font-weight="600" fill="#1a2433">DevOps</text>
+  <text x="1058" y="760" text-anchor="middle" font-size="12" fill="#55606e">GitHub · Actions · registries</text>
+  <text x="1058" y="778" text-anchor="middle" font-size="11.5" fill="#55606e">repo/CI inspection · log diagnosis</text>
+  <text x="1058" y="794" text-anchor="middle" font-size="11.5" fill="#55606e">PR-first changes · reruns · rollback</text>
+  <rect x="1216" y="716" width="238" height="118" rx="8" fill="#ffffff" stroke="#c0a45c"/>
+  <text x="1335" y="740" text-anchor="middle" font-size="14" font-weight="600" fill="#1a2433">SREOps</text>
+  <text x="1335" y="760" text-anchor="middle" font-size="12" fill="#55606e">K8s · metrics · logs · traces</text>
+  <text x="1335" y="778" text-anchor="middle" font-size="11.5" fill="#55606e">alerts · INV diagnosis loop</text>
+  <text x="1335" y="794" text-anchor="middle" font-size="11.5" fill="#55606e">gated remediation · postmortems</text>
+
+  <!-- band3 to band4 arrows -->
+  <line x1="340" y1="732" x2="340" y2="900" stroke="#4a5c74" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="352" y="800" font-size="12" fill="#4a5c74">tool schemas + calls</text>
+  <line x1="1060" y1="854" x2="1060" y2="900" stroke="#c0a45c" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#arrd)"/>
+  <text x="1072" y="884" font-size="11.5" fill="#8a6d1f">contribute tools · knowledge · verify</text>
+
+  <!-- BAND 4: TOOL REGISTRY -->
+  <rect x="60" y="902" width="1440" height="104" rx="12" fill="#fdf6ee" stroke="#cf9450" stroke-width="1.5"/>
+  <text x="84" y="926" font-size="13" font-weight="700" fill="#a5651e" letter-spacing="1">TOOL REGISTRY — typed · frozen per run</text>
+  <text x="780" y="950" text-anchor="middle" font-size="13" fill="#1a2433">JSON-Schema tools · effects: read | propose (mutation lives only in the engine) · risk classes · discovery / filtering / progressive disclosure</text>
+  <text x="780" y="972" text-anchor="middle" font-size="12.5" fill="#55606e">middleware: tenancy → rbac → policy → rate → timeout → execute → validate → redact → audit → observe · errors return as observations · MCP mounts read-only</text>
+
+  <!-- provider + governed core row -->
+  <line x1="340" y1="1006" x2="340" y2="1040" stroke="#4a5c74" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="352" y="1030" font-size="12" fill="#4a5c74">purpose-routed model calls</text>
+  <line x1="1120" y1="1006" x2="1120" y2="1040" stroke="#4a5c74" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="890" y="1030" font-size="12" fill="#a03232" font-weight="600">GoalDAG draft — data only, across the trust boundary</text>
+
+  <!-- BAND 5 left: PROVIDER LAYER -->
+  <rect x="60" y="1042" width="700" height="240" rx="12" fill="#eef7f0" stroke="#5c9c6e" stroke-width="1.5"/>
+  <text x="84" y="1066" font-size="13" font-weight="700" fill="#2e7d46" letter-spacing="1">MODEL PROVIDER LAYER — app/llm</text>
+  <rect x="90" y="1080" width="310" height="60" rx="8" fill="#ffffff" stroke="#5c9c6e"/>
+  <text x="245" y="1102" text-anchor="middle" font-size="13" font-weight="600" fill="#1a2433">Purpose router + capability registry</text>
+  <text x="245" y="1120" text-anchor="middle" font-size="11.5" fill="#55606e">RoutePlan per run · eval-gated bindings</text>
+  <rect x="420" y="1080" width="310" height="60" rx="8" fill="#ffffff" stroke="#5c9c6e"/>
+  <text x="575" y="1102" text-anchor="middle" font-size="13" font-weight="600" fill="#1a2433">Resilient executor</text>
+  <text x="575" y="1120" text-anchor="middle" font-size="11.5" fill="#55606e">taxonomy retries · shared breaker · visible fallback · budget gate</text>
+  <rect x="90" y="1154" width="310" height="106" rx="8" fill="#ffffff" stroke="#5c9c6e"/>
+  <text x="245" y="1176" text-anchor="middle" font-size="13" font-weight="600" fill="#1a2433">Adapters — the only SDK importers</text>
+  <text x="245" y="1196" text-anchor="middle" font-size="11.5" fill="#55606e">anthropic · openai-compat · google</text>
+  <text x="245" y="1212" text-anchor="middle" font-size="11.5" fill="#55606e">bedrock · azure-openai · (litellm, off)</text>
+  <text x="245" y="1232" text-anchor="middle" font-size="11.5" fill="#55606e">OpenRouter · Ollama · self-hosted</text>
+  <text x="245" y="1248" text-anchor="middle" font-size="11.5" fill="#55606e">via base_url — providers are data</text>
+  <rect x="420" y="1154" width="310" height="106" rx="8" fill="#ffffff" stroke="#5c9c6e"/>
+  <text x="575" y="1176" text-anchor="middle" font-size="13" font-weight="600" fill="#1a2433">llm_usage ledger</text>
+  <text x="575" y="1196" text-anchor="middle" font-size="11.5" fill="#55606e">append-only · org-scoped · tokens are truth</text>
+  <text x="575" y="1212" text-anchor="middle" font-size="11.5" fill="#55606e">serving vs requested model · agent_kind</text>
+  <text x="575" y="1232" text-anchor="middle" font-size="11.5" fill="#55606e">prompt_version · feeds budgets +</text>
+  <text x="575" y="1248" text-anchor="middle" font-size="11.5" fill="#55606e">chargeback · survives trace-store loss</text>
+
+  <!-- BAND 5 right: GOVERNED CORE -->
+  <rect x="800" y="1042" width="700" height="240" rx="12" fill="#fdeeee" stroke="#c05c5c" stroke-width="2"/>
+  <text x="824" y="1066" font-size="13" font-weight="700" fill="#a03232" letter-spacing="1">GOVERNED CORE — app/engine · deterministic · the trust boundary</text>
+  <rect x="830" y="1080" width="310" height="60" rx="8" fill="#ffffff" stroke="#c05c5c"/>
+  <text x="985" y="1102" text-anchor="middle" font-size="13" font-weight="600" fill="#1a2433">compile_goal_dag</text>
+  <text x="985" y="1120" text-anchor="middle" font-size="11.5" fill="#55606e">catalog · wiring · guard · compensation · lock closures</text>
+  <rect x="1160" y="1080" width="310" height="60" rx="8" fill="#ffffff" stroke="#c05c5c"/>
+  <text x="1315" y="1102" text-anchor="middle" font-size="13" font-weight="600" fill="#1a2433">Approval artifact + durable interrupt</text>
+  <text x="1315" y="1120" text-anchor="middle" font-size="11.5" fill="#55606e">plans · policy · cost · blast · verify · rollback · flags</text>
+  <rect x="830" y="1154" width="310" height="106" rx="8" fill="#ffffff" stroke="#c05c5c"/>
+  <text x="985" y="1176" text-anchor="middle" font-size="13" font-weight="600" fill="#1a2433">Wave scheduler + saga rollback</text>
+  <text x="985" y="1196" text-anchor="middle" font-size="11.5" fill="#55606e">per-step idempotency · deviation ⇒ re-approval</text>
+  <text x="985" y="1212" text-anchor="middle" font-size="11.5" fill="#55606e">pre-approved compensation, reverse order</text>
+  <text x="985" y="1232" text-anchor="middle" font-size="11.5" fill="#55606e">cancel at boundaries, never mid-apply</text>
+  <text x="985" y="1248" text-anchor="middle" font-size="11.5" fill="#55606e">change windows · honest partials</text>
+  <rect x="1160" y="1154" width="310" height="106" rx="8" fill="#ffffff" stroke="#c05c5c"/>
+  <text x="1315" y="1176" text-anchor="middle" font-size="13" font-weight="600" fill="#1a2433">Executors</text>
+  <text x="1315" y="1196" text-anchor="middle" font-size="11.5" fill="#55606e">Terraform (catalog templates, state isolation)</text>
+  <text x="1315" y="1212" text-anchor="middle" font-size="11.5" fill="#55606e">K8s (pinned charts, dry-run diff, rollout undo)</text>
+  <text x="1315" y="1232" text-anchor="middle" font-size="11.5" fill="#55606e">day-2 verbs (the one audited SDK-write file)</text>
+  <text x="1315" y="1248" text-anchor="middle" font-size="11.5" fill="#55606e">LLM proposes data; code executes it</text>
+
+  <!-- arrows to band 6 -->
+  <line x1="410" y1="1282" x2="410" y2="1316" stroke="#4a5c74" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="1150" y1="1282" x2="1150" y2="1316" stroke="#4a5c74" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- BAND 6: STATE & MEMORY -->
+  <rect x="60" y="1318" width="1440" height="128" rx="12" fill="#f2f6fc" stroke="#9db2cc" stroke-width="1.5"/>
+  <text x="84" y="1342" font-size="13" font-weight="700" fill="#3b5b8c" letter-spacing="1">STATE &amp; MEMORY</text>
+  <rect x="90" y="1354" width="430" height="76" rx="8" fill="#ffffff" stroke="#3b5b8c"/>
+  <text x="305" y="1378" text-anchor="middle" font-size="13.5" font-weight="600" fill="#1a2433">PostgreSQL + pgvector — system of record</text>
+  <text x="305" y="1398" text-anchor="middle" font-size="11.5" fill="#55606e">run_events (source of truth) · run_steps · approvals · audit</text>
+  <text x="305" y="1414" text-anchor="middle" font-size="11.5" fill="#55606e">memory tiers · prompt registry · bindings · llm_usage</text>
+  <rect x="560" y="1354" width="430" height="76" rx="8" fill="#ffffff" stroke="#3b5b8c"/>
+  <text x="775" y="1378" text-anchor="middle" font-size="13.5" font-weight="600" fill="#1a2433">Redis — coordination, never a record</text>
+  <text x="775" y="1398" text-anchor="middle" font-size="11.5" fill="#55606e">event bus (Streams) · locks · liveness · idempotency</text>
+  <text x="775" y="1414" text-anchor="middle" font-size="11.5" fill="#55606e">breaker state · rate limits · down ⇒ refuse new runs</text>
+  <rect x="1030" y="1354" width="440" height="76" rx="8" fill="#ffffff" stroke="#3b5b8c"/>
+  <text x="1250" y="1378" text-anchor="middle" font-size="13.5" font-weight="600" fill="#1a2433">World model — infra ground truth</text>
+  <text x="1250" y="1398" text-anchor="middle" font-size="11.5" fill="#55606e">impact_of on every mutation approval · drift · inventory</text>
+  <text x="1250" y="1414" text-anchor="middle" font-size="11.5" fill="#55606e">behind an interface · fold-in to Postgres decision-gated</text>
+
+  <line x1="780" y1="1446" x2="780" y2="1478" stroke="#9aa7b8" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrd)"/>
+
+  <!-- BAND 7: QUALITY -->
+  <rect x="60" y="1480" width="1440" height="128" rx="12" fill="#f4f4f4" stroke="#8f8f8f" stroke-width="1.5"/>
+  <text x="84" y="1504" font-size="13" font-weight="700" fill="#555555" letter-spacing="1">CONTROL / QUALITY PLANE</text>
+  <rect x="90" y="1516" width="430" height="76" rx="8" fill="#ffffff" stroke="#8f8f8f"/>
+  <text x="305" y="1540" text-anchor="middle" font-size="13.5" font-weight="600" fill="#1a2433">Observability</text>
+  <text x="305" y="1560" text-anchor="middle" font-size="11.5" fill="#55606e">Langfuse (trace == run) · Prometheus · Grafana</text>
+  <text x="305" y="1576" text-anchor="middle" font-size="11.5" fill="#55606e">served-by badges · fallback hops · flow console · stall tell</text>
+  <rect x="560" y="1516" width="430" height="76" rx="8" fill="#ffffff" stroke="#8f8f8f"/>
+  <text x="775" y="1540" text-anchor="middle" font-size="13.5" font-weight="600" fill="#1a2433">Evaluation — release control</text>
+  <text x="775" y="1560" text-anchor="middle" font-size="11.5" fill="#55606e">trace → evaluate (dataset + judge) → diagnose</text>
+  <text x="775" y="1576" text-anchor="middle" font-size="11.5" fill="#55606e">→ regression gate (CI, exit 1) → release</text>
+  <rect x="1030" y="1516" width="440" height="76" rx="8" fill="#ffffff" stroke="#8f8f8f"/>
+  <text x="1250" y="1540" text-anchor="middle" font-size="13.5" font-weight="600" fill="#1a2433">Audit &amp; compliance</text>
+  <text x="1250" y="1560" text-anchor="middle" font-size="11.5" fill="#55606e">per-call audit rows · immutable approvals · redaction on egress</text>
+  <text x="1250" y="1576" text-anchor="middle" font-size="11.5" fill="#55606e">governance-flag stamp on every artifact · cost chargeback</text>
+
+  <!-- boundaries panel -->
+  <rect x="60" y="1642" width="1440" height="160" rx="12" fill="#fffdf5" stroke="#d4b106" stroke-width="1.2"/>
+  <text x="84" y="1668" font-size="13" font-weight="700" fill="#8a6d1f" letter-spacing="1">BOUNDED OPERATIONAL INTELLIGENCE — the enforced boundaries</text>
+  <text x="90" y="1694" font-size="12.5" fill="#1a2433">· Permission modes (READ_ONLY · PLAN_ONLY · APPROVAL_REQUIRED · AUTONOMOUS) evaluated per action — modes change gates, never tools</text>
+  <text x="90" y="1716" font-size="12.5" fill="#1a2433">· Budgets halt the loop at safe boundaries: tokens · dollars · iterations · tool calls · runtime · mutations — one grace call, honest partial, resumable</text>
+  <text x="90" y="1738" font-size="12.5" fill="#1a2433">· Mutations exit only through: proposal (data) → compile closures → approval (hash-bound, four-eyes in prod) → deterministic execution → evidence-backed verification</text>
+  <text x="90" y="1760" font-size="12.5" fill="#1a2433">· Every run is durable and replayable (run_events) · resumable on any worker · cancel at boundaries, never mid-apply · trace == run · redaction on every egress</text>
+  <text x="90" y="1782" font-size="12.5" fill="#1a2433">· Hardline deny tier no approval can unlock · ESTOP pauses new work, never in-flight applies · subagent output is untrusted evidence · skills change only via PR + eval gate</text>
+
+  <!-- edge legend -->
+  <line x1="90" y1="1836" x2="150" y2="1836" stroke="#4a5c74" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="160" y="1840" font-size="12" fill="#55606e">request / control flow</text>
+  <line x1="340" y1="1836" x2="400" y2="1836" stroke="#9aa7b8" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrd)"/>
+  <text x="410" y="1840" font-size="12" fill="#55606e">telemetry / contribution (async)</text>
+  <rect x="680" y="1826" width="18" height="14" fill="#fdeeee" stroke="#c05c5c"/>
+  <text x="706" y="1840" font-size="12" fill="#55606e">deterministic governed core</text>
+  <rect x="920" y="1826" width="18" height="14" fill="#f5f2fb" stroke="#8a7cc0"/>
+  <text x="946" y="1840" font-size="12" fill="#55606e">intelligent shell (zero mutation authority)</text>
+  <rect x="1230" y="1826" width="18" height="14" fill="#faf7ef" stroke="#c0a45c"/>
+  <text x="1256" y="1840" font-size="12" fill="#55606e">thin capability packs</text>
+
+  <text x="780" y="1886" text-anchor="middle" font-size="11.5" fill="#8a93a0" font-style="italic">Source of truth: Mermaid in Redesign/02-Redesigned-Architecture.md §2.1 — this render is content-identical, laid out for presentation.</text>
+</svg>

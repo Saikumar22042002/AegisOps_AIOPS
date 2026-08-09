@@ -1,0 +1,44 @@
+---
+title: "AegisOps — Multi-Cloud Capability Model (Redesign/02 §6, 03 §3)"
+---
+flowchart TB
+    OBJ["Objective (cloud-neutral)<br/>provision · deploy · investigate · restore ·<br/>scale · migrate · diagnose · verify"]
+    HARN["Agent Harness<br/>ZERO cloud awareness (CI-enforced:<br/>no cloud SDK imports, no cloud literals)"]
+    NORM["Normalized resource model<br/>compute · storage · db · network · k8s ·<br/>serverless · functions · identity · telemetry · lb"]
+
+    subgraph AWSP["cloudops.aws pack"]
+        direction TB
+        AT["read tools (boto3)"]
+        ATPL["templates (10 families)"]
+        AD2["day-2 verbs"]
+        AV["verify strategies"]
+    end
+    subgraph AZP["cloudops.azure pack"]
+        direction TB
+        ZT["read tools (azure-sdk)"]
+        ZTPL["templates (10 families)"]
+        ZD2["day-2 verbs<br/>(deallocate ≠ stop: billing)"]
+        ZV["verify strategies"]
+    end
+    subgraph GCPP["cloudops.gcp pack"]
+        direction TB
+        GT["read tools (google-cloud)"]
+        GTPL["templates (10 families)"]
+        GD2["day-2 verbs"]
+        GV["verify strategies"]
+    end
+
+    CRED["Credential broker (per org, short-lived)<br/>AssumeRole · workload identity · service principals ·<br/>never one global key set"]
+    PARITY["PARITY GATE (CI)<br/>a service family ships only when all 3 packs<br/>expose the same verb set:<br/>discover · inspect · create · update · lifecycle ·<br/>scale · delete · troubleshoot · verify"]
+
+    OBJ --> HARN
+    HARN -->|"objective analysis<br/>selects pack(s)"| AWSP
+    HARN --> AZP
+    HARN --> GCPP
+    AWSP --- NORM
+    AZP --- NORM
+    GCPP --- NORM
+    AWSP --> CRED
+    AZP --> CRED
+    GCPP --> CRED
+    NORM -.-> PARITY

@@ -1,0 +1,24 @@
+---
+title: "AegisOps — Intelligent Execution Loop (Redesign/04 §3)"
+---
+flowchart TB
+    START(["objective accepted — run durable"]) --> BG{"budget<br/>governor"}
+    BG -- "exhausted" --> GRACE["one grace call:<br/>honest partial summary"] --> HALT(["halt: budget<br/>resumable after raise"])
+    BG -- "ok" --> CTX["assemble context<br/>(per-iteration)"]
+    CTX --> LLM["model call<br/>(purpose-routed, native tool calling)"]
+    LLM --> Q{"response"}
+    Q -- "tool calls" --> POL{"policy check<br/>per action"}
+    POL -- "approval required" --> PARK["durable approval interrupt<br/>(artifact · four-eyes if prod)"] --> RESUME["resume on decision<br/>(any worker, any day)"] --> BG
+    POL -- "denied" --> OBSD["denial → observation"] --> BG
+    POL -- "allowed" --> EXEC["execute via registry middleware<br/>tenancy · rbac · rate · timeout ·<br/>execute · redact · audit · observe"]
+    EXEC --> OBS["result / error → observation<br/>(never an exception)"] --> STUCK{"stuck<br/>detector"}
+    STUCK -- "3rd identical call" --> NUDGE["inject: change approach"] --> BG
+    STUCK -- "5th / 2nd critical" --> HALT2(["force-terminate —<br/>honest partial"])
+    STUCK -- "ok" --> BG
+    Q -- "ask user" --> ASK["durable NeedsInput park"] --> BG
+    Q -- "delegate" --> SUB["subagents<br/>(typed results, shared budgets)"] --> BG
+    Q -- "final answer" --> VS{"verification-stop:<br/>evidence fresh?"}
+    VS -- "no (max 3 nudges)" --> VN["synthetic verify nudge"] --> BG
+    VS -- "yes" --> GV{"goal validation vs<br/>success criteria"}
+    GV -- "unmet" --> DIAG["diagnose → gather evidence →<br/>re-plan (re-reason)"] --> BG
+    GV -- "met" --> DONE(["evidence-backed result<br/>+ memory proposals"])

@@ -1,0 +1,49 @@
+---
+title: "AegisOps — Memory Tiers & Context Engine (Redesign/06)"
+---
+flowchart TB
+    subgraph TIERS["Memory tiers (logical) — scope · provenance · confidence · lifecycle on every item"]
+        direction LR
+        W["WORKING<br/>current iteration context<br/>(projection, discarded)"]
+        T["TASK<br/>objective · observations ·<br/>evidence for one run"]
+        E["EPISODIC<br/>distilled episodes ·<br/>postmortems (org)"]
+        S["SEMANTIC<br/>durable facts<br/>(org / user)"]
+        P["PROCEDURAL<br/>playbooks / skills<br/>(PR + eval gate ONLY)"]
+    end
+
+    GATE["retrieval gate (cheapest tier)<br/>retrieve? · query rewrite · FAILS OPEN ·<br/>decision is an observable event"]
+    CONS["consolidation (post-run)<br/>facts + episode candidates →<br/>PROPOSALS — human accepts ·<br/>contradiction ⇒ supersede, never coexist"]
+    WRITE["WRITE-PATH = SECURITY BOUNDARY<br/>no agent writes semantic/procedural directly ·<br/>provenance is a column the model cannot set"]
+
+    subgraph CTX["Context engine (per-iteration recipe)"]
+        R1["1 · cache-stable prefix: system prompt (versioned) ·<br/>identity · org policy pack · pack knowledge"]
+        R2["2 · semi-stable: objective + criteria · plan state ·<br/>memory snapshot (frozen at run start)"]
+        R3["3 · volatile tail: task projection (70% recent verbatim /<br/>30% older digest) · gated retrievals · matched skills ·<br/>last observations"]
+        R1 --- R2 --- R3
+    end
+
+    COMP["compaction<br/>trigger: tokens > window − reserve ·<br/>flush-notes hook first · structured summary ·<br/>tool call/result pairs never split · recent-tail floor"]
+
+    subgraph STORES["Stores (physical) — tiers ≠ stores"]
+        direction LR
+        PG[("PostgreSQL + pgvector<br/>run_events · memory_items ·<br/>messages · ledger · prompts")]
+        RD[("Redis<br/>delivery + coordination only —<br/>never a system of record")]
+        FS[("repo files (PR-gated)<br/>skills · org policy packs")]
+        WM[("world model<br/>infra ground truth")]
+    end
+
+    T --> CONS --> S
+    CONS --> E
+    WRITE --- CONS
+    GATE --> R3
+    E --> GATE
+    S --> GATE
+    P -->|"match-gated, max 2"| R3
+    CTX --> COMP
+    W --- CTX
+    T --> PG
+    E --> PG
+    S --> PG
+    P --> FS
+    TIERS -.-> RD
+    S -.-> WM
