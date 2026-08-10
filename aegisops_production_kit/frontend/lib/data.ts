@@ -2,7 +2,7 @@
 // pixel-exact UI; from M3 the same SHAPES are returned by the real backend so components
 // bind unchanged, and these literals are replaced by live API data.
 
-import { cloudColor, modelColor } from "./colors";
+import { cloudColor } from "./colors";
 import type { ApprovalState } from "./types";
 
 export interface Opt {
@@ -13,7 +13,7 @@ export interface Opt {
 
 // CLN-2: orgOptions/envOptions/regionOptions removed — zero references anywhere. The org
 // comes from the authenticated principal (S0), the env is fixed to Production in the store
-// (no picker ships — a four-eyes-relevant fact documented at STAB P0-3), and the region
+// (no picker ships — documented at STAB P0-3), and the region
 // selector never rendered a menu. Re-adding a picker means wiring real state, not a list.
 
 // U4: "Auto (ask me)" is the default — it maps to cloud=null on the wire, so an ambiguous
@@ -34,15 +34,9 @@ export const cloudOptions: Opt[] = [
   { label: "VMware", sub: "vSphere" },
 ].map((o) => ({ ...o, dot: cloudColor(o.label) }));
 
-// U3: the model menu lists exactly the models the backend serves (Google Gemini today) and
-// sends the raw model id as `model` on /chat. The backend validates it against the same
-// catalog (GET /models) and rejects anything else with a 400 — no advertising providers we
-// can't run. Keep this in sync with `available_models` in the backend registry.
-export const modelOptions: Opt[] = [
-  { label: "gemini-3.5-flash", sub: "Google Gemini · default" },
-  { label: "gemini-flash-latest", sub: "Google Gemini · latest flash" },
-  { label: "gemini-2.5-flash", sub: "Google Gemini · GA fallback" },
-].map((o) => ({ ...o, dot: modelColor(o.label) }));
+// P0/D4: the hardcoded model list is gone. The model menu (TopNav) fetches GET /models —
+// the backend registry is the single source of truth, and /chat rejects anything the
+// registry doesn't serve with a 400. Nothing here to "keep in sync" anymore.
 
 export const roleOptions: Opt[] = [
   { label: "Platform Admin", sub: "Full control" },

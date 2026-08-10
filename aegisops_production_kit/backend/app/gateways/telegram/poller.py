@@ -41,7 +41,7 @@ def posture(settings: Settings) -> str:
     return ("  reachable by: LINKED AegisOps accounts only — an unlinked sender receives only "
             "the how-to-link reply and can neither read nor change anything.\n"
             "  identity: one-time code issued by a web-authenticated user (Settings → "
-            "Connected accounts); RBAC, org scope and four-eyes follow the bound user.\n"
+            "Connected accounts); RBAC and org scope follow the bound user.\n"
             f"  web origin for deep links: {settings.web_base_url}")
 
 

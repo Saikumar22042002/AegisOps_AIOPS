@@ -167,8 +167,7 @@ Cell values: ✅ target-required · ◐ target-optional (phase 2 of coverage) ·
 5. **Troubleshooting (T)** is not a tool — it is a diagnosis playbook (procedural knowledge) the
    INV loop uses over the read tools of that service family.
 6. IAM C/U is deliberately ◐: identity mutation is the highest-risk class; ships behind
-   `destructive` risk class with mandatory human approval regardless of mode (plus four-eyes where
-   an org has opted into that policy).
+   `destructive` risk class with mandatory human approval regardless of mode.
 
 ## 4. DevOps capability catalog
 

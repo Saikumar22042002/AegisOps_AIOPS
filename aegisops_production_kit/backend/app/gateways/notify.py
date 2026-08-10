@@ -8,10 +8,10 @@ Who receives a card is a governance decision, not a convenience:
 
 * **linked** — an unlinked user has no channel identity to push to;
 * **eligible** — `can_approve` per the bound user's roles (`identity.notifiable_approvers`);
-* **org-scoped** — the run's org only (S0);
-* **four-eyes aware** — when the flag is on and the run targets Production, the initiator is
-  excluded, because they cannot approve it and a card they cannot action is noise that invites
-  a confusing refusal.
+* **org-scoped** — the run's org only (S0).
+
+The initiator is included: approval is single-user human-in-the-loop, so the initiating
+human is an authorized approver of their own plan (initiator == approver).
 
 The card carries the change's SHAPE (workflow, mode, `+a ~c -d`, step count, failing-policy
 count) and a web deep link — never the diff, inputs or outputs. A chat transcript is a poor
@@ -37,7 +37,7 @@ def approval_buttons(run_id: str) -> list[Button]:
 
     The token is opaque and UNTRUSTED. Pressing it proves only that someone with access to that
     chat pressed a button — so `driver.handle_callback` re-resolves the sender's identity and
-    re-runs the full server-side decision path (RBAC, org scope, four-eyes, awaiting-approval
+    re-runs the full server-side decision path (RBAC, org scope, awaiting-approval
     state, the in-flight lock). Nothing is authorized by the token itself.
     """
     return [Button(label="✅ Approve", token=f"apv:{run_id}:approved"),
@@ -53,8 +53,7 @@ def _transport_for(channel: str, settings: Settings):
     return None
 
 
-async def approval_pending(*, run_id: str, org_id: str, env: str | None,
-                           initiator_user_id: str | None, initiator_username: str | None,
+async def approval_pending(*, run_id: str, org_id: str, initiator_username: str | None,
                            interrupt_payload: dict) -> int:
     """Push the approval card to every linked, eligible approver. Returns how many were notified.
 
@@ -66,14 +65,8 @@ async def approval_pending(*, run_id: str, org_id: str, env: str | None,
     if transport is None:
         return 0
 
-    # A5: exclude the initiator only when four-eyes actually forbids them approving this run.
-    exclude = None
-    if settings.aegisops_four_eyes_for_production and (env or "").lower() == "production":
-        exclude = initiator_user_id
-
     try:
-        targets = await identity.notifiable_approvers(org_id, channel=identity.TELEGRAM,
-                                                     exclude_user_id=exclude)
+        targets = await identity.notifiable_approvers(org_id, channel=identity.TELEGRAM)
     except Exception as exc:  # noqa: BLE001
         log.warning("gateway.notify_targets_failed", run_id=run_id, error=str(exc))
         return 0

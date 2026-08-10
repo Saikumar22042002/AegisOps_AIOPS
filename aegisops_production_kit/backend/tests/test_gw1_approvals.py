@@ -10,13 +10,12 @@ Covered here:
 * token parsing rejects anything malformed (no run id smuggling, no third decision value);
 * an UNLINKED presser is refused and gets only the how-to-link reply;
 * a linked but NON-APPROVER presser is refused with the web's exact wording;
-* **four-eyes is re-checked at click time** — the Production initiator's own press is refused
-  even though the card was pushed to a chat they can read;
 * a stale press (run already decided) surfaces the 409, not a silent no-op;
 * an approved press disables the card so the decision cannot be double-pressed;
 * the continuation is consumed from the cursor `resolve_approval_core` returned (STAB P0-3), so
   apply progress — not the replayed plan turn — is what streams back;
-* the push list is four-eyes aware and survives one approver's chat being unreachable.
+* the push list includes the initiator (single-user HITL: initiator == approver is valid)
+  and survives one approver's chat being unreachable.
 """
 
 from __future__ import annotations
@@ -113,24 +112,6 @@ async def test_non_approver_press_is_refused_with_the_web_wording(monkeypatch):
     t = FakeTransport()
     await driver.handle_callback(_cb(), t, _settings())
     assert "Cloud Architect, Org Admin, or Platform Admin" in t.callbacks[-1][1]
-
-
-async def test_four_eyes_is_rechecked_at_click_time(monkeypatch):
-    """A5 over a chat button: the Production initiator's own press is refused, with the same
-    message the web endpoint gives — the card being in their chat authorizes nothing."""
-    monkeypatch.setattr(identity, "resolve", _returns(_bound(["platform-admin"])))
-
-    async def _four_eyes(*a, **k):
-        raise HTTPException(403, "Four-eyes policy: you initiated this Production change — "
-                                 "a different approver must review it.")
-
-    monkeypatch.setattr("app.api.chat.resolve_approval_core", _four_eyes, raising=False)
-    t = FakeTransport()
-    await driver.handle_callback(_cb(), t, _settings())
-
-    assert "Four-eyes" in t.callbacks[-1][1]
-    assert "Four-eyes" in t.last_text
-    assert not t.edits          # the card is NOT disabled — someone else still must decide
 
 
 async def test_stale_press_surfaces_the_conflict(monkeypatch):
@@ -254,29 +235,23 @@ async def test_callback_failure_is_reported_not_raised(monkeypatch):
 # ── the cross-channel push ───────────────────────────────────────────────────────────────────
 
 
-async def test_push_is_four_eyes_aware(monkeypatch):
-    """When four-eyes applies, the initiator is excluded — a card they cannot action is noise."""
+async def test_push_list_never_excludes_anyone(monkeypatch):
+    """Single-user HITL: the initiator is an authorized approver of their own plan, so the
+    push list is every linked approver in the org — there is no exclusion path at all."""
     captured: dict = {}
 
-    async def _targets(org_id, *, channel, exclude_user_id=None):
-        captured["exclude"] = exclude_user_id
+    async def _targets(org_id, **kwargs):
+        captured["kwargs"] = kwargs
         return []
 
     monkeypatch.setattr(identity, "notifiable_approvers", _targets)
     monkeypatch.setattr(notify, "_transport_for", lambda channel, settings: FakeTransport())
-    monkeypatch.setattr("app.gateways.notify.get_settings",
-                        lambda: _settings(aegisops_four_eyes_for_production=True))
+    monkeypatch.setattr("app.gateways.notify.get_settings", lambda: _settings())
 
-    await notify.approval_pending(run_id="r1", org_id="o1", env="Production",
-                                  initiator_user_id="u-init", initiator_username="dev",
+    await notify.approval_pending(run_id="r1", org_id="o1", initiator_username="dev",
                                   interrupt_payload={})
-    assert captured["exclude"] == "u-init"
-
-    # Non-production: four-eyes does not apply, so the initiator may approve and is included.
-    await notify.approval_pending(run_id="r1", org_id="o1", env="Staging",
-                                  initiator_user_id="u-init", initiator_username="dev",
-                                  interrupt_payload={})
-    assert captured["exclude"] is None
+    assert "exclude_user_id" not in captured["kwargs"], \
+        "an exclusion parameter would mean a second-approver policy crept back in"
 
 
 async def test_push_survives_one_unreachable_approver(monkeypatch):
@@ -300,8 +275,7 @@ async def test_push_survives_one_unreachable_approver(monkeypatch):
     monkeypatch.setattr(notify, "_transport_for", lambda channel, settings: t)
     monkeypatch.setattr("app.gateways.notify.get_settings", lambda: _settings())
 
-    pushed = await notify.approval_pending(run_id="r1", org_id="o1", env="Staging",
-                                           initiator_user_id=None, initiator_username="dev",
+    pushed = await notify.approval_pending(run_id="r1", org_id="o1", initiator_username="dev",
                                            interrupt_payload={"workflow": "aws.s3",
                                                               "mode": "apply"})
     assert pushed == 2 and len(calls) == 3
@@ -310,8 +284,7 @@ async def test_push_survives_one_unreachable_approver(monkeypatch):
 async def test_push_is_a_noop_when_no_gateway_is_running(monkeypatch):
     monkeypatch.setattr(notify, "_transport_for", lambda channel, settings: None)
     monkeypatch.setattr("app.gateways.notify.get_settings", lambda: _settings())
-    assert await notify.approval_pending(run_id="r1", org_id="o1", env="Production",
-                                         initiator_user_id=None, initiator_username=None,
+    assert await notify.approval_pending(run_id="r1", org_id="o1", initiator_username=None,
                                          interrupt_payload={}) == 0
 
 
@@ -325,9 +298,7 @@ async def test_pushed_card_has_buttons_and_no_plan_contents(monkeypatch):
     payload = {"workflow": "aws.rds", "mode": "apply",
                "plan": {"summary": {"add": 2, "change": 0, "destroy": 1},
                         "diff": [{"address": "aws_db_instance.prod_secrets"}]}}
-    assert await notify.approval_pending(run_id="r9", org_id="o1", env="Production",
-                                         initiator_user_id="u-other",
-                                         initiator_username="dev",
+    assert await notify.approval_pending(run_id="r9", org_id="o1", initiator_username="dev",
                                          interrupt_payload=payload) == 1
     msg = t.sent[-1]
     assert [b.token for b in (msg.buttons or [])] == ["apv:r9:approved", "apv:r9:rejected"]

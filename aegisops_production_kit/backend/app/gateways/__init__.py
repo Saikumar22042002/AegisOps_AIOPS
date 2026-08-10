@@ -17,7 +17,7 @@ Design rules that are not negotiable, and where they are enforced:
 * **Identity is a binding, never an allowlist.** An unbound sender has no platform identity and
   gets only the how-to-link reply (`driver.handle_inbound`). We deliberately do NOT adopt
   waku's `TELEGRAM_ALLOWED_USER` pattern: a chat id is not an authenticated principal, and
-  RBAC/tenancy/four-eyes cannot be evaluated against one.
+  RBAC/tenancy cannot be evaluated against one.
 * **No new mutation path.** `driver` calls `api.chat.prepare_run` / `build_drive` —
   the exact functions `POST /chat` calls — and approvals go through
   `api.chat.resolve_approval_core`, the exact function `POST /approvals/{run_id}` calls.

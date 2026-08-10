@@ -45,8 +45,22 @@ class Settings(BaseSettings):
     # U6: the Governed Executive Loop — multi-step goal DAGs (create-first closures) execute
     # under one whole-DAG approval. `off` keeps the DEP dag branch as a text proposal.
     aegisops_exec_loop: Literal["on", "off"] = "off"
-    # A5 4-eyes: when on, the initiator of a Production-environment run cannot approve it.
-    aegisops_four_eyes_for_production: bool = True
+    # P0 worker foundation: which background responsibilities this process owns.
+    #   all    — API + background loops (single-node default; today's behavior)
+    #   api    — serve HTTP/SSE only; no reconciler/retention/drift/gateway pollers
+    #   worker — background loops (+ API surface remains available for health probes)
+    # Under the api+api-b compose posture exactly ONE process runs the sweeps (F-18).
+    aegisops_role: Literal["all", "api", "worker"] = "all"
+    # P0/F-16: bearer token protecting GET /metrics. Empty + app_env=local → open (dev
+    # ergonomics, keeps the compose Prometheus scrape working). Empty + non-local → 403.
+    aegisops_metrics_token: str = ""
+    # P0 ledger: local fsync'd spill journal for usage records that could not be
+    # persisted to Postgres (replayed idempotently by the reconciler; gitignored).
+    aegisops_ledger_spill_path: str = "./llm_usage_spill.jsonl"
+    # Approval model (Redesign/00 §7): single-user HUMAN-IN-THE-LOOP. The initiating human
+    # reviews and approves or rejects their own plan (initiator == approver). There is no
+    # second-approver / four-eyes concept; the active posture is stamped on every approval
+    # card + /healthz (P0.5) so it can never drift silently.
     # S1 credential reveal: the step-up re-auth proof (a fresh Keycloak authentication) must
     # be no older than this many seconds. Password re-entry produces a proof dated "now".
     reveal_stepup_max_age_seconds: int = 120

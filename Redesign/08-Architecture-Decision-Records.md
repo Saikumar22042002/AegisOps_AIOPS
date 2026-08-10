@@ -202,7 +202,7 @@ reduction available and the precondition for every other change.
 | 2 | LangGraph end-state (drop vs keep wrapped) | ADR-04 | gate after P4 +1 quarter |
 | 3 | Neo4j fold-in/removal | ADR-06 | gate at P5 |
 | 4 | Credential brokering design (vault, federation, onboarding) | ADR-17 | before P5.3 |
-| 5 | Approval model: HITL default (initiator may approve); four-eyes demoted to optional org policy, default off — **decided by operator directive, resolved** | 07 P0.5 | resolved |
+| 5 | Approval model: single-user HITL (the initiating human approves their own plan). First decided at P0.5 as "HITL default, four-eyes optional org policy"; **superseded 2026-08-10 (P1 entry gate, operator directive): the four-eyes/second-approver concept is REMOVED ENTIRELY** — no flag, no gate, no UI, no tests. — **resolved** | 07 P0.5; P1 entry gate report | resolved |
 | 6 | AUTONOMOUS mode availability per env + pre-approved remediation verb lists per org | 03 §6.1 / 04 §8 | before P4.5 / P5.4 |
 | 7 | Temporal adoption (standing gate; default: no) | 07 gates | on trigger only |
 | 8 | max_steps raise 5→8; per-run concurrency caps | 07 P3.9 | before P3.9 |

@@ -29,7 +29,7 @@ sequenceDiagram
     H->>E: propose_goal_dag (data only — the trust boundary)
     E->>E: compile: catalog · wiring · guard · compensation · lock closures
     E->>A: approval artifact (plans · policy · cost · blast · verify · rollback · flags)
-    A-->>E: approve (HITL — initiating human may approve · optional four-eyes policy)
+    A-->>E: approve (single-user HITL — the initiating human approves their own plan)
     E->>E: wave execution: VPC → EKS → deploy (idempotent, observed)
     alt step failure
         E->>H: failure observation

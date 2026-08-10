@@ -328,13 +328,13 @@ restriction → runtime (turn-scoped narrowing)`. Verdicts are logged as observa
 Durable interrupt (unchanged constitution). The artifact carries: step plans (+a ~c −d), real
 policy predicate table (no `_todo` blankets — F-11 closed), cost estimate, blast radius
 (`impact_of` on **all** mutations), verification plan, rollback/compensation plan, deviation
-policy, change window, **governance-flag stamp** (four-eyes/tenancy/mode/event-bus — D9 made
+policy, change window, **governance-flag stamp** (approval-model/tenancy/mode/event-bus — D9 made
 visible). Approval **binds to the exact compiled plan hash**; any drift at execution time
 (precondition change, param revision, world divergence) is a deviation requiring fresh approval —
 the existing deviation rule, extended with args-hash binding (OpenClaw deny-on-drift).
-Approval is **human-in-the-loop**: the initiating human may review and approve their own plan
-(`initiator == approver` is valid). Four-eyes is an optional org-level policy flag (default off);
-when an org enables it, it is enforced at the approval core for every interrupting tier.
+Approval is **single-user human-in-the-loop**: the initiating human reviews and approves or
+rejects their own plan (`initiator == approver` is valid). There is no second-approver /
+four-eyes concept in AegisOps (removed entirely at the P1 entry gate, 2026-08-10).
 Click-time identity re-checks on every channel (GW-1, kept) apply regardless.
 
 ### 8.5 Permission / approval flow diagram
@@ -349,7 +349,7 @@ flowchart TB
     DENY["deny → observation<br/>(loop may re-plan)"]
     APPR["approval_required"]
     ART["artifact: plans · real policy table · cost ·<br/>blast radius · verify plan · rollback plan ·<br/>governance-flag stamp · bound plan hash"]
-    INT["durable interrupt (park)<br/>web / Telegram / Slack — click-time re-check ·<br/>HITL: initiator may approve ·<br/>optional four-eyes org policy"]
+    INT["durable interrupt (park)<br/>web / Telegram / Slack — click-time re-check ·<br/>single-user HITL: the initiating human<br/>approves their own plan"]
     DEC{decision}
     EXECG["engine executes EXACTLY the bound hash<br/>drift ⇒ deviation ⇒ fresh approval"]
     REJ["honest close (rejected)"]

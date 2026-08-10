@@ -14,7 +14,7 @@ the store's reducer, which mutates per-message fields, which the components rend
   text/event-stream`, `credentials:"include"`; normalizes sse-starlette's CRLF frames
   (`buffer.replace(/\r\n/g,"\n")`, `sse.ts:62`) then splits on the blank line (`sse.ts:64`).
   **Flag for reviewers:** on `!res.ok` it throws a plain `Error` with only `detail` text, **not**
-  `ApiError` — so SSE-driven flows can't see the HTTP status; the four-eyes 403 on `approveRun`
+  `ApiError` — so SSE-driven flows can't see the HTTP status; a 4xx on `approveRun`
   is matched by message string, not status code (`sse.ts:42-50`, caught at `store.ts:423`).
 - **`lib/store.ts`** — the Zustand store + the two SSE reducers (`sendText`, `approveRun`).
 
@@ -101,13 +101,13 @@ sequenceDiagram
 
 - **Instant flip:** the decision lands on the message before any event (`store.ts:393`), so the
   card replaces the buttons immediately.
-- **Denial is visible (four-eyes 403):** `catch` at `store.ts:423-429` sets `runError`, restores
+- **Denial is visible (4xx on approve):** `catch` at `store.ts:423-429` sets `runError`, restores
   `approval="pending"`, and puts `decision:null, error:msg` on the message so the card returns
   for a legitimate approver.
 - **Restoration on session open:** `openSession` (`store.ts:197`) fetches `GET /runs/{id}`
   (`store.ts:215`) and, if `status == "awaiting_approval"`, rebuilds the interrupt card
-  (`store.ts:216-219`) — essential because under four-eyes the approver is a different person
-  than the initiator whose live window streamed the interrupt.
+  (`store.ts:216-219`) — essential because the approver may open the session from a window
+  that never saw the live interrupt stream (reload, second device, another approver).
 
 ## Credential reveal / download (`Workspace.tsx:CredentialReveal`)
 

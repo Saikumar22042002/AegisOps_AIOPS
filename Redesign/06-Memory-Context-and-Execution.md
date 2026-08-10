@@ -165,7 +165,10 @@ boundary (resume = replay + continue — Pi's lane records); the Redis stream is
 step-level read model (existing table, gains `wave`, `evidence JSONB`, `compensation_of`).
 
 Supporting DDL (resolves prior-suite gap I11): `llm_usage` (as specified in the Brainstorming
-provider layer, **plus `prompt_version TEXT`**, month-partitioned); `prompt_registry(name,
+provider layer, **plus `prompt_version TEXT`**; month-partitioning DEFERRED by the C-07 decision
+at the P1 entry gate, 2026-08-10 — shipped migration `0010` is unpartitioned with
+`ix(org_id, ts)` + `ix(run_id)`; the partition triggers and migration path are recorded in
+11 §22 C-07); `prompt_registry(name,
 version, content, content_hash, owner, changelog, eval_state, created_at — PK(name,version))`;
 `model_bindings` (as specified: PK(org_id,purpose), eval_state, updated_by/reason).
 

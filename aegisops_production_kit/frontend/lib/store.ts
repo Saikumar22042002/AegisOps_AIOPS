@@ -141,7 +141,7 @@ export const useUI = create<UIState>((set, get) => ({
   env: "Production",
   cloud: "Auto (ask me)",  // U4: default to Auto so ambiguous requests ask which cloud
   region: "us-east-1",
-  model: "gemini-3.5-flash",  // U3: a real, backend-served model id (see modelOptions)
+  model: "gemini-3.5-flash",  // U3: a real, backend-served model id (menu = GET /models)
   role: "Platform Admin",
   feedback: {},
   activeRunId: null,
@@ -208,10 +208,10 @@ export const useUI = create<UIState>((set, get) => ({
       const lastRunMsg = [...mapped].reverse().find((m) => m.isAI && m.runId);
       set({ messages: mapped, activeRunId: lastRunMsg?.runId ?? null,
             selectedMessageId: lastRunMsg?.id ?? null, artifactNonce: get().artifactNonce + 1 });
-      // P0-3: rebuild the approval card for a run still awaiting a decision. Four-eyes means
-      // the approver is a DIFFERENT person than the initiator whose window streamed the
-      // interrupt live — without this restore, a compliant Production approval was
-      // impossible from any freshly-opened session.
+      // P0-3: rebuild the approval card for a run still awaiting a decision. The approver
+      // may open the session from a different window/device than the one that streamed the
+      // interrupt live (page reload, second device, another approver in the org) — without
+      // this restore, approving from any freshly-opened session was impossible.
       if (lastRunMsg?.runId) {
         try {
           const run = await api.get<any>(`/runs/${lastRunMsg.runId}`);
@@ -457,7 +457,7 @@ export const useUI = create<UIState>((set, get) => ({
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : "approval failed";
-      // P0-3: a DENIED decision must be loudly visible — the live four-eyes 403 used to
+      // P0-3: a DENIED decision must be loudly visible — a 4xx on the approval call used to
       // render as pure silence (the "minutes of zero feedback"). The error lands on the
       // message and the card comes back so a legitimate approver can still act.
       set({ runError: msg, approval: "pending" });

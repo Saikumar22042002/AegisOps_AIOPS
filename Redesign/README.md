@@ -37,8 +37,8 @@ Hermes `NousResearch/hermes-agent@3f83297`, OpenClaw `v2026.8.1`.
 8. Verification is tool-success-shaped and AWS-skewed; Azure/GCP resources can be created but barely seen.
 9. Multi-tenancy stops at Postgres — one global long-lived cloud credential set for all tenants.
 10. Governance posture drifts silently via `.env` — flags change with zero visibility to approvers.
-    *(Historical note: the four-eyes flag cited at audit time is optional org policy under the
-    corrected HITL model; the silent-drift defect itself stands and is fixed by stamping.)*
+    *(Historical note: the four-eyes flag cited at audit time has since been removed entirely —
+    P1 entry gate, 2026-08-10; the silent-drift defect itself stands and is fixed by stamping.)*
 
 ## 2. Target architectural principles (02 §1)
 
@@ -57,7 +57,7 @@ claims · run log as source of truth · minimal framework surface.
 | **Model strategy** | 1 provider, 3 ids, contextvar, no params | 6 adapter families, purpose routing, capability registry, eval-gated bindings, two-stage failover, ledger + budgets |
 | **Execution** | one HTTP-driven pass; exec_loop sequential, off-by-default (on in this install) | durable Task/Run/Step + run-log replay; waves; saga rollback; day-2 verbs; change windows; worker role |
 | **Failure recovery** | honest halt + partial (good) but no retry/diagnosis | taxonomy→action mapping, bounded retries, deviation proposals, compensation chains, stuck detection, grace-call partials |
-| **Security** | strict tenancy/RBAC/four-eyes(default)/redaction; global cloud creds; unauth /metrics; drifting .env | same constitution + hardline deny tier, contextvar approval state, import-frozen flags, args-hash-bound approvals, ESTOP, per-org brokered creds, stamped governance flags |
+| **Security** | strict tenancy/RBAC/redaction; four-eyes(default at audit — since removed entirely at the P1 entry gate: single-user HITL is THE model); global cloud creds; unauth /metrics; drifting .env | same constitution + hardline deny tier, contextvar approval state, import-frozen flags, args-hash-bound approvals, ESTOP, per-org brokered creds, stamped governance flags |
 | **Observability** | deep traces; 11 metrics (1 dead, 4 charted); cost in Langfuse only | + run-log projections, ledger dashboards, served-by badges, fallback visibility, flow console, all metrics charted, /metrics authed |
 | **Evaluation** | none behavioral | dataset + judge + regression gate in CI; 9 evaluated dimensions; gates prompts/bindings/packs/inversion; offline arena |
 
@@ -84,7 +84,7 @@ global credential set · LangChain direct import · secrets/state residue in the
 ## 16. Must be preserved (00 §7, 01 §5)
 
 Terraform-only catalog mutation · durable approval interrupt · plan_guard at the choke-point ·
-strict tenancy/RBAC · HITL approval (initiator may approve; four-eyes optional org policy) · per-step idempotency · boundary-only cancel · honest partials ·
+strict tenancy/RBAC · single-user HITL approval (initiator == approver) · per-step idempotency · boundary-only cancel · honest partials ·
 redaction on egress · trace==run · immutable approvals · investigation registry's read-only
 boundary · TF state isolation · supervisor/reconciler recovery · GW-1 transport seam + click-time
 re-checks · the 70/30 transcript budgeter · SSE replay/cursor mechanics.
@@ -107,6 +107,6 @@ replay resume · SRE PromQL → per-service templates.
 ## 19. Decisions requiring human approval (08 consolidated)
 
 Harness-first inversion (pre-P4) · LangGraph end-state (post-P4 gate) · Neo4j fold-in (P5 gate) ·
-credential brokering design (pre-P5.3) · ~~four-eyes re-enable~~ **resolved: HITL default, four-eyes optional org policy (operator directive)** ·
+credential brokering design (pre-P5.3) · ~~four-eyes re-enable~~ **resolved: four-eyes removed entirely — single-user HITL is THE model (operator directive, P1 entry gate 2026-08-10)** ·
 AUTONOMOUS mode + pre-approved verb lists (pre-P4.5/P5.4) · Temporal (standing gate, default no) ·
 max_steps raise + concurrency caps (pre-P3.9).

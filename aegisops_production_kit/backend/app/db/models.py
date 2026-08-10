@@ -126,8 +126,8 @@ class Run(Base):
     org_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
     session_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True)
     # A5: who started the run (users.id mirror row) + the environment it targets — both are
-    # governance facts: 4-eyes compares approver vs initiator for Production changes, and S1
-    # gates the credential reveal on initiator-or-approver.
+    # governance facts: S1 gates the credential reveal on initiator-or-approver, and PR-3
+    # gates cancel the same way; the audit trail records who initiated every change.
     initiated_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     env: Mapped[str | None] = mapped_column(String(20), nullable=True)  # Production | Staging | …
     # GW-1: which gateway initiated this run (web | telegram | …) — a governance fact, so an
@@ -287,7 +287,7 @@ class ChannelIdentity(Base):
 
     Identity is the binding, never a chat-id allowlist. An unbound sender has no identity on
     this platform and receives only the how-to-link reply — it cannot start a run, read
-    anything, or approve anything. Once bound, RBAC, tenancy and four-eyes follow the bound
+    anything, or approve anything. Once bound, RBAC and tenancy follow the bound
     user everywhere, exactly as they do on the web.
 
     `active_session_id` gives the channel "one chat = one session per user"; `/new` clears it.
@@ -370,3 +370,33 @@ class Notification(Base):
     color: Mapped[str | None] = mapped_column(String(40), nullable=True)
     read: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class LlmUsage(Base):
+    """P0 authoritative LLM usage/cost ledger (Redesign/06 §8.2; migration 0010).
+
+    Accounting truth — Langfuse is observability. Append-only by convention. `id` is
+    client-generated so retry/spill-replay inserts are idempotent (ON CONFLICT DO
+    NOTHING). `org_id`/`run_id` carry no FKs on purpose: an accounting record must
+    outlive the rows it describes, and spill replay must never fail an FK check.
+    Tokens are ground truth; `cost_usd` is a write-time convenience snapshot.
+    """
+
+    __tablename__ = "llm_usage"
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    org_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True, index=True)
+    run_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True, index=True)
+    task_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)  # arrives with P2/P3
+    purpose: Mapped[str] = mapped_column(String(40), default="legacy")
+    provider: Mapped[str] = mapped_column(String(20), default="google")
+    model: Mapped[str] = mapped_column(String(80))
+    requested_model: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    agent_kind: Mapped[str] = mapped_column(String(20), default="main")
+    prompt_version: Mapped[str | None] = mapped_column(String(40), nullable=True)  # P2 registry
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    outcome: Mapped[str] = mapped_column(String(60), default="ok")

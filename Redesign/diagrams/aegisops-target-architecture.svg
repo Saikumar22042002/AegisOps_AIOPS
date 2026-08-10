@@ -45,7 +45,7 @@
   <rect x="1030" y="290" width="440" height="66" rx="8" fill="#ffffff" stroke="#3b5b8c"/>
   <text x="1250" y="312" text-anchor="middle" font-size="14" font-weight="600" fill="#1a2433">Approval core</text>
   <text x="1250" y="330" text-anchor="middle" font-size="12" fill="#55606e">click-time re-check on every channel</text>
-  <text x="1250" y="346" text-anchor="middle" font-size="12" fill="#55606e">HITL: initiator may approve · optional four-eyes policy · immutable records</text>
+  <text x="1250" y="346" text-anchor="middle" font-size="12" fill="#55606e">single-user HITL: the initiating human approves their own plan · immutable records</text>
 
   <line x1="780" y1="372" x2="780" y2="400" stroke="#4a5c74" stroke-width="2" marker-end="url(#arr)"/>
 
@@ -215,7 +215,7 @@
   <text x="84" y="1668" font-size="13" font-weight="700" fill="#8a6d1f" letter-spacing="1">BOUNDED OPERATIONAL INTELLIGENCE — the enforced boundaries</text>
   <text x="90" y="1694" font-size="12.5" fill="#1a2433">· Permission modes (READ_ONLY · PLAN_ONLY · APPROVAL_REQUIRED · AUTONOMOUS) evaluated per action — modes change gates, never tools</text>
   <text x="90" y="1716" font-size="12.5" fill="#1a2433">· Budgets halt the loop at safe boundaries: tokens · dollars · iterations · tool calls · runtime · mutations — one grace call, honest partial, resumable</text>
-  <text x="90" y="1738" font-size="12.5" fill="#1a2433">· Mutations exit only through: proposal (data) → compile closures → human-in-the-loop approval (hash-bound; initiator may approve; optional four-eyes policy) → deterministic execution → verification</text>
+  <text x="90" y="1738" font-size="12.5" fill="#1a2433">· Mutations exit only through: proposal (data) → compile closures → single-user human-in-the-loop approval (hash-bound; the initiating human approves their own plan) → deterministic execution → verification</text>
   <text x="90" y="1760" font-size="12.5" fill="#1a2433">· Every run is durable and replayable (run_events) · resumable on any worker · cancel at boundaries, never mid-apply · trace == run · redaction on every egress</text>
   <text x="90" y="1782" font-size="12.5" fill="#1a2433">· Hardline deny tier no approval can unlock · ESTOP pauses new work, never in-flight applies · subagent output is untrusted evidence · skills change only via PR + eval gate</text>
 

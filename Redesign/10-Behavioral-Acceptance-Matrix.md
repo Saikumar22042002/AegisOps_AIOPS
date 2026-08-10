@@ -47,8 +47,8 @@ Re-planning · Policy decision · Approval · Verification · Final state · Tra
 - **Re-planning:** none.
 - **Policy:** mutation, risk=medium, env=dev → `approval_required` (SINGLE_DAG).
 - **Approval:** artifact with plan diff (+1 create), real policy predicate rows, cost, blast
-  radius, verification plan, rollback (`destroy_created`), governance stamp. HITL: the initiating
-  human may approve their own plan (four-eyes only where an org has opted into that policy).
+  radius, verification plan, rollback (`destroy_created`), governance stamp. Single-user HITL:
+  the initiating human reviews and approves their own plan (initiator == approver).
 - **Verification:** post-apply EvidenceCard: `verify.running` per cloud table + tags read-back.
 - **Final state:** `completed`; inventory row; world-model upsert.
 - **Trace:** `run_events`: N reads → proposal → approval_requested/resolved → step_started/
@@ -66,7 +66,7 @@ Re-planning · Policy decision · Approval · Verification · Final state · Tra
 - **Observations:** state read; precondition satisfied/violated.
 - **Re-planning:** if already stopped → no-op answer with evidence, **no mutation proposed**.
 - **Policy:** risk=low, blast=low → dev: PRE_APPROVED tier (if org-listed) else approval; prod:
-  approval (HITL; four-eyes additionally if org policy enables it).
+  approval (single-user HITL).
 - **Approval:** card shows inverse verb as compensation; Azure card must show deallocate-vs-stop
   billing distinction.
 - **Verification:** `verify.stopped` / `verify.running`; restart additionally asserts status

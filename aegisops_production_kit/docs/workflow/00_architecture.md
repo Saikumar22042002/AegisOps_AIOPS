@@ -97,7 +97,6 @@ the provider plugin cache is the shared `tfplugins` volume via `TF_PLUGIN_CACHE_
 | `aegisops_reconciler` (`:40`) | `on` | starts the stranded-run reconciler loop at startup (`main.py:75`) |
 | `aegisops_drift` (`:44`) | `off` | drift/orphan sweeps + `DRIFT_FINDINGS` gauge (`reconciler.py:223`) |
 | `aegisops_exec_loop` (`:47`) | `off` | multi-step create-first DAG runs via the governed loop vs. proposed as text (`cloudops.py`, `exec_loop.py`) |
-| `aegisops_four_eyes_for_production` (`:49`) | `True` | prod self-approval blocked (`api/chat.py:363`) |
 | `aegisops_tf_backend` (`:133`) | `local` | `remote` → S3+DynamoDB backend config (`tools/terraform.py:_backend_config_args`) |
 | `aegisops_tf_skip_init_when_ready` (`:176`) | `True` | warm-init skip (`tools/terraform.py:_is_initialized`) |
 | `reveal_stepup_max_age_seconds` (`:52`) | `120` | credential-reveal step-up re-auth freshness (`security/deps.py:verify_stepup_auth`) |

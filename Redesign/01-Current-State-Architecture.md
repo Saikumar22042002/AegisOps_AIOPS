@@ -41,7 +41,7 @@ flowchart TB
 
     subgraph CONTROL["FastAPI control plane — 9 routers / 41 endpoints"]
         PREP["prepare_run (admission)<br/>OIDC → strict tenancy → RBAC → limits"]
-        APR["POST /approvals/{run_id}<br/>resolve_approval_core: org + state re-check<br/>(+ flag-conditional four-eyes)"]
+        APR["POST /approvals/{run_id}<br/>resolve_approval_core: org + state re-check<br/>(single-user HITL)"]
         ART["artifacts API (8 tabs' data)"]
     end
 
@@ -274,9 +274,10 @@ documented api+api-b posture doubles every limit. [F-17]
   `AEGISOPS_FOUR_EYES_FOR_PRODUCTION=false` (`.env:126`), `AEGISOPS_EXEC_LOOP=on` (`.env:139`),
   `AEGISOPS_TELEGRAM=on` (`.env:146`). Net effect at audit time: four-eyes disabled while the
   multi-step mutation loop and an external chat channel were enabled — a silently changed posture
-  visible nowhere in the product. [F-9] *(Historical note: the four-eyes component is superseded —
-  HITL is the corrected default model per 00 §7, so `four_eyes=false` is now the intended default;
-  the defect that survives is the invisibility of flag drift, fixed by governance stamping.)*
+  visible nowhere in the product. [F-9] *(Historical note: the four-eyes concept was REMOVED
+  ENTIRELY at the P1 entry gate (2026-08-10) — single-user HITL is THE approval model per 00 §7,
+  and neither the flag nor the gate exists in code anymore; the defect that survives is the
+  invisibility of flag drift, fixed by governance stamping.)*
 - `AEGISOPS_COST_GUARDRAIL_USD` is read via raw `os.getenv` (`agents/cost.py:74`) and exists in
   neither `settings.py`, `.env`, nor `.env.example` — the cost guardrail is undiscoverable and
   effectively permanently off. [F-19]
@@ -319,7 +320,7 @@ Carried defects D1–D9 from the prior audit remain open at `a974290`; this audi
 | D6 | Gateway turns hardcode `model=None`, undocumented | `gateways/driver.py:201-203` |
 | D7 | Dead code: `agents/llm.py:generate()`, `GeminiProvider.astream/agenerate`, `gemini.astream_text`, `Investigator.run/spawn`, `github.create_pull_request`, `runs.ended_at` (declared, never assigned) | multiple |
 | D8 | Hardcoded `passed: True` policy rows in DevOps/SRE cards | `devops.py:102-105`, `sre.py:146` |
-| D9 | `.env` governance drift (four-eyes off, exec loop on, Telegram on). *Superseded in part: under the corrected HITL model (00 §7), four-eyes-off is the intended default — the drift finding now covers only the exec-loop and Telegram flags, and the underlying fix (stamped, visible governance flags) is unchanged.* | `.env:126,139,146` vs `settings.py:47,49,165` |
+| D9 | `.env` governance drift (audit-time: four-eyes off, exec loop on, Telegram on). *Superseded in part: the four-eyes concept has since been REMOVED ENTIRELY (P1 entry gate, 2026-08-10) — the drift finding now covers only the exec-loop and Telegram flags, and the underlying fix (stamped, visible governance flags) is unchanged.* | `.env:126,139,146` vs `settings.py:47,49,165` |
 | F-10 | Latent `NameError` (module-level `select` missing) silently kills `aegisops_approval_wait_seconds` — it has never observed | `chat.py:465,468` vs `:105` |
 | F-11 | ~40 `_todo()` policy stubs on approval cards; promoted modules get one blanket `_todo_policy` | `templates.py:45`, `module_pipeline.py:55-57` |
 | F-12 | Read/verify coverage asymmetric: AWS 6 services, Azure 3, GCP 2 vs 7/7/6 write catalog | `tools/{aws,azure,gcp}.py` |
@@ -362,15 +363,15 @@ These are not bugs; they are architecture.
 11. **Multi-tenancy ends at the database.** All tenants mutate clouds through one global credential
     set.
 12. **Governance posture can silently drift via `.env`** — approvers cannot see the active
-    governance flags (historically observed with the four-eyes flag; the flag is optional policy
-    under the corrected HITL model, but silent drift of any governance flag remains the defect).
+    governance flags (historically observed with the since-removed four-eyes flag; silent drift
+    of any governance flag remains the defect, fixed by governance stamping).
 
 ## 5. What must be preserved
 
 The governance core audited here is genuinely strong and survives the redesign unchanged in
 semantics (per the constitution in `00-Redesign-Mandate.md §7`): Terraform-only mutation through
 the approved catalog · durable cross-process approval interrupt · plan_guard at the choke-point ·
-strict tenancy/RBAC · human-in-the-loop approval (four-eyes as optional org policy) · per-step idempotency · boundary-only cancel · honest
+strict tenancy/RBAC · single-user human-in-the-loop approval (initiator == approver) · per-step idempotency · boundary-only cancel · honest
 partials · redaction on every egress · trace==run · immutable Approval rows · the investigation
 registry's read-only boundary (denylist + freeze + shared budgets) · TF state-workspace isolation ·
 supervisor/reconciler crash recovery · GW-1's transport seam with click-time re-checks.

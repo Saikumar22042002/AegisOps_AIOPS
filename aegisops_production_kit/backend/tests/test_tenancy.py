@@ -355,22 +355,15 @@ class TestTwoOrgIsolation:
         assert c.get("/runs/not-a-uuid/timeline").status_code == 404
         assert c.get("/sessions/not-a-uuid/messages").status_code == 404
 
-    def test_four_eyes_blocks_prod_self_approval(self, two_orgs, as_member, client, monkeypatch):
-        """A5: the initiator of a Production run cannot approve it; a different approver
-        passes the 4-eyes gate; non-Production runs are exempt. (Runs are created in a
-        non-awaiting status so the gate is exercised without driving the graph.)
+    def test_initiator_may_approve_their_own_run(self, two_orgs, as_member, client):
+        """Single-user HITL: the initiating human is an authorized approver of their own
+        plan (initiator == approver) in EVERY environment, including Production. There is
+        no second-approver / four-eyes concept in AegisOps.
 
-        The flag is PINNED on for the duration of this test. Without pinning, the assertion
-        depends on the operator's `.env`: an install with AEGISOPS_FOUR_EYES_FOR_PRODUCTION=false
-        makes this test fail (409 past the gate instead of 403 at it) even though the code is
-        correct — and, worse, silently stops covering A5 at all wherever the flag is off. The
-        gate's behaviour is what we assert here; whether a given deployment enables it is a
-        deployment decision, tested by the settings default.
+        Runs are created in a non-awaiting status, so an approval attempt that passes every
+        authorization gate surfaces as 409 (the awaiting-approval state check — the last
+        gate). A 403 here would mean a second-approver policy has crept back in.
         """
-        from app.settings import get_settings
-
-        monkeypatch.setattr(get_settings(), "aegisops_four_eyes_for_production", True)
-
         async def _mk(env: str):
             from app.db.models import Run
             from app.db.session import session_scope
@@ -387,15 +380,12 @@ class TestTwoOrgIsolation:
         two_orgs["run_ids"] += [prod, staging]
 
         initiator = _member(two_orgs["org_a"], two_orgs["user_a"], ORG_A_SLUG)  # approver caps
-        other = _member(two_orgs["org_a"], str(uuid.uuid4()), ORG_A_SLUG)  # different approver
 
-        r = as_member(initiator).post(f"/approvals/{prod}", json={"decision": "approved"})
-        assert r.status_code == 403 and "four-eyes" in r.json()["detail"].lower(), \
-            "prod self-approval must be refused by the 4-eyes policy"
-        # A different approver passes 4-eyes (409 = past the gate: run isn't awaiting approval).
-        assert as_member(other).post(f"/approvals/{prod}", json={"decision": "approved"}).status_code == 409
-        # Non-production: the initiator may approve (subject to role policy) — gate exempt.
-        assert as_member(initiator).post(f"/approvals/{staging}", json={"decision": "approved"}).status_code == 409
+        for run_id, env in ((prod, "Production"), (staging, "Staging")):
+            r = as_member(initiator).post(f"/approvals/{run_id}", json={"decision": "approved"})
+            assert r.status_code == 409, \
+                f"{env}: the initiator's own approval must pass every authz gate " \
+                f"(got {r.status_code}: {r.json().get('detail')})"
 
     def test_knowledge_search_is_org_scoped(self, two_orgs, as_member):
         a = _member(two_orgs["org_a"], two_orgs["user_a"], ORG_A_SLUG)

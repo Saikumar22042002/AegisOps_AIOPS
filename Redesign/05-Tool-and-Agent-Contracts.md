@@ -171,3 +171,44 @@ A pack module exports exactly: `TOOLS: [ToolDef]`, `KNOWLEDGE: [PromptFragment]`
 `DAY2: [Day2VerbKey]`, `POLICIES: [PolicyFragment]`. CI enforces: no loop code, no SDK dispatch
 outside ToolDef `fn`s, no imports from `harness` internals beyond the public contract, parity
 manifests per service family (03 §3.4). A pack is reviewable data; the kernel is the only engine.
+
+## 11. Canonical model-invocation contracts (P1.1 — resolves C-01)
+
+> Added at the P1 entry gate (2026-08-10). 04 §4 defines the provider layer's semantics
+> (purposes, `RoutePlan`, capability flags, `ServedBy`, error taxonomy) but delegated the
+> canonical wire types to an external document; these are the normative minimum shapes.
+> Owner at P1.1: `app/llm/types.py`. Consumers: adapters (`app/llm/adapters/*`), `service.py`,
+> the ledger, and (from P2) the harness kernel. Evolution: additive-only — there is no
+> per-contract wire-version field yet (C-03 stands); renames/retypes are breaking changes
+> and forbidden without a versioning decision.
+
+- **`CanonicalMessage`** — `role: system|user|assistant|tool` (04 §4.2) · `content: str` ·
+  `tool_calls: [ToolCall] | None` (assistant only) · `tool_call_id: str | None` (tool role only).
+- **`ModelRequest`** — `purpose: Purpose` (04 §4.3 enum; the ONLY model coupling) ·
+  `messages: [CanonicalMessage]` · `tools: [ToolDef] | None` (§1; adapters translate per wire
+  family) · `params: {temperature?, top_p?, max_tokens?, timeout_s (default 120), stop?}` ·
+  `route: RoutePlan` (resolved before dispatch; pinned on the run row) · `metadata: {run_id?,
+  org_id?, agent_kind, prompt_ref: PromptRef | None}`. `generate()` and `stream()` take the
+  same request; there is no `stream=` flag (04 §4.1).
+- **`ModelResponse`** — `content: str` · `tool_calls: [ToolCall]` (empty when none) ·
+  `finish_reason: stop|length|tool_calls|content_filter` · `usage: Usage` ·
+  `served_by: ServedBy` · `latency_ms: int`.
+- **`Usage`** — `input_tokens · output_tokens · total_tokens · cache_read_tokens? ·
+  cache_write_tokens?` (the five token kinds of 04 §4.7); rolls into `llm_usage` verbatim.
+- **`ServedBy`** — `provider · model · requested_model · fallback_hop: int` (04 §4.6; honest
+  serving metadata on every response, rendered as badges per 10-V).
+- **`StreamEvent`** — `kind: text_delta | tool_call_delta | usage | served_by | error | done` ·
+  `payload` (kind-shaped). Every stream terminates with exactly one `done` (after `usage` +
+  `served_by`) or exactly one `error` carrying a `ModelError`.
+- **`ToolCall`** — `id: str` (provider-issued or synthesized) · `name: str` (registry-namespaced,
+  §1) · `arguments: dict` (validated against the ToolDef `input_schema` BEFORE policy/dispatch) ·
+  `args_hash: str` (canonical-JSON SHA-256 — the identity used by policy binding, idempotency and
+  IP-1's repetition detector).
+- **`ToolResult`** — `tool_call_id: str` · `ok: bool` · `content: str | dict` (schema-validated
+  on ok) · `error: {kind, message} | None` · `stage: str` (which middleware stage failed, §3).
+  A `ToolResult` is what re-enters the model as the tool-role message; middleware wraps it into
+  the run-log `ToolObservation` (§3) — same data, two audiences.
+- **`ModelError`** — `kind: rate_limited | upstream_rate_limited | context_overflow | auth |
+  auth_permanent | content_filtered | refusal | timeout | unavailable | invalid_request` (04 §4
+  taxonomy) · `retriable: bool` · `provider_detail: str` (redacted). `context_overflow` triggers
+  compact-and-retry, never failover (06 §7); `auth_permanent` opens the breaker for the binding.

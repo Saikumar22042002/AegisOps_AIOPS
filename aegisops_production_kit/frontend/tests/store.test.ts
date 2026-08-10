@@ -252,18 +252,18 @@ describe("approveRun — P0-3 denial visibility + openSession card restoration",
       ],
     });
 
-  it("a DENIED decision is loudly visible and the card comes back (the four-eyes silence bug)", async () => {
+  it("a DENIED decision is loudly visible and the card comes back (the silent-403 bug)", async () => {
     seedInterrupted();
     mockStream.mockImplementation(async () => {
-      throw new Error("Production changes require a different approver (four-eyes)");
+      throw new Error("Approval requires Cloud Architect, Org Admin, or Platform Admin.");
     });
     await useUI.getState().approveRun("approved");
     const m = aiMsg();
-    expect(m.error).toContain("four-eyes");
+    expect(m.error).toContain("Approval requires");
     expect(m.decision).toBeNull();                       // the decision card returns
     expect(m.streaming).toBe(false);                     // never a phantom applying strip
     expect(useUI.getState().approval).toBe("pending");
-    expect(useUI.getState().runError).toContain("four-eyes");
+    expect(useUI.getState().runError).toContain("Approval requires");
   });
 
   it("openSession rebuilds the approval card for a run still awaiting a decision", async () => {

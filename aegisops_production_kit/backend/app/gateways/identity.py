@@ -4,7 +4,7 @@ The whole point of this module: a messaging channel gives us an opaque account i
 opaque account id is **not** an authenticated principal. Nothing on this platform may run
 against one. So a web-authenticated user issues a one-time code, sends it from the channel, and
 we record a binding. From then on every gateway request resolves to that platform user, and
-RBAC / tenancy / four-eyes evaluate against them exactly as they do on the web.
+RBAC / tenancy evaluate against them exactly as they do on the web.
 
 Deliberately NOT adopted from waku's telegram gateway: `TELEGRAM_ALLOWED_USER`. An env-var
 allowlist of chat ids answers "may this chat talk to the bot?" — it cannot answer "who is this,
@@ -328,11 +328,10 @@ async def set_active_session(identity_id: str, session_id: str | None) -> None:
         log.warning("gateway.set_active_session_failed", error=str(exc))
 
 
-async def notifiable_approvers(org_id: str, *, channel: str = TELEGRAM,
-                               exclude_user_id: str | None = None) -> list[BoundIdentity]:
+async def notifiable_approvers(org_id: str, *, channel: str = TELEGRAM) -> list[BoundIdentity]:
     """Linked identities in this org whose bound user can approve — the push list for an
-    approval card. Org-scoped (S0), and `exclude_user_id` drops the initiator when four-eyes
-    means they cannot approve their own change anyway."""
+    approval card. Org-scoped (S0). The initiator is included: under single-user HITL the
+    initiating human is an authorized approver of their own plan."""
     out: list[BoundIdentity] = []
     try:
         async with session_scope() as s:
@@ -342,8 +341,6 @@ async def notifiable_approvers(org_id: str, *, channel: str = TELEGRAM,
                 .where(ChannelIdentity.channel == channel,
                        ChannelIdentity.org_id == uuid.UUID(org_id)))).all()
             for identity, user in rows:
-                if exclude_user_id and str(identity.user_id) == str(exclude_user_id):
-                    continue
                 if not rbac.can_approve(list(user.roles or [])):
                     continue
                 out.append(_to_bound(identity, user))

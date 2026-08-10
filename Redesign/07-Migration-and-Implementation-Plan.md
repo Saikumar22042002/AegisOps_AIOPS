@@ -25,7 +25,7 @@
 | 0.2 | LLM-judge suite + CI release gate (exit 1; verdict history; judge semaphore; retry-transient-only) | M |
 | 0.3 | `llm_usage` ledger table + writes at existing generation/stream record points, incl. embeddings (D3), `agent_kind`, `prompt_version` (registry lands P2; column nullable until then) | S |
 | 0.4 | Defect sweep: D1 (bad_location/bad_region), D2 (dead fallback + discarded models.list), D4 (menu fetches GET /models), D5 (remove `applying` **reads**; full status machine lands P3 — interim machine: running→awaiting_approval→executing→completed/failed/cancelled, no hole), D7 (dead code), F-10 (module-level `select` import → approval-wait metric records at last) | S |
-| 0.5 | Governance-flag stamping on approval artifacts + `/healthz` (D9); **align approval posture to the HITL default** (four-eyes optional org policy, code default off — operator-directed correction) | S |
+| 0.5 | Governance-flag stamping on approval artifacts + `/healthz` (D9); **align approval posture to the HITL default** (as delivered at P0: four-eyes optional org policy, code default off — operator-directed correction. *Since superseded: the four-eyes concept was removed entirely at the P1 entry gate, 2026-08-10 — single-user HITL is THE model*) | S |
 | 0.6 | Security hygiene: authenticate `/metrics` (F-16); Redis-backed rate limiting (F-17); remove secrets/state residue from the working tree + pre-commit guard (F-21); verify realm export secret-free | S |
 | 0.7 | Flip `aegisops_event_bus` default memory→redis (memory = unit tests only) | S |
 | 0.8 | Worker-role flag: background sweeps (reconciler/retention) run in exactly one role (F-18) | S |

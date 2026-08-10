@@ -353,7 +353,7 @@ async def _handle_callback(cb: Callback, transport: Transport, settings: Setting
         return
 
     user = bound.auth_user()
-    # RBAC at CLICK time. resolve_approval_core re-checks this too (and org scope, four-eyes,
+    # RBAC at CLICK time. resolve_approval_core re-checks this too (and org scope,
     # awaiting-approval state and the in-flight lock) — answering here first just gives the
     # presser an immediate, specific reason instead of a generic failure.
     if not user.can_approve:
@@ -368,7 +368,7 @@ async def _handle_callback(cb: Callback, transport: Transport, settings: Setting
             rationale=f"via {cb.channel} by {bound.username}",
             user=user, settings=settings)
     except HTTPException as exc:
-        # Every refusal the web endpoint would give, verbatim: four-eyes (403), cross-org (404),
+        # Every refusal the web endpoint would give, verbatim: cross-org (404),
         # already decided / not awaiting (409), a decision already in flight (409).
         detail = str(exc.detail)
         await transport.answer_callback(cb.callback_id, detail, alert=True)

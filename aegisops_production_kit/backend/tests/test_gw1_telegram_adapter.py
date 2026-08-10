@@ -397,7 +397,8 @@ def test_posture_says_linked_only_and_offers_no_allowlist():
     text = tg_poller.posture(_settings())
     assert "LINKED" in text
     assert "how-to-link" in text
-    assert "four-eyes" in text
+    assert "RBAC and org scope" in text
+    assert "four-eyes" not in text.lower()   # the concept is removed; it must not reappear
     # The waku pattern we deliberately did not adopt must not reappear in the posture text.
     assert "ALLOWED_USER" not in text and "allowlist" not in text.lower()
 

@@ -22,11 +22,17 @@ import json
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
+
+# P0/F-10: module-level import — the approval-wait metric block below uses `select`;
+# a function-local-only import left it as a latent NameError swallowed by its
+# try/except, so aegisops_approval_wait_seconds never recorded a single observation.
+from sqlalchemy import select
 from sse_starlette.sse import EventSourceResponse
 
 from ..agents.events import DONE, RunChannel, create_channel, get_channel
@@ -35,6 +41,7 @@ from ..agents.supervisor import get_supervisor
 from ..db import repositories as repo
 from ..db.models import Message, Run, RunStep, Session
 from ..db.session import session_scope
+from ..integrations import usage_ledger
 from ..integrations.gemini import set_run_model
 from ..integrations.llm import UnknownModelError, get_provider
 from ..logging_conf import bind_correlation, get_logger
@@ -102,8 +109,6 @@ async def _active_run_counts(org_id: str, user_id: str | None) -> tuple[int, int
     could drift or lock an org out after a crash; heartbeat-derived counts self-heal like
     the reconciler). awaiting_approval does NOT count — it may legitimately wait days and
     holds no worker/subprocess. Returns (org_active, user_active)."""
-    from sqlalchemy import select
-
     from ..agents.supervisor import hb_key
     from ..cache.redis import get_redis
 
@@ -113,7 +118,9 @@ async def _active_run_counts(org_id: str, user_id: str | None) -> tuple[int, int
         rows = (await s.execute(
             select(Run.id, Run.initiated_by).where(
                 Run.org_id == uuid.UUID(org_id),
-                Run.status.in_(("running", "applying"))))).all()
+                # P0/D5: "applying" removed — the status is written by nothing at HEAD
+                # (verified: zero writers; equivalence protocol in Redesign/09-review §10).
+                Run.status.in_(("running",))))).all()
     for rid, initiated_by in rows:
         try:
             if not await redis.exists(hb_key(str(rid))):
@@ -134,9 +141,10 @@ async def _force_terminal(run_id: str, message: str) -> None:
     try:
         async with session_scope() as s:
             run = await s.get(Run, uuid.UUID(run_id))
-            if run and run.status in ("running", "applying"):
+            if run and run.status == "running":  # P0/D5: "applying" removed (no writers)
                 run.status = "failed"
                 run.outcome = {"status": "failed", "error": message[:500]}
+                run.ended_at = datetime.now(UTC)  # P0/D7: run duration persisted
     except Exception as exc:  # noqa: BLE001 — last-ditch; the reconciler will catch what this can't
         log.error("chat.force_terminal_failed", run_id=run_id, error=str(exc))
     _cleanup_terminal_plan_files(run_id)
@@ -149,9 +157,10 @@ async def _mark_cancelled(run_id: str, message: str) -> None:
     try:
         async with session_scope() as s:
             run = await s.get(Run, uuid.UUID(run_id))
-            if run and run.status in ("running", "applying", "awaiting_approval"):
+            if run and run.status in ("running", "awaiting_approval"):  # P0/D5: no "applying"
                 run.status = "cancelled"
                 run.outcome = {"status": "cancelled", "note": message[:500]}
+                run.ended_at = datetime.now(UTC)  # P0/D7
     except Exception as exc:  # noqa: BLE001
         log.error("chat.mark_cancelled_failed", run_id=run_id, error=str(exc))
     _cleanup_terminal_plan_files(run_id)
@@ -192,6 +201,8 @@ async def _persist_result(run_id: str, session_id: str, org_id: str, state: dict
         run = await s.get(Run, uuid.UUID(run_id))
         if run:
             run.status = status_
+            if status_ in ("completed", "failed", "cancelled"):
+                run.ended_at = datetime.now(UTC)  # P0/D7: duration persisted
             run.intent = state.get("intent")
             run.confidence = state.get("intent_confidence")
             run.routing_reason = state.get("routing_reason")
@@ -328,6 +339,7 @@ def build_drive(prepared: PreparedRun, channel: RunChannel) -> Callable[[], Awai
     async def _drive() -> None:
         from ..agents.events import Emitter
         set_run_model(prepared.resolved_model)  # U3: bind the model for this run's async context
+        usage_ledger.bind_run(run_id, org_id)   # P0: ledger accounting attribution (run/org)
         emitter = Emitter(channel)
         try:
             # Lead with the run identity so the client binds its live artifact panel to THIS
@@ -391,8 +403,7 @@ async def _notify_gateways_awaiting_approval(prepared: PreparedRun, state: dict)
     try:
         from ..gateways import notify as gw_notify
         await gw_notify.approval_pending(
-            run_id=prepared.run_id, org_id=prepared.org_id, env=prepared.env,
-            initiator_user_id=prepared.initiator_user_id,
+            run_id=prepared.run_id, org_id=prepared.org_id,
             initiator_username=(state.get("user") or {}).get("username"),
             interrupt_payload=state.get("interrupt_payload") or {})
     except Exception as exc:  # noqa: BLE001 — a push failure must never affect the run
@@ -420,8 +431,8 @@ def _record_approval_wait(domain: str | None, decision: str, started_at) -> None
     legacy run with no recorded approval step, in which case there is nothing honest to record."""
     if not started_at:
         return
-    from datetime import datetime, timezone
-    wait = (datetime.now(timezone.utc) - started_at).total_seconds()
+    from datetime import datetime
+    wait = (datetime.now(UTC) - started_at).total_seconds()
     APPROVAL_WAIT.labels(domain=domain or "unknown", decision=decision).observe(max(wait, 0.0))
 
 
@@ -430,10 +441,11 @@ async def resolve_approval_core(run_id: str, *, decision: str, rationale: str | 
     """Record + drive an approval decision. Returns (channel, continuation_cursor).
 
     Every refusal is an HTTPException raised from here, so the HTTP route and a messaging
-    gateway refuse identically: unknown decision (400), cross-org run (404), four-eyes
-    violation (403), not-awaiting-approval (409), concurrent decision in flight (409). RBAC
+    gateway refuse identically: unknown decision (400), cross-org run (404),
+    not-awaiting-approval (409), concurrent decision in flight (409). RBAC
     (`can_approve`) is the caller's guard — the HTTP route via `require_approver`, a gateway by
-    re-checking the bound user at click time.
+    re-checking the bound user at click time. Approval is single-user human-in-the-loop:
+    the initiating human is an authorized approver of their own plan (initiator == approver).
     """
     if decision not in {"approved", "rejected"}:
         raise HTTPException(400, "decision must be 'approved' or 'rejected'")
@@ -448,13 +460,6 @@ async def resolve_approval_core(run_id: str, *, decision: str, rationale: str | 
         # S0 org predicate: a run outside the approver's org does not exist for them.
         if not run or (user.org_id and str(run.org_id) != user.org_id):
             raise HTTPException(404, "run not found")
-        # A5 4-eyes: the initiator of a Production change cannot approve it themselves.
-        # Skipped for legacy runs with no recorded initiator (pre-A5 rows).
-        if (settings.aegisops_four_eyes_for_production and (run.env or "").lower() == "production"
-                and run.initiated_by and user.user_id and str(run.initiated_by) == user.user_id):
-            raise HTTPException(status.HTTP_403_FORBIDDEN,
-                                "Four-eyes policy: you initiated this Production change — "
-                                "a different approver must review it.")
         if run.status != "awaiting_approval":
             raise HTTPException(status.HTTP_409_CONFLICT, "run is not awaiting approval")
         org_id, session_id = str(run.org_id), str(run.session_id)
@@ -494,6 +499,7 @@ async def resolve_approval_core(run_id: str, *, decision: str, rationale: str | 
 
     async def _drive():
         from ..agents.events import Emitter
+        usage_ledger.bind_run(run_id, org_id)  # P0: continuation spend attributed to the run
         emitter = Emitter(channel)
         try:
             await emitter.run({"runId": run_id, "sessionId": session_id})
