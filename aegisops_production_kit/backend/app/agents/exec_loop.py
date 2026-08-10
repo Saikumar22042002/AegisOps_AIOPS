@@ -18,7 +18,8 @@ Gated by `AEGISOPS_EXEC_LOOP` (default off → the DEP dag branch proposes the p
 from __future__ import annotations
 
 import re
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import structlog
 from langgraph.types import interrupt
@@ -158,6 +159,9 @@ async def plan_goal_dag(state: AgentState, config, dag: list[dict]) -> dict:
                                                for s in steps_card if isinstance(s.get("plan"), dict)),
                                     "change": 0, "destroy": 0}},
                "policyChecks": [c for s in steps_card for c in s.get("policy_checks", [])]}
+    # P0.5 (D9/F-9): governance posture on the whole-DAG card too — additive field only.
+    from ..security.governance_stamp import stamped
+    payload = stamped(payload)
     await emitter.step(9, "Awaiting approval · whole goal DAG, one decision")
     await emitter.interrupt(payload)
     answer = (f"Drafted a governed {len(dag)}-step plan (" +

@@ -52,9 +52,29 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     configure_logging(settings.log_level)
+    # P0 Redis policy: production/multi-replica coordination REQUIRES Redis. In-memory
+    # coordination is an explicit dev/test mode — there is NO silent non-local fallback:
+    # a non-local process with a memory bus, or with Redis unreachable, refuses to start
+    # rather than silently losing shared-coordination guarantees.
+    if settings.app_env != "local" and settings.aegisops_event_bus == "memory":
+        raise RuntimeError(
+            "AEGISOPS_EVENT_BUS=memory is a dev-only mode; app_env="
+            f"{settings.app_env!r} requires Redis coordination (set AEGISOPS_EVENT_BUS=redis).")
     setup_otel(settings)
     db.init_engine(settings)
     redis_client.init_redis(settings)
+    if settings.aegisops_event_bus == "redis":
+        try:
+            redis_ok = await redis_client.ping()
+        except Exception:  # noqa: BLE001
+            redis_ok = False
+        if not redis_ok:
+            if settings.app_env != "local":
+                raise RuntimeError(
+                    "Redis coordination is required (AEGISOPS_EVENT_BUS=redis) but Redis "
+                    "is unreachable — refusing to start rather than degrade silently.")
+            log.warning("startup.redis_unreachable",
+                        detail="dev posture: continuing; coordination features will error loudly")
     neo4j_client.init_neo4j(settings)
     # D3: world-model schema constraints (idempotent; best-effort — Neo4j down degrades the
     # graph features, never blocks startup).
@@ -80,25 +100,33 @@ async def lifespan(app: FastAPI):
         await rehydrate_promoted(settings)
     except Exception as exc:  # noqa: BLE001 — a failed rehydrate degrades, never blocks startup
         log.warning("startup.mpp_rehydrate_failed", error=str(exc))
+    # P0 worker foundation (F-18): background responsibilities run only in processes whose
+    # role owns them — under the api+api-b posture exactly ONE process sweeps. Role gates
+    # STARTUP ownership only; it introduces no queues/schedulers (those are P3).
+    _owns_background = settings.aegisops_role in ("all", "worker")
     # B3: periodic stranded-run reconciler (recovers runs abandoned by a crashed worker).
     # Gated so no background loop auto-starts in a test lifespan (AEGISOPS_RECONCILER=off).
-    if settings.aegisops_reconciler == "on":
+    if settings.aegisops_reconciler == "on" and _owns_background:
         from .agents.reconciler import get_reconciler
         try:
             await get_reconciler().start()
         except Exception as exc:  # noqa: BLE001
             log.error("startup.reconciler_failed", error=str(exc))
     else:
-        log.info("reconciler.disabled")
+        log.info("reconciler.disabled",
+                 reason=("role" if settings.aegisops_reconciler == "on" else "flag"),
+                 role=settings.aegisops_role)
     # GW-1: messaging gateways. Long-polling, so no public URL and no inbound port. Gated by
     # AEGISOPS_TELEGRAM (default off) and never able to break startup — `start_in_background`
     # catches everything and returns False rather than raising (waku's contract).
-    try:
-        from .gateways.telegram.poller import start_in_background as start_telegram
-        if await start_telegram(settings):
-            log.info("startup.telegram_gateway", detail="listening (long-poll)")
-    except Exception as exc:  # noqa: BLE001 — a gateway must never take the API down
-        log.error("startup.telegram_failed", error=str(exc))
+    # P0: gateway pollers are a background responsibility → role-gated like the reconciler.
+    if _owns_background:
+        try:
+            from .gateways.telegram.poller import start_in_background as start_telegram
+            if await start_telegram(settings):
+                log.info("startup.telegram_gateway", detail="listening (long-poll)")
+        except Exception as exc:  # noqa: BLE001 — a gateway must never take the API down
+            log.error("startup.telegram_failed", error=str(exc))
     log.info("app.startup", version=__version__, env=settings.app_env)
     try:
         yield
@@ -196,7 +224,21 @@ def create_app() -> FastAPI:
     app.include_router(gateways.router)
 
     @app.get("/metrics", include_in_schema=False)
-    async def metrics() -> Response:
+    async def metrics(request: Request) -> Response:
+        # P0/F-16: /metrics exposed run counts, envs, and API path cardinality to anyone
+        # who could reach the port. Posture: token set → bearer required; token unset →
+        # open ONLY in app_env=local (keeps the compose Prometheus scrape working);
+        # unset + non-local → 403 (fail secure, with an actionable detail).
+        token = settings.aegisops_metrics_token
+        if token:
+            supplied = (request.headers.get("authorization") or "").removeprefix("Bearer ").strip()
+            if supplied != token:
+                return PlainTextResponse("metrics: invalid or missing bearer token",
+                                         status_code=401)
+        elif settings.app_env != "local":
+            return PlainTextResponse(
+                "metrics: set AEGISOPS_METRICS_TOKEN (required outside app_env=local)",
+                status_code=403)
         return PlainTextResponse(generate_latest(REGISTRY).decode("utf-8"), media_type=CONTENT_TYPE_LATEST)
 
     # OTel auto-instrumentation for incoming requests (health/metrics excluded from spans).

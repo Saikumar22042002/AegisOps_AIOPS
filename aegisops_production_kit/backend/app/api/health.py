@@ -63,8 +63,12 @@ async def check_dependencies() -> dict[str, Any]:
 
 
 @router.get("/healthz")
-async def healthz() -> dict[str, str]:
-    return {"status": "ok"}
+async def healthz() -> dict[str, Any]:
+    # P0.5 (D9/F-9): the active governance posture is visible wherever liveness is —
+    # a weakened or changed flag can never again drift silently in an `.env`.
+    from ..security.governance_stamp import governance_stamp
+
+    return {"status": "ok", "governance": governance_stamp(get_settings())}
 
 
 @router.get("/readyz")

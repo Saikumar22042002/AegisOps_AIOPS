@@ -89,3 +89,17 @@ DRIFT_FINDINGS = Gauge(
     labelnames=("kind",),  # drift | orphan
     registry=REGISTRY,
 )
+
+LEDGER_RECORDS = Counter(
+    "aegisops_ledger_records_total",
+    "Authoritative llm_usage records persisted, by delivery path.",
+    labelnames=("path",),  # direct | replay
+    registry=REGISTRY,
+)
+
+LEDGER_SPILL = Counter(
+    "aegisops_ledger_spill_total",
+    "Usage records that could NOT be persisted and went to the local spill journal. "
+    "Any increase is alert-worthy: accounting is running on the durable fallback.",
+    registry=REGISTRY,
+)

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from datetime import UTC
 
 import structlog
 from sqlalchemy import select
@@ -30,7 +31,10 @@ from .supervisor import RunSupervisor, get_supervisor, hb_key
 
 log = structlog.get_logger(__name__)
 
-EXECUTING_STATES = ("running", "applying")
+# P0/D5: "applying" removed — a phantom status written by nothing at HEAD (verified:
+# zero writers). The interim run-state machine is running → awaiting_approval →
+# completed | failed | cancelled; the full machine lands in P3.
+EXECUTING_STATES = ("running",)
 SWEEP_INTERVAL = 60  # seconds between sweeps
 
 
@@ -84,7 +88,7 @@ class Reconciler:
         whose terminal cleanup never fired); (b) a DESTROYED resource's per-state workspace
         whose terraform state holds zero resources for > threshold is pruned. Sweeper-only —
         no chat request can trigger a prune; every action is logged."""
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
         from ..settings import get_settings
         from ..tools import terraform as tf_tools
@@ -97,13 +101,13 @@ class Reconciler:
             async with session_scope() as s:
                 keep = {str(r.id) for r in (await s.execute(
                     select(Run).where(Run.status.in_(
-                        ("running", "applying", "awaiting_approval"))))).scalars()}
+                        ("running", "awaiting_approval"))))).scalars()}  # P0/D5: no "applying"
             out["stray_plans_removed"] = tf_tools.sweep_stray_plan_files(
                 settings, max_age_days, keep_run_ids=keep)
         except Exception as e:  # noqa: BLE001 — hygiene must never break the reconcile pass
             log.warning("reconciler.stray_plan_sweep_failed", error=str(e))
         try:
-            cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+            cutoff = datetime.now(UTC) - timedelta(days=max_age_days)
             async with session_scope() as s:
                 rows = (await s.execute(
                     select(Resource).where(Resource.status == "destroyed",
@@ -217,6 +221,14 @@ class Reconciler:
                 try:
                     summary = await self.sweep()
                     await self.sweep_orphans()  # D2: rebuild any invisible inventory orphan
+                    # P0 ledger: replay any spilled usage records into Postgres (idempotent
+                    # by record id — a replay can never double-count). Best-effort here;
+                    # the journal survives until every record lands.
+                    try:
+                        from ..integrations.usage_ledger import replay_spill
+                        await replay_spill(get_settings())
+                    except Exception as e:  # noqa: BLE001 — never break the reconcile pass
+                        log.warning("reconciler.ledger_replay_failed", error=str(e))
                     # PR-6: publish the operator-alert gauges from the sweep result.
                     from ..metrics import STRANDED_RUNS
                     STRANDED_RUNS.set((summary.get("resumed", 0)) + (summary.get("failed", 0)))

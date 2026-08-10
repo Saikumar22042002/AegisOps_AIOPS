@@ -58,6 +58,48 @@ JSON shape:
   "intent": "<short label>", "confidence": 0.0-1.0, "reason": "<one sentence>"}}"""
 
 
+def normalize_classification(cls: dict) -> dict:
+    """Pure normalization of a raw router-LLM classification into state updates.
+
+    P0: extracted verbatim from the router node body so the behavioral evaluation gate
+    (backend/evals) replays recorded model outputs through the EXACT production code.
+    Behavior-preserving refactor — no logic change.
+    """
+    domain = (cls.get("domain") or "general").lower()
+    if domain not in {"cloudops", "devops", "sre", "knowledge", "general"}:
+        domain = "general"
+    return {
+        "domain": domain,
+        "intent": cls.get("intent", domain),
+        "intent_confidence": float(cls.get("confidence", 0.5)),
+        "routing_reason": cls.get("reason", ""),
+        "cloud": (cls.get("cloud") or "").lower() or None,
+        "resource": (cls.get("resource") or "").lower() or None,
+        "action": (cls.get("action") or "create").lower(),
+        "target": (cls.get("target") or "").strip() or None,
+    }
+
+
+def apply_post_guard_rules(updates: dict, message: str, confidence: float) -> dict:
+    """The deterministic post-guard rules (broad-inventory default + ambiguity gate),
+    extracted verbatim for the evaluation gate (P0). No-op when a guard already
+    diverted the run to clarification — mirroring the node's early return."""
+    if updates.get("needs_clarification"):
+        return updates
+    # Broad inventory question with no usable target → list everything (Phase 7 / BUG-04).
+    if (updates["domain"] == "cloudops" and updates["action"] == "read"
+            and not updates.get("target") and intent_guard.is_broad_inventory_question(message)):
+        updates["target"] = "all"
+    # Ambiguity guard — never take destructive action on unclear intent.
+    if confidence < 0.45:
+        updates["needs_clarification"] = True
+        updates["clarification"] = (
+            "I want to make sure I route this correctly — could you clarify the goal "
+            "(e.g. provision a resource, investigate an incident, deploy code, or ask a question)?"
+        )
+    return updates
+
+
 async def router(state: AgentState, config) -> dict:
     emitter = emitter_of(config)
     settings = get_settings()
@@ -123,26 +165,14 @@ async def router(state: AgentState, config) -> dict:
         return {"domain": "general", "intent": "general", "intent_confidence": 0.3,
                 "routing_reason": f"classification fallback ({e})"}
 
-    domain = (cls.get("domain") or "general").lower()
-    if domain not in {"cloudops", "devops", "sre", "knowledge", "general"}:
-        domain = "general"
-    confidence = float(cls.get("confidence", 0.5))
-    reason = cls.get("reason", "")
-    intent = cls.get("intent", domain)
+    updates: dict = normalize_classification(cls)  # P0: shared with the eval gate
+    domain = updates["domain"]
+    confidence = updates["intent_confidence"]
+    reason = updates["routing_reason"]
+    intent = updates["intent"]
 
     await emitter.step(1, f"Routed → {domain} ({int(confidence * 100)}%)")
     AGENT_RUNS.labels(domain=domain, workflow=intent, status="routed", env=state.get("user", {}).get("env", "na")).inc()
-
-    updates: dict = {
-        "domain": domain,
-        "intent": intent,
-        "intent_confidence": confidence,
-        "routing_reason": reason,
-        "cloud": (cls.get("cloud") or "").lower() or None,
-        "resource": (cls.get("resource") or "").lower() or None,
-        "action": (cls.get("action") or "create").lower(),
-        "target": (cls.get("target") or "").strip() or None,
-    }
 
     # Hard safety guard (Phase 7 / BUG-01): deterministic, regex-only — even if the LLM misfires,
     # a status/inventory question can never carry a side-effecting action, and a destroy requires
@@ -159,18 +189,9 @@ async def router(state: AgentState, config) -> dict:
         if updates.get("needs_clarification"):
             return updates
 
-    # Broad inventory question with no usable target → list everything (Phase 7 / BUG-04).
-    if (updates["domain"] == "cloudops" and updates["action"] == "read"
-            and not updates.get("target") and intent_guard.is_broad_inventory_question(message)):
-        updates["target"] = "all"
-
-    # Ambiguity guard — never take destructive action on unclear intent.
-    if confidence < 0.45:
-        updates["needs_clarification"] = True
-        updates["clarification"] = (
-            "I want to make sure I route this correctly — could you clarify the goal "
-            "(e.g. provision a resource, investigate an incident, deploy code, or ask a question)?"
-        )
+    # P0: broad-inventory default + ambiguity gate — shared verbatim with the eval gate.
+    updates = apply_post_guard_rules(updates, message, confidence)
+    if updates.get("needs_clarification"):
         return updates
 
     # Create a real ServiceNow ticket for actionable domains + open the context graph.

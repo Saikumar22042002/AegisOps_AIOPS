@@ -231,7 +231,7 @@ def _trace_spans(run, steps: list) -> tuple[list[dict], str | None]:
 
     root_status = "failed" if run.status == "failed" else (
         "cancelled" if run.status == "cancelled" else (
-            "running" if run.status in {"running", "applying", "awaiting_approval"} else "done"))
+            "running" if run.status in {"running", "awaiting_approval"} else "done"))  # P0/D5
     # A still-running run has no honest total yet — show in-flight, not the partial elapsed.
     root_dur = "···" if root_status == "running" else (total or "—")
     spans: list[dict] = [{

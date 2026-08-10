@@ -5,7 +5,7 @@ import { type CSSProperties, useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { cloudColor, modelColor } from "../lib/colors";
-import { cloudOptions, modelOptions, roleOptions } from "../lib/data";
+import { cloudOptions, roleOptions, type Opt } from "../lib/data";
 import { Checkmark, ThemeGlyph } from "../lib/icons";
 import { useResolvedTheme, useUI } from "../lib/store";
 
@@ -143,6 +143,24 @@ function ModelSelector() {
   const open = useUI((s) => s.menu === "model");
   const toggle = useUI((s) => s.toggleMenu);
   const setSelector = useUI((s) => s.setSelector);
+  // P0/D4: the menu lists exactly what the backend serves — GET /models is the single
+  // source of truth (replaces a hardcoded literal that required manual sync with the
+  // backend registry). On failure the menu is honestly empty, never a fake list.
+  const [modelOptions, setModelOptions] = useState<Opt[]>([]);
+  useEffect(() => {
+    api
+      .get<{ models: { id: string; provider: string; enabled: boolean; default: boolean }[] }>("/models")
+      .then((r) =>
+        setModelOptions(
+          r.models.map((m) => ({
+            label: m.id,
+            sub: `${m.provider}${m.default ? " · default" : ""}`,
+            dot: modelColor(m.id),
+          })),
+        ),
+      )
+      .catch(() => setModelOptions([]));
+  }, []);
   return (
     <div style={{ position: "relative", zIndex: 31 }}>
       <button
@@ -159,6 +177,11 @@ function ModelSelector() {
       {open && (
         <div style={{ ...popover, right: 0, minWidth: 268 }}>
           <div style={menuEyebrow}>Model · LLM provider</div>
+          {modelOptions.length === 0 && (
+            <div style={{ padding: "9px 10px", fontSize: 12, color: "var(--text-4)" }}>
+              model catalog unavailable (GET /models)
+            </div>
+          )}
           {modelOptions.map((o) => (
             <button
               key={o.label}

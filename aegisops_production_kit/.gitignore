@@ -26,6 +26,11 @@ crash.log
 __pycache__/
 *.py[cod]
 .venv/
+*.egg-info/
+# P0 ledger spill journal (durable local accounting spill — replayed into Postgres, never committed)
+llm_usage_spill*.jsonl
+# P0 eval gate output artifacts
+backend/evals/out/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/

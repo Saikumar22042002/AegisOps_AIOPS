@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import uuid
 
-import pytest
 from sqlalchemy import delete
 
 from app.agents import intent_guard, inventory
@@ -19,11 +18,13 @@ from app.agents.provider_errors import ProviderFailure, suggest_retry
 from app.db.models import Resource
 from app.db.session import session_scope
 
-
 # ── suggest_retry ──────────────────────────────────────────────────────────────────────────
 
 def _bad_region():
-    return ProviderFailure(kind="bad_region", title="t", cause="c", next_step="n")
+    # P0/D1: the classifier's real kind is "bad_location"; the old "bad_region" fixture
+    # kind matched a retry branch the classifier could never reach (the cross-boundary
+    # regression proving classify → suggest now connects lives in test_p0_defects.py).
+    return ProviderFailure(kind="bad_location", title="t", cause="c", next_step="n")
 
 
 def test_bad_region_swaps_the_region_in_place():
@@ -63,7 +64,7 @@ def test_unclassified_or_unfixable_failures_suggest_nothing():
 async def test_error_event_carries_the_retry_payload():
     ch = RunChannel("u7-run")
     em = Emitter(ch)
-    retry = {"kind": "bad_region", "label": "Retry with region us-west-2",
+    retry = {"kind": "bad_location", "label": "Retry with region us-west-2",
              "retry_message": "vm, region=us-west-2"}
     await em.error("terraform plan failed: bad region", code="terraform_error",
                    retriable=True, retry=retry)

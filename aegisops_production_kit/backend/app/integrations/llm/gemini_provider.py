@@ -8,9 +8,6 @@ default — all Google Gemini, all served by this one provider.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from typing import Any
-
 from ...settings import Settings
 from ..gemini import GeminiLLM, get_gemini
 
@@ -44,14 +41,7 @@ class GeminiProvider:
     def serves(self, model: str) -> bool:
         return model in self._models
 
-    async def astream(self, system: str | None, contents: Any, tools: list | None = None,
-                      model: str | None = None) -> AsyncIterator[Any]:
-        async for chunk in self._llm.astream(system, contents, tools, model=model):
-            yield chunk
-
-    async def agenerate(self, system: str | None, contents: Any, tools: list | None = None,
-                        model: str | None = None) -> Any:
-        return await self._llm.agenerate(system, contents, tools, model=model)
-
-    async def aembed(self, texts: list[str]) -> list[list[float]]:
-        return await self._llm.aembed(texts)
+    # P0/D7: the astream/agenerate/aembed passthroughs were deleted — they had ZERO callers
+    # (the validate-only seam dispatches nothing; all inference goes through the GeminiLLM
+    # singleton). This class is the honest catalog/validation surface for /models and /chat
+    # admission until the P1 provider layer replaces the whole seam.

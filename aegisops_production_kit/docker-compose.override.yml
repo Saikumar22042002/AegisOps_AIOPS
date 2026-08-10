@@ -16,6 +16,9 @@ services:
       # bus remains the single-worker default in settings.
       AEGISOPS_EVENT_BUS: redis
       AEGISOPS_RECONCILER: "on"
+      # P0 worker foundation (F-18): `api` owns the background sweeps; `api-b` is
+      # role=api below — exactly ONE reconciler/retention/drift owner per deployment.
+      AEGISOPS_ROLE: all
     volumes:
       # GCP service-account key for the Terraform google provider (gitignored host dir).
       - "./infra/secrets:/secrets:ro"
@@ -50,6 +53,8 @@ services:
       TF_DATA_ROOT: /app/.terraform-state/tfdata
       AEGISOPS_EVENT_BUS: redis
       AEGISOPS_RECONCILER: "on"
+      # P0 worker foundation (F-18): serve HTTP/SSE only — no duplicate sweeps.
+      AEGISOPS_ROLE: api
     ports: ["8001:8000"]
     volumes:
       - "./infra/secrets:/secrets:ro"
@@ -118,6 +123,8 @@ services:
       - "./docker-compose.override.yml:/compose/docker-compose.override.yml:ro"
       # PR-1c: the hygiene posture test reads the real ignore rules.
       - "./.gitignore:/app/.gitignore:ro"
+      # P0: the security-preflight test reads the sandbox-classification manifest.
+      - "./.gitleaks.toml:/app/.gitleaks.toml:ro"
       # PR-5/6/7: structural tests read these repo artifacts (mounted under /app so the
       # backend-dir anchor resolves them the same way it does on the host).
       - "./docs:/app/docs:ro"

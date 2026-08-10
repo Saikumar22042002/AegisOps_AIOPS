@@ -8,7 +8,9 @@ from fastapi.testclient import TestClient
 def test_healthz_ok(client: TestClient) -> None:
     resp = client.get("/healthz")
     assert resp.status_code == 200
-    assert resp.json() == {"status": "ok"}
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert "governance" in body  # posture stamp rides liveness so flag drift is visible
 
 
 def test_request_id_header(client: TestClient) -> None:

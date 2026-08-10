@@ -139,7 +139,10 @@ def suggest_retry(f: ProviderFailure | None, message: str, *, cloud: str | None 
     exists. The retry is always a NEW user turn (plan -> policy -> approval all re-run)."""
     if f is None or not message:
         return None
-    if f.kind == "bad_region":
+    # P0/D1: the classifier emits kind="bad_location" (see above) — this matcher said
+    # "bad_region", so the one-click region retry was unreachable for every real
+    # classified failure. One canonical kind: bad_location, end to end.
+    if f.kind == "bad_location":
         alts = _ALT_REGIONS.get((cloud or "aws").lower(), _ALT_REGIONS["aws"])
         to = next((r for r in alts if r != (current_region or "")), alts[0])
         if re.search(r"\b(region|location)\s*[=:]\s*\S+", message, re.IGNORECASE):
@@ -148,7 +151,7 @@ def suggest_retry(f: ProviderFailure | None, message: str, *, cloud: str | None 
                                    message, flags=re.IGNORECASE)
         else:
             retry_message = f"{message.rstrip('. ')}, region={to}"
-        return {"kind": "bad_region", "field": "region", "from": current_region, "to": to,
+        return {"kind": "bad_location", "field": "region", "from": current_region, "to": to,
                 "label": f"Retry with region {to}", "retry_message": retry_message}
     if f.kind == "credentials_expired":
         return {"kind": "credentials_expired", "label": "Retry (after refreshing credentials)",

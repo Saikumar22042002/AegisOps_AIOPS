@@ -18,10 +18,12 @@ describe("cloudColor", () => {
 
 describe("modelColor", () => {
   it("maps model families to their token colors", () => {
-    expect(modelColor("Claude Sonnet 4.5")).toBe("var(--amber)");
-    expect(modelColor("GPT-4o")).toBe("var(--green)");
+    // P0/D7: only served models get a brand color — the menu renders GET /models ids
+    // (Google Gemini today); anything else is the neutral violet, honestly.
+    expect(modelColor("gemini-3.5-flash")).toBe("var(--cyan)");
     expect(modelColor("Gemini 2.5 Pro")).toBe("var(--cyan)");
-    expect(modelColor("Azure OpenAI")).toBe("var(--green)"); // OpenAI matches before Azure
+    expect(modelColor("Claude Sonnet 4.5")).toBe("var(--violet)");
+    expect(modelColor("GPT-4o")).toBe("var(--violet)");
     expect(modelColor("Llama 3.1 70B")).toBe("var(--violet)");
   });
 });

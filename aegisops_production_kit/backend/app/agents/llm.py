@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
@@ -36,18 +36,12 @@ async def classify_json(settings: Settings, system: str, prompt: str) -> dict[st
         raise GeminiError("GEMINI_API_KEY is not configured")
     model = get_run_model() or gemini.model  # U3: label reflects the model the run actually uses
     with LLM_LATENCY.labels(model=model, operation="classify").time():
-        resp = await gemini.agenerate(system, prompt)
+        resp = await gemini.agenerate(system, prompt, op="classify")
     return _extract_json(resp.text or "")
 
 
-async def generate(settings: Settings, system: str, prompt: str) -> str:
-    gemini = get_gemini(settings)
-    if not gemini.enabled:
-        raise GeminiError("GEMINI_API_KEY is not configured")
-    model = get_run_model() or gemini.model  # U3
-    with LLM_LATENCY.labels(model=model, operation="generate").time():
-        resp = await gemini.agenerate(system, prompt)
-    return resp.text or ""
+# P0/D7: the caller-less `generate()` helper was deleted — every non-streaming call goes
+# through `classify_json` or the Gemini client directly; dead code invites drift.
 
 
 _TRUNCATION_NOTE = ("\n\n_(The upstream model stream ended early, so this answer may be "
@@ -88,11 +82,19 @@ async def stream_answer(settings: Settings, system: str, prompt: str, emitter: E
                 output=output, usage=usage, start_time=t0, error=error)
         except Exception:  # noqa: BLE001
             pass
+        # P0 ledger (accounting truth, durable-delivery path): unlike the Langfuse call
+        # above, this record cannot silently disappear — failure ends in the fsync'd
+        # spill journal, loudly. record_usage never raises.
+        from ..integrations.usage_ledger import record_usage
+        record_usage(
+            settings, purpose="answer_stream", model=model, usage=usage,
+            latency_ms=int((datetime.now(UTC) - t0).total_seconds() * 1000),
+            outcome="ok" if error is None else f"error:{error[:40]}")
 
     with LLM_LATENCY.labels(model=model, operation="stream").time():
         while True:
             attempt += 1
-            t0 = datetime.now(timezone.utc)
+            t0 = datetime.now(UTC)
             try:
                 async for chunk in gemini.astream(system, prompt):
                     usage = usage_of(chunk) or usage  # totals arrive on the final chunk

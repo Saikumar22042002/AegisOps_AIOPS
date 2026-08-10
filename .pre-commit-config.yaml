@@ -1,0 +1,31 @@
+# AegisOps pre-commit guards (P0 security/preflight foundation).
+#
+# Install:  pip install pre-commit && pre-commit install
+# Purpose:  stop accidental credential / Terraform-state / .env commits BEFORE they
+#           reach history. CI runs the same gitleaks policy as a backstop.
+# Policy:   aegisops_production_kit/.gitleaks.toml is the single sandbox-classification
+#           manifest — do not add allowlist entries without an operator declaration.
+
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.24.3
+    hooks:
+      - id: gitleaks
+        name: gitleaks (staged secrets scan, redacted output)
+        args:
+          - protect
+          - --staged
+          - --redact
+          - --config=aegisops_production_kit/.gitleaks.toml
+
+  - repo: local
+    hooks:
+      - id: forbid-secret-shaped-paths
+        name: forbid .env / tfstate / tfplan / SA-key / secrets-dir paths
+        language: fail
+        entry: >-
+          Refusing to commit a secret-shaped file (.env, *.tfstate, *.tfplan,
+          *-sa.json, infra/secrets/). If this is intentional and sandbox-classified,
+          record the operator declaration in aegisops_production_kit/.gitleaks.toml first.
+        files: '(^|/)\.env(\..*)?$|\.tfstate(\.backup)?$|\.tfplan$|-sa\.json$|(^|/)infra/secrets/'
+        exclude: '(^|/)\.env\.example$'

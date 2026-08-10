@@ -51,6 +51,10 @@ async def approval(state: AgentState, config) -> dict:
                 "outcome": {"status": "blocked", "error": "plan_guard: plan/action mismatch"}}
 
     payload = state.get("interrupt_payload") or {"kind": "approval", "runId": state["run_id"]}
+    # P0.5 (D9/F-9): every approval card carries the active governance posture. Additive
+    # field only — no existing payload key changes, no interrupt semantics change.
+    from ..security.governance_stamp import stamped
+    payload = stamped(payload)
     # Record the approval start now; end after the human decides. start_step preserves the first
     # start across the resume re-entry, so the recorded duration is the real human-wait time.
     await timing.start_step(state.get("run_id"), "approval", human_vs_auto="human")

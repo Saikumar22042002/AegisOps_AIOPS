@@ -1,0 +1,56 @@
+# AegisOps secret-scanning policy (P0 security/preflight foundation).
+#
+# Contract (Redesign/09 §6, P0 requirement 16):
+#   1. detect secrets, Terraform state/plan files, and service-account keys;
+#   2. never print secret values (gitleaks redacts by default; CI uses --redact);
+#   3. explicitly classify the operator-declared DEV/SANDBOX artifacts below;
+#   4. FAIL on any finding not covered by this manifest — unknown credentials block;
+#   5. production-shaped credentials outside declared paths always fail;
+#   6. this file is the single sandbox-classification manifest. Adding an entry is a
+#      change-management event: it must name the operator declaration that authorizes it.
+#
+# The global allowlist below is NOT a weakening of the scanner: every entry is an
+# exact path to an artifact the operator classified as disposable O'Reilly
+# sandbox/development material (declaration recorded 2026-08-09, P0 task §16).
+# New files — even in the same directories — are NOT covered and will fail the scan.
+
+title = "AegisOps gitleaks policy"
+
+[extend]
+useDefault = true
+
+# ── Structural leak rules (filename-based; any content) ─────────────────────────────
+
+[[rules]]
+id = "aegisops-terraform-state"
+description = "Terraform state files must never be committed (may embed outputs/credentials)"
+path = '''\.tfstate(\.backup)?$'''
+
+[[rules]]
+id = "aegisops-terraform-plan"
+description = "Terraform plan files must never be committed (replayable mutation payloads)"
+path = '''\.tfplan$'''
+
+[[rules]]
+id = "aegisops-dotenv"
+description = ".env files must never be committed"
+path = '''(^|[\\/])\.env(\.local|\.production|\.development)?$'''
+
+[[rules]]
+id = "aegisops-service-account-json"
+description = "Cloud service-account key files must never be committed"
+path = '''-sa\.json$'''
+
+# ── Operator-declared DEV/SANDBOX artifacts (exact paths only) ───────────────────────
+# Declaration: O'Reilly sandbox credentials/artifacts, disposable, NOT production.
+# Recorded: 2026-08-09 (P0 implementation task, section 16).
+
+[allowlist]
+description = "Operator-declared sandbox artifacts — exact paths; nothing else is covered"
+paths = [
+  '''(^|[\\/])infra[\\/]secrets[\\/]gcp-sa\.json$''',
+  '''(^|[\\/])infra[\\/]secrets[\\/]aegisops-before-wipe-20260719\.dump$''',
+  '''(^|[\\/])\.env$''',
+  '''(^|[\\/])infra[\\/]terraform-workspaces[\\/].+\.tfstate(\.backup)?$''',
+  '''(^|[\\/])infra[\\/]terraform-workspaces[\\/].+\.tfplan$''',
+]

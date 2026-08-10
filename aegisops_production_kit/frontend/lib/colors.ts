@@ -13,9 +13,9 @@ export function cloudColor(name: string): string {
 }
 
 export function modelColor(name: string): string {
-  if (/Claude/i.test(name)) return "var(--amber)";
-  if (/GPT|OpenAI/i.test(name)) return "var(--green)";
+  // P0/D7: the Claude/GPT/Azure branches were dead — the menu now renders only ids the
+  // backend actually serves (GET /models; Google Gemini today). New providers get a
+  // color when the P1 provider layer makes them real.
   if (/Gemini/i.test(name)) return "var(--cyan)";
-  if (/Azure/i.test(name)) return "var(--accent-2)";
   return "var(--violet)";
 }

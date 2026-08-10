@@ -31,6 +31,56 @@ jobs:
       - name: Test
         run: pytest -q
 
+  # P0: behavioral evaluation gate (Redesign/04 §9, 07 item 0.2). Two steps prove two
+  # properties: (1) the current behavior passes; (2) the gate CAN reject known-bad
+  # behavior — the seeded known-bad fixture must FAIL scoring or the self-test closes
+  # the gate. A red gate blocks the release like any other required job.
+  evals:
+    name: Behavioral evaluation gate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Gate (deterministic lane — recorded fixtures through real code)
+        run: python -m evals.gate
+      - name: Gate self-test (known-bad fixture MUST be rejected)
+        run: python -m evals.gate --self-test
+      - name: Upload verdict artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: backend/evals/out/
+          if-no-files-found: warn
+
+  # P0 security/preflight: secret + Terraform-state/plan + .env leak scanning over the
+  # committed tree. Policy + the operator-declared sandbox allowlist live in
+  # .gitleaks.toml — findings outside that exact-path manifest fail the job. Output is
+  # redacted (never prints secret values).
+  gitleaks:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan committed tree
+        run: |
+          GITLEAKS_VERSION=8.24.3
+          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz gitleaks
+          ./gitleaks detect --no-git --source . --config .gitleaks.toml --redact --verbose
+
   frontend:
     name: Frontend (lint + typecheck + vitest + build)
     runs-on: ubuntu-latest

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import contextvars
 from collections.abc import AsyncIterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
@@ -60,42 +60,18 @@ class GeminiLLM:
         self._enabled = bool(settings.gemini_api_key)
         # Client construction does not call the network; calls do.
         self.client = genai.Client(api_key=settings.gemini_api_key or "missing-key")
-        # P18/B6: DO NOT resolve the model here — `models.list()` is a blocking network call and
-        # this constructor runs inside async handlers (via the get_gemini singleton). Start with
-        # the configured model and resolve lazily, off-thread, on first use.
+        # P0/D2: the lazy models.list() resolution was DEAD — prepare_run always resolves a
+        # concrete model per run (U3), so `_effective_model` never fell through to a resolved
+        # default; the network call still fired and its result was discarded. Deleted. A key
+        # that cannot serve the requested model now fails at the call with the provider's own
+        # error (and /chat already 400s unknown ids at admission).
         self.model = settings.gemini_model
-        self._model_resolved = False
         self.embed_model = settings.gemini_embedding_model
         self.embed_dim = settings.gemini_embed_dim
 
     @property
     def enabled(self) -> bool:
         return self._enabled
-
-    async def _ensure_model(self) -> None:
-        """Resolve the model to one the key can actually list, once, without blocking the loop."""
-        if self._model_resolved or not self._enabled:
-            self._model_resolved = True
-            return
-        import anyio
-        self.model = await anyio.to_thread.run_sync(self._resolve, self.model)
-        self._model_resolved = True
-
-    def _resolve(self, wanted: str) -> str:
-        if not self._enabled:
-            return wanted
-        try:
-            ids = {m.name.split("/")[-1] for m in self.client.models.list()}
-            if wanted in ids:
-                return wanted
-            for cand in ("gemini-3.5-flash", "gemini-flash-latest", "gemini-2.5-flash"):
-                if cand in ids:
-                    log.warning("gemini.model_fallback", wanted=wanted, using=cand)
-                    return cand
-            return wanted
-        except Exception as e:  # noqa: BLE001 - resolution is best-effort; log and keep wanted
-            log.warning("gemini.model_list_failed", error=str(e))
-            return wanted
 
     def _config(self, system: str | None, tools: list | None) -> types.GenerateContentConfig:
         return types.GenerateContentConfig(
@@ -114,7 +90,6 @@ class GeminiLLM:
         """Stream raw response chunks (caller reads .text and tool-call parts)."""
         if not self._enabled:
             raise GeminiError("GEMINI_API_KEY is not configured")
-        await self._ensure_model()
         use = self._effective_model(model)
         stream = await self.client.aio.models.generate_content_stream(
             model=use, contents=contents, config=self._config(system, tools)
@@ -122,28 +97,21 @@ class GeminiLLM:
         async for chunk in stream:
             yield chunk
 
-    async def astream_text(
-        self, system: str | None, contents: Any, tools: list | None = None,
-        model: str | None = None,
-    ) -> AsyncIterator[str]:
-        async for chunk in self.astream(system, contents, tools, model=model):
-            if getattr(chunk, "text", None):
-                yield chunk.text
-
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=0.5, max=6), reraise=True)
     async def agenerate(
         self, system: str | None, contents: Any, tools: list | None = None,
-        model: str | None = None,
+        model: str | None = None, op: str = "generate",
     ) -> types.GenerateContentResponse:
         if not self._enabled:
             raise GeminiError("GEMINI_API_KEY is not configured")
-        await self._ensure_model()
         use = self._effective_model(model)
-        # Each attempt is recorded as one Langfuse generation (tokens/cost/latency; failures
-        # as ERROR generations) under whichever step span is currently open for the run.
+        # Each attempt is recorded as one Langfuse generation (observability) AND one
+        # authoritative ledger row (accounting truth — P0; `op` is a coarse call-site
+        # label, NOT purpose routing, which is P1).
+        from . import usage_ledger
         from .langfuse_client import get_tracer
 
-        t0 = datetime.now(timezone.utc)
+        t0 = datetime.now(UTC)
         try:
             resp = await self.client.aio.models.generate_content(
                 model=use, contents=contents, config=self._config(system, tools)
@@ -153,11 +121,18 @@ class GeminiLLM:
                 name="gemini.generate", model=use,
                 input={"system": system, "prompt": contents if isinstance(contents, str) else str(contents)},
                 start_time=t0, error=str(e))
+            usage_ledger.record_usage(
+                self.settings, purpose=op, model=use,
+                latency_ms=int((datetime.now(UTC) - t0).total_seconds() * 1000),
+                outcome=f"error:{type(e).__name__}")
             raise
         get_tracer(self.settings).generation(
             name="gemini.generate", model=use,
             input={"system": system, "prompt": contents if isinstance(contents, str) else str(contents)},
             output=resp.text or "", usage=usage_of(resp), start_time=t0)
+        usage_ledger.record_usage(
+            self.settings, purpose=op, model=use, usage=usage_of(resp),
+            latency_ms=int((datetime.now(UTC) - t0).total_seconds() * 1000))
         return resp
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=0.5, max=6), reraise=True)
@@ -165,11 +140,23 @@ class GeminiLLM:
         """Return one embedding vector per input text (dimensionality = embed_dim)."""
         if not self._enabled:
             raise GeminiError("GEMINI_API_KEY is not configured")
+        from . import usage_ledger
+
+        t0 = datetime.now(UTC)
         resp = await self.client.aio.models.embed_content(
             model=self.embed_model,
             contents=texts,
             config=types.EmbedContentConfig(output_dimensionality=self.embed_dim),
         )
+        # P0/D3: embedding calls were invisible in EVERY sink. The embed API does not
+        # report token usage reliably, so tokens may honestly be 0 — the call itself
+        # (count, model, latency) is now on the ledger.
+        usage_ledger.record_usage(
+            self.settings, purpose="embedding", model=self.embed_model,
+            usage=getattr(resp, "usage_metadata", None) and {
+                "total": getattr(resp.usage_metadata, "total_token_count", 0)} or None,
+            latency_ms=int((datetime.now(UTC) - t0).total_seconds() * 1000),
+            agent_kind="embedding", outcome=f"ok:{len(texts)}_texts")
         return [list(e.values) for e in resp.embeddings]
 
 

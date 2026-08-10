@@ -21,7 +21,16 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
+# P0: the unit tier runs hermetically anywhere. The shipped coordination default is now
+# `redis` (the multi-replica posture, with a no-silent-fallback startup guard), so tests
+# pin the explicit dev/memory mode BEFORE the app import freezes settings. The api-test
+# container overrides these where the live datastores are the point.
+os.environ.setdefault("AEGISOPS_EVENT_BUS", "memory")
+os.environ.setdefault("AEGISOPS_ROLE", "all")
+os.environ.setdefault("AEGISOPS_TELEGRAM", "off")
+os.environ.setdefault("AEGISOPS_RECONCILER", "off")
+
+from app.main import app  # noqa: E402 — must import after the env pins above
 
 
 def _live_enabled() -> bool:
