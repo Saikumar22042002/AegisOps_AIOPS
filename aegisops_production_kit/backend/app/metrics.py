@@ -97,6 +97,22 @@ LEDGER_RECORDS = Counter(
     registry=REGISTRY,
 )
 
+# ── P1.6: provider-routing resilience (visible failover — 04 §4.6, 10-V) ──
+LLM_FAILOVER = Counter(
+    "aegisops_llm_failover_total",
+    "Turn-local provider/model failover hops taken by the resilient executor. "
+    "Any sustained increase means a primary binding is unhealthy.",
+    labelnames=("provider", "model", "kind"),  # kind = the ModelError kind that caused the hop
+    registry=REGISTRY,
+)
+
+LLM_BUDGET_REFUSALS = Counter(
+    "aegisops_llm_budget_refusals_total",
+    "Model calls refused by the org daily budget gate (P1.6; 0 unless "
+    "AEGISOPS_LLM_DAILY_BUDGET_USD is set).",
+    registry=REGISTRY,
+)
+
 LEDGER_SPILL = Counter(
     "aegisops_ledger_spill_total",
     "Usage records that could NOT be persisted and went to the local spill journal. "

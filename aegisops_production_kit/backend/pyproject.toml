@@ -30,7 +30,11 @@ dependencies = [
   "langgraph>=0.2.50",
   "langgraph-checkpoint-postgres>=2.0.1",
   "langchain-core>=0.3.15",
+  # ── LLM provider SDKs (P1.5) — imported ONLY inside app/llm/adapters/* (P1.9) ──
   "google-genai>=0.3.0",
+  "anthropic>=0.40",
+  "openai>=1.55",
+  "pyyaml>=6.0",
 
   # ── Auth ──
   "python-keycloak>=4.5",

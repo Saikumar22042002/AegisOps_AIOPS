@@ -1,121 +1,107 @@
-"""Gemini helpers for the agents — JSON classification, generation, and token streaming."""
+"""Compatibility shim over the P1 provider substrate (07 P1.3 — byte-compatible).
+
+The historical Gemini helpers, same signatures, same error semantics (`GeminiError`
+raised for callers that catch it), same streaming resilience policy — now routed
+through `app/llm` (canonical contracts → router → resilient executor → adapter).
+TRANSITIONAL (Redesign/11 T-01): deleted end of P2 once every caller imports
+`app.llm.service` directly. New code must NOT import this module.
+"""
 
 from __future__ import annotations
 
-import json
-import re
 from datetime import UTC, datetime
 from typing import Any
 
 import structlog
 
-from ..integrations.gemini import GeminiError, get_gemini, get_run_model, usage_of
-from ..integrations.langfuse_client import get_tracer
+from ..integrations.gemini import GeminiError, get_run_model
 from ..metrics import LLM_LATENCY
 from ..settings import Settings
+from ..llm import service
+from ..llm.errors import ModelError
 from .events import Emitter
 
 log = structlog.get_logger(__name__)
 
-
-def _extract_json(text: str) -> dict[str, Any]:
-    """Pull the first JSON object out of a model response (handles ```json fences)."""
-    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
-    candidate = fenced.group(1) if fenced else None
-    if not candidate:
-        m = re.search(r"\{.*\}", text, re.DOTALL)
-        candidate = m.group(0) if m else None
-    if not candidate:
-        raise ValueError("No JSON object in model response")
-    return json.loads(candidate)
+# The eval runner replays recorded model outputs through this exact parser (rule zero).
+_extract_json = service.extract_json
 
 
-async def classify_json(settings: Settings, system: str, prompt: str) -> dict[str, Any]:
-    gemini = get_gemini(settings)
-    if not gemini.enabled:
-        raise GeminiError("GEMINI_API_KEY is not configured")
-    model = get_run_model() or gemini.model  # U3: label reflects the model the run actually uses
-    with LLM_LATENCY.labels(model=model, operation="classify").time():
-        resp = await gemini.agenerate(system, prompt, op="classify")
-    return _extract_json(resp.text or "")
+async def classify_json(settings: Settings, system: str, prompt: str, *,
+                        purpose: str = "extract",
+                        response_schema: dict[str, Any] | None = None) -> dict[str, Any]:
+    model_label = get_run_model() or settings.gemini_model  # U3: label = the run's model
+    with LLM_LATENCY.labels(model=model_label, operation="classify").time():
+        try:
+            return await service.classify_json(
+                settings, system, prompt, purpose=purpose,
+                response_schema=response_schema, requested_model=get_run_model())
+        except ModelError as e:
+            raise GeminiError(str(e)) from e
 
 
 # P0/D7: the caller-less `generate()` helper was deleted — every non-streaming call goes
-# through `classify_json` or the Gemini client directly; dead code invites drift.
+# through `classify_json` or the service directly; dead code invites drift.
 
 
 _TRUNCATION_NOTE = ("\n\n_(The upstream model stream ended early, so this answer may be "
                     "incomplete — ask me to continue if something is missing.)_")
 
+# Error kinds that are configuration problems, not transient stream failures — parity
+# with the historical "except GeminiError: raise" (never retried).
+_CONFIG_KINDS = {"auth_permanent", "invalid_request", "content_filtered", "refusal"}
+
 
 async def stream_answer(settings: Settings, system: str, prompt: str, emitter: Emitter,
-                        max_attempts: int = 3) -> str:
-    """Stream Gemini tokens to the client and return the full text — resilient to upstream
-    transport truncation (Phase 7 / BUG-03).
-
-    The google-genai async stream can die mid-response with a transport error (observed live:
-    aiohttp `TransferEncodingError: 400, 'Not enough data to satisfy transfer length header'`,
-    screenshot 15). Previously that exception escaped the agent, crashed the whole graph run,
-    and the run was persisted as an EMPTY "completed" state. Policy now:
+                        max_attempts: int = 3, *, purpose: str = "general") -> str:
+    """Stream tokens to the client and return the full text — resilient to upstream
+    transport truncation (Phase 7 / BUG-03; policy unchanged in P1):
 
       • nothing emitted yet  → retry transparently (fresh stream, nothing duplicated);
-      • tokens already shown → finish cleanly with the partial text + a visible truncation
-        note, and emit a retriable `error` event (the client can resume via Last-Event-ID);
-      • retries exhausted with nothing to show → raise GeminiError, which every streaming
-        agent (general/knowledge/sre) already handles without crashing the graph.
+      • tokens already shown → finish cleanly with the partial text + a visible
+        truncation note, and emit a retriable `error` event;
+      • retries exhausted with nothing to show → raise GeminiError, which every
+        streaming agent (general/knowledge/sre) already handles.
+
+    Provider failover BELOW this policy is the executor's job (turn-local, visible
+    hops, pre-first-token only) — this loop only sees a stream that works or errors.
     """
-    gemini = get_gemini(settings)
-    if not gemini.enabled:
-        raise GeminiError("GEMINI_API_KEY is not configured")
-    model = get_run_model() or gemini.model  # U3: the model this run selected (or the default)
+    model_label = get_run_model() or settings.gemini_model
     full: list[str] = []
     attempt = 0
-    usage: dict | None = None
-
-    def _record(output: str | None, error: str | None, t0: datetime) -> None:
-        # One Langfuse generation per streamed answer (or per failed attempt), with the token
-        # usage the final stream chunk reported. Best-effort — never breaks the stream.
-        try:
-            get_tracer(settings).generation(
-                name="gemini.stream", model=model,
-                input={"system": system, "prompt": prompt},
-                output=output, usage=usage, start_time=t0, error=error)
-        except Exception:  # noqa: BLE001
-            pass
-        # P0 ledger (accounting truth, durable-delivery path): unlike the Langfuse call
-        # above, this record cannot silently disappear — failure ends in the fsync'd
-        # spill journal, loudly. record_usage never raises.
-        from ..integrations.usage_ledger import record_usage
-        record_usage(
-            settings, purpose="answer_stream", model=model, usage=usage,
-            latency_ms=int((datetime.now(UTC) - t0).total_seconds() * 1000),
-            outcome="ok" if error is None else f"error:{error[:40]}")
-
-    with LLM_LATENCY.labels(model=model, operation="stream").time():
+    with LLM_LATENCY.labels(model=model_label, operation="stream").time():
         while True:
             attempt += 1
-            t0 = datetime.now(UTC)
+            error_payload: dict | None = None
             try:
-                async for chunk in gemini.astream(system, prompt):
-                    usage = usage_of(chunk) or usage  # totals arrive on the final chunk
-                    if getattr(chunk, "text", None):
-                        full.append(chunk.text)
-                        await emitter.token(chunk.text)
-                _record("".join(full), None, t0)
+                async for ev in service.stream(settings, purpose=purpose, system=system,
+                                               prompt=prompt,
+                                               requested_model=get_run_model()):
+                    if ev.kind == "text_delta":
+                        full.append(ev.payload["text"])
+                        await emitter.token(ev.payload["text"])
+                    elif ev.kind == "served_by":
+                        # Additive SSE event (P1.7): honest model badge, incl. fallback hops.
+                        await emitter.served_by(ev.payload)
+                    elif ev.kind == "error":
+                        error_payload = ev.payload
+            except ModelError as e:
+                # Pre-dispatch refusal (no key, unknown model, budget) — config problem.
+                raise GeminiError(str(e)) from e
+            if error_payload is None:
                 return "".join(full)
-            except GeminiError:
-                raise  # configuration problem — not transient
-            except Exception as e:  # noqa: BLE001 - transport/stream failure mid-response
-                log.warning("llm.stream_interrupted", error=str(e), attempt=attempt,
-                            emitted_chars=sum(len(c) for c in full))
-                if not full and attempt < max_attempts:
-                    _record(None, f"stream interrupted, retrying: {e}", t0)
-                    continue  # user saw nothing yet — retry with a fresh stream
-                if full:
-                    _record("".join(full), f"stream truncated: {e}", t0)
-                    await emitter.token(_TRUNCATION_NOTE)
-                    await emitter.error(f"upstream stream interrupted: {e}",
-                                        code="stream_truncated", retriable=True)
-                    return "".join(full) + _TRUNCATION_NOTE
-                _record(None, str(e), t0)
-                raise GeminiError(f"model stream failed after {attempt} attempt(s): {e}") from e
+            kind = error_payload.get("kind", "unavailable")
+            message = error_payload.get("message", kind)
+            log.warning("llm.stream_interrupted", error=message, kind=kind,
+                        attempt=attempt, emitted_chars=sum(len(c) for c in full))
+            if kind in _CONFIG_KINDS:
+                raise GeminiError(message)
+            if not full and attempt < max_attempts:
+                continue  # user saw nothing yet — retry with a fresh stream
+            if full:
+                await emitter.token(_TRUNCATION_NOTE)
+                await emitter.error(f"upstream stream interrupted: {message}",
+                                    code="stream_truncated", retriable=True)
+                return "".join(full) + _TRUNCATION_NOTE
+            raise GeminiError(
+                f"model stream failed after {attempt} attempt(s): {message}")

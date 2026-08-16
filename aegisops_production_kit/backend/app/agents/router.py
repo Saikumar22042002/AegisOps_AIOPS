@@ -13,7 +13,7 @@ import json
 import structlog
 
 from ..graph_db.context_graph import ContextGraph
-from ..integrations.gemini import get_gemini
+from ..llm import service as llm_service
 from ..integrations.servicenow import get_servicenow
 from ..metrics import AGENT_RUNS
 from ..settings import get_settings
@@ -22,6 +22,27 @@ from .runtime import emitter_of
 from .state import AgentState
 
 log = structlog.get_logger(__name__)
+
+# P1.8: native structured output for the router purpose — the provider enforces a JSON
+# OBJECT with these (permissively typed) fields; the semantics stay entirely in _SYSTEM,
+# and normalize_classification remains the one normalizer (rule zero: the eval gate
+# replays recorded outputs through that exact code, schema or no schema).
+_CLASSIFICATION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "domain": {"type": "string",
+                   "enum": ["cloudops", "devops", "sre", "knowledge", "general"]},
+        "intent": {"type": "string"},
+        "intent_confidence": {"type": "number"},
+        "routing_reason": {"type": "string"},
+        "cloud": {"type": "string"},
+        "resource": {"type": "string"},
+        "action": {"type": "string",
+                   "enum": ["create", "read", "modify", "destroy"]},
+        "target": {"type": "string"},
+    },
+    "required": ["domain"],
+}
 
 _SYSTEM = """You are the Router for AegisOps, an agentic AIOps platform.
 Classify the user's request and respond with ONLY a JSON object, no prose.
@@ -58,6 +79,18 @@ JSON shape:
   "intent": "<short label>", "confidence": 0.0-1.0, "reason": "<one sentence>"}}"""
 
 
+def _clamp_target(raw: object) -> str | None:
+    """A usable target is a short, single-line resource name/reference. The router model
+    occasionally leaks its reasoning into this field; a multi-line or very long value would
+    then propagate into inventory matching and user-facing messages, so anything that cannot
+    be a real reference normalizes to "no target" (the graceful ask-for-the-name path)."""
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    first_line = text.splitlines()[0].strip()
+    return first_line if 0 < len(first_line) <= 100 else None
+
+
 def normalize_classification(cls: dict) -> dict:
     """Pure normalization of a raw router-LLM classification into state updates.
 
@@ -76,7 +109,7 @@ def normalize_classification(cls: dict) -> dict:
         "cloud": (cls.get("cloud") or "").lower() or None,
         "resource": (cls.get("resource") or "").lower() or None,
         "action": (cls.get("action") or "create").lower(),
-        "target": (cls.get("target") or "").strip() or None,
+        "target": _clamp_target(cls.get("target")),
     }
 
 
@@ -142,8 +175,7 @@ async def router(state: AgentState, config) -> dict:
                                   "resource in this conversation (approval-gated).",
                 "action": "destroy", "target": "__last_applied__"}
 
-    gemini = get_gemini(settings)
-    if not gemini.enabled:
+    if not llm_service.configured(settings, "router"):
         log.warning("router.llm_unavailable")
         return {"domain": "general", "llm_unavailable": True, "intent": "unavailable",
                 "intent_confidence": 0.0, "routing_reason": "LLM not configured"}
@@ -159,7 +191,8 @@ async def router(state: AgentState, config) -> dict:
     classify_input = (f"Recent conversation (context for resolving references — classify ONLY "
                       f"the current message):\n{ctx}\n\nCurrent message: {message}") if ctx else message
     try:
-        cls = await llm.classify_json(settings, system, classify_input)
+        cls = await llm.classify_json(settings, system, classify_input, purpose="router",
+                                      response_schema=_CLASSIFICATION_SCHEMA)
     except Exception as e:  # noqa: BLE001
         log.warning("router.classify_failed", error=str(e))
         return {"domain": "general", "intent": "general", "intent_confidence": 0.3,

@@ -1,0 +1,33 @@
+# P1.9 provider import boundary (07 P1.9) — the formal contract for `lint-imports`.
+# The always-on enforcement (no extra dependency) is tests/test_p1_import_boundary.py;
+# this file exists so the boundary is ALSO checkable with the standard tool:
+#   pip install import-linter && lint-imports --config .importlinter
+
+[importlinter]
+root_package = app
+
+[importlinter:contract:provider-sdks-only-in-adapters]
+name = Provider SDKs live only inside app.llm.adapters
+type = forbidden
+source_modules =
+    app.agents
+    app.api
+    app.db
+    app.security
+    app.gateways
+    app.rag
+    app.graph_db
+    app.tools
+    app.integrations
+forbidden_modules =
+    google.genai
+    anthropic
+    openai
+
+[importlinter:contract:llm-below-agents]
+name = The llm substrate never imports the agent layer
+type = forbidden
+source_modules =
+    app.llm
+forbidden_modules =
+    app.agents

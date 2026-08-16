@@ -11,7 +11,7 @@ from typing import Any
 
 import structlog
 
-from ..integrations.gemini import get_gemini
+from ..llm import service as llm_service
 from ..integrations.langfuse_client import get_tracer
 from ..settings import Settings
 from . import store
@@ -21,12 +21,11 @@ log = structlog.get_logger(__name__)
 
 async def retrieve(session, *, org_id: uuid.UUID, query: str, settings: Settings, k: int = 5) -> list[dict[str, Any]]:
     async with get_tracer(settings).tool("rag.retrieve", input={"query": query, "k": k}) as t:
-        gemini = get_gemini(settings)
         results: list[dict[str, Any]] = []
         mode = "keyword"
-        if gemini.enabled:
+        if llm_service.configured(settings, "embeddings"):
             try:
-                vectors = await gemini.aembed([query])
+                vectors = await llm_service.embed(settings, [query])
                 results = await store.semantic_search(session, org_id=org_id, query_vector=vectors[0], k=k)
                 mode = "semantic"
             except Exception as e:  # noqa: BLE001 - degrade to keyword search, never fabricate

@@ -27,12 +27,31 @@ export type NavKey =
 export type ArtifactTab =
   | "timeline"
   | "reasoning"
+  | "events"
   | "terraform"
   | "logs"
   | "metrics"
   | "traces"
   | "references"
   | "approvals";
+
+// P2.5: one harness loop event (OBSERVE→REASON→ACT trail). CoT-safe: `hypothesis` is a
+// one-line machine-comparable claim, `rationale` a privacy-safe summary — never raw CoT.
+export interface RunEvent {
+  seq: number;
+  kind: string;
+  at: string;
+  hypothesis?: string;
+  rationale?: string;
+  action?: string;
+  tool?: string;
+  ok?: boolean;
+  error?: string | null;
+  preview?: string | null;
+  verdict?: string;
+  reason?: string;
+  status?: string;
+}
 
 export type MenuKey =
   | "org"
@@ -107,6 +126,9 @@ export interface ChatMessage {
   decision?: "approved" | "rejected" | null;
   // Names of sensitive Terraform outputs revealable ONCE via POST /runs/{id}/credentials (N-02).
   sensitiveOutputs?: string[];
+  // P1.7: honest serving metadata from the `served_by` SSE event — which provider/model
+  // actually answered, and whether the resilient executor took a fallback hop.
+  servedBy?: { provider: string; model: string; requestedModel?: string; fallbackHop: number };
   tab?: "conversation" | "analysis";
 }
 

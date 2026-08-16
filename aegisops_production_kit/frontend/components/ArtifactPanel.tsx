@@ -108,6 +108,7 @@ function TabBody({ tab, data }: { tab: ArtifactTab; data: any }) {
   if (tab === "timeline") return <Timeline data={data} />;
   if (tab === "terraform") return <Terraform data={data} />;
   if (tab === "reasoning") return <Reasoning data={data} />;
+  if (tab === "events") return <AgentLoop data={data} />;
   if (tab === "logs") return <Logs data={data} />;
   if (tab === "metrics") return <Metrics data={data} />;
   if (tab === "traces") return <Traces data={data} />;
@@ -117,7 +118,14 @@ function TabBody({ tab, data }: { tab: ArtifactTab; data: any }) {
 }
 
 function statusColor(s: string) {
-  return { done: "var(--green)", running: "var(--accent-2)", pending: "var(--amber)", rejected: "var(--red)", failed: "var(--red)", cancelled: "var(--border-2)" }[s] || "var(--border-3)";
+  // P3 durable-engine statuses: `compensated` (a done step the saga undid) and the run
+  // terminals `rolled_back`/`verifying`/`scheduled`/`awaiting_input` read honestly — a
+  // rolled-back step is not "failed", it is deliberately reversed (amber, not red).
+  return { done: "var(--green)", running: "var(--accent-2)", pending: "var(--amber)",
+           rejected: "var(--red)", failed: "var(--red)", cancelled: "var(--border-2)",
+           compensated: "var(--amber)", rolled_back: "var(--amber)",
+           verifying: "var(--accent-2)", scheduled: "var(--text-4)",
+           awaiting_input: "var(--amber)" }[s] || "var(--border-3)";
 }
 
 // Real-time timeline for an in-flight run, rendered from the graph's streamed step events.
@@ -235,6 +243,47 @@ function Terraform({ data }: { data: any }) {
         })}
       </div>
     </>
+  );
+}
+
+// P2.5: the harness OBSERVE→REASON→ACT trail from GET /runs/{id}/events. Renders the
+// one-line hypothesis + privacy-safe rationale of each reason step and the ok/failed
+// observations — the visible proof that a failed tool changed the next action. Never
+// shows raw chain-of-thought (the API does not return it).
+function AgentLoop({ data }: { data: any }) {
+  const events = data.events ?? [];
+  if (!events.length) return <Empty msg="No agent-loop activity for this run (harness read paths off, or a non-harness run)." />;
+  const dot = (e: any) =>
+    e.kind === "observation" ? (e.ok ? "var(--green)" : "var(--red)")
+    : e.kind === "verification" ? (e.verdict === "verified" ? "var(--green)" : "var(--amber)")
+    : e.kind === "budget" ? "var(--amber)"
+    : e.kind === "assistant_turn" ? "var(--accent-2)" : "var(--text-4)";
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }} data-testid="agent-loop">
+      {events.map((e: any, i: number) => (
+        <div key={e.seq ?? i} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+          <span style={{ width: 7, height: 7, borderRadius: 99, background: dot(e), marginTop: 6, flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 11, color: "var(--text-4)", fontFamily: "'IBM Plex Mono',monospace" }}>
+              #{e.seq} {e.kind}{e.tool ? ` · ${e.tool}` : ""}{e.verdict ? ` · ${e.verdict}` : ""}
+              {e.reason ? ` · ${e.reason}` : ""}{e.status ? ` · ${e.status}` : ""}
+              {e.kind === "observation" ? (e.ok ? " · OK" : ` · FAILED${e.error ? ` (${e.error})` : ""}`) : ""}
+            </div>
+            {e.hypothesis && (
+              <div style={{ fontSize: 12.5, color: "var(--text)", marginTop: 2 }}>
+                <span style={{ color: "var(--text-4)" }}>hypothesis: </span>{e.hypothesis}
+              </div>
+            )}
+            {e.rationale && (
+              <div style={{ fontSize: 12, color: "var(--text-3)", lineHeight: 1.5, marginTop: 1 }}>{e.rationale}</div>
+            )}
+            {e.preview && (
+              <div style={{ fontSize: 11.5, color: "var(--text-3)", fontFamily: "'IBM Plex Mono',monospace", marginTop: 2, wordBreak: "break-word" }}>{e.preview}</div>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 

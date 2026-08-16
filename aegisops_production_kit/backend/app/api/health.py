@@ -74,6 +74,13 @@ async def healthz() -> dict[str, Any]:
 @router.get("/readyz")
 async def readyz(response: Response) -> dict[str, Any]:
     result = await check_dependencies()
+    # P5 hardening: the config preflight is reported alongside dependency reachability, so an
+    # operator sees production-posture findings (event-bus/metrics-auth/tenancy/broker) on the
+    # same readiness surface. It does not itself flip readiness (the P0 startup refusals are
+    # the hard gate); a `blocked` finding is surfaced for visibility.
+    from .. import preflight
+    from ..settings import get_settings
+    result["preflight"] = preflight.run(get_settings()).as_dict()
     if not result["ready"]:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         log.warning("readyz.not_ready", dependencies=result["dependencies"])

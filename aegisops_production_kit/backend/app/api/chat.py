@@ -43,7 +43,8 @@ from ..db.models import Message, Run, RunStep, Session
 from ..db.session import session_scope
 from ..integrations import usage_ledger
 from ..integrations.gemini import set_run_model
-from ..integrations.llm import UnknownModelError, get_provider
+from ..llm import catalog as llm_catalog
+from ..llm.errors import ModelError as LlmModelError
 from ..logging_conf import bind_correlation, get_logger
 from ..metrics import AGENT_RUNS, APPROVAL_WAIT
 from ..ratelimit import limiter
@@ -267,8 +268,15 @@ async def prepare_run(*, user: User, message: str, context: ChatContext,
     # unknown model fails loudly (400) instead of being silently ignored; the resolved id is
     # bound to this run so the model the operator picked is the model the run actually uses.
     try:
-        _provider, resolved_model = get_provider(settings, model)
-    except UnknownModelError as exc:
+        cat = llm_catalog.load()
+        info = cat.model(model) if model else cat.model(cat.purposes["general"].model)
+        if not cat.provider_configured(info.provider, settings):
+            raise LlmModelError(
+                "invalid_request",
+                f"model {info.id!r} needs provider {info.provider!r}, which has no "
+                f"credentials configured on this deployment")
+        resolved_model = info.id
+    except LlmModelError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
     async with session_scope() as s:
         org = await repo.org_for(s, user)

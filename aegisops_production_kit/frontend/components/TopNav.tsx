@@ -152,11 +152,15 @@ function ModelSelector() {
       .get<{ models: { id: string; provider: string; enabled: boolean; default: boolean }[] }>("/models")
       .then((r) =>
         setModelOptions(
-          r.models.map((m) => ({
-            label: m.id,
-            sub: `${m.provider}${m.default ? " · default" : ""}`,
-            dot: modelColor(m.id),
-          })),
+          // P1.7: multi-provider catalog — only models whose provider has credentials
+          // are selectable (an unconfigured provider would 400 at /chat admission).
+          r.models
+            .filter((m) => m.enabled)
+            .map((m) => ({
+              label: m.id,
+              sub: `${m.provider}${m.default ? " · default" : ""}`,
+              dot: modelColor(m.id),
+            })),
         ),
       )
       .catch(() => setModelOptions([]));

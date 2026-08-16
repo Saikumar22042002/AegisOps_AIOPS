@@ -1,0 +1,89 @@
+# AegisOps model catalog (Redesign/04 §4.3-4.5, 07 P1.4).
+#
+# Two sources of model truth, one owner each (07 risk register):
+#   this file            = what CAN run (providers, models, capabilities, purpose defaults)
+#   DB `model_bindings`  = who runs what (org overrides, eval-gated) — P1.7
+# Boot cross-validates both (app/llm/catalog.py); an invalid catalog refuses startup.
+#
+# Provider configuration is DECLARED here (settings_field names the `app.settings.Settings`
+# attribute holding the credential) — code never hardcodes a provider branch, so adding a
+# wire family is a yaml + adapter change only.
+#
+# Rule (07 P1.4): every purpose binding needs a validated fallback chain or an EXPLICIT
+# `fallbacks: none`. Governed purposes (router/planner/loop.main/judge) never
+# silent-fallback, so they are `none` by construction.
+
+# `wire_family` selects the adapter (defaults to the provider name); `base_url_field`/
+# `base_url` configure OpenAI-compatible endpoints. A provider is therefore pure data:
+# OpenRouter below is a NEW provider added with zero adapter code (07 P1.5 / prompt §4).
+providers:
+  google:
+    wire_family: google
+    settings_field: gemini_api_key
+    env_key: GEMINI_API_KEY          # documentation of the env binding, not read by code
+  anthropic:
+    wire_family: anthropic
+    settings_field: anthropic_api_key
+    env_key: ANTHROPIC_API_KEY
+  openai_compat:
+    wire_family: openai_compat
+    settings_field: openai_api_key
+    env_key: OPENAI_API_KEY
+    base_url_field: openai_base_url  # empty = SDK default (api.openai.com)
+  openrouter:
+    wire_family: openai_compat
+    settings_field: openrouter_api_key
+    env_key: OPENROUTER_API_KEY
+    base_url: https://openrouter.ai/api/v1
+
+models:
+  - id: gemini-3.5-flash
+    provider: google
+    capabilities: [streaming, structured_output, tools_native, prompt_cache]
+    context_window: 1048576
+  - id: gemini-flash-latest
+    provider: google
+    capabilities: [streaming, structured_output, tools_native, prompt_cache]
+    context_window: 1048576
+  - id: gemini-2.5-flash
+    provider: google
+    capabilities: [streaming, structured_output, tools_native, prompt_cache]
+    context_window: 1048576
+  - id: gemini-embedding-001
+    provider: google
+    capabilities: [embeddings]
+    embedding_dim: 768   # ADR-02: pinned; rebinding = re-embedding migration
+  - id: claude-sonnet-5
+    provider: anthropic
+    capabilities: [streaming, structured_output, tools_native, reasoning, prompt_cache]
+    context_window: 200000
+  - id: claude-haiku-4-5-20251001
+    provider: anthropic
+    capabilities: [streaming, structured_output, tools_native, prompt_cache]
+    context_window: 200000
+  - id: gpt-4o-mini
+    provider: openai_compat
+    capabilities: [streaming, structured_output, tools_native]
+    context_window: 128000
+  - id: openrouter/auto
+    provider: openrouter
+    capabilities: [streaming, tools_native]
+    context_window: 128000
+
+purposes:
+  # Governed (04 §4.4): never user-pinnable, never silent-fallback.
+  router:         {model: gemini-3.5-flash, fallbacks: none, requires: [structured_output]}
+  planner:        {model: gemini-3.5-flash, fallbacks: none}
+  loop.main:      {model: gemini-3.5-flash, fallbacks: none}
+  judge:          {model: gemini-3.5-flash, fallbacks: none}
+  # Routable purposes: one validated same-family fallback each today; cross-provider
+  # fallbacks become legitimate the moment a second provider is configured + bound (P1.7).
+  extract:        {model: gemini-3.5-flash, fallbacks: [gemini-flash-latest], requires: [structured_output]}
+  inv_loop:       {model: gemini-3.5-flash, fallbacks: [gemini-flash-latest]}
+  sre.triage:     {model: gemini-3.5-flash, fallbacks: [gemini-flash-latest]}
+  critic:         {model: gemini-3.5-flash, fallbacks: [gemini-flash-latest]}
+  retrieval_gate: {model: gemini-3.5-flash, fallbacks: [gemini-flash-latest]}
+  consolidation:  {model: gemini-3.5-flash, fallbacks: [gemini-flash-latest]}
+  knowledge:      {model: gemini-3.5-flash, fallbacks: [gemini-flash-latest]}
+  general:        {model: gemini-3.5-flash, fallbacks: [gemini-flash-latest]}
+  embeddings:     {model: gemini-embedding-001, fallbacks: none, requires: [embeddings]}

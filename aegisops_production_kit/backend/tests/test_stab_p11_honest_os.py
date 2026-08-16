@@ -51,17 +51,17 @@ def test_the_exact_screenshot_shape_fails_validation_not_terraform():
 
 # ── the verbatim-name guard in extraction (the s3 rewrite audit case) ──
 
-class _FakeGemini:
-    enabled = True
-
-
 def _extract(monkeypatch, template_key: str, message: str, llm_result: dict) -> dict:
+    """P1 seam migration (2026-08-10): the extraction guard under test is UNCHANGED;
+    the fakes moved from the retired Gemini singleton (`get_gemini().enabled`) to the
+    provider-neutral seams — `llm_service.configured` + the shim's `classify_json`
+    (which now carries purpose=/response_schema= kwargs)."""
     import asyncio
 
     s = Settings(_env_file=None)
-    monkeypatch.setattr(cloudops, "get_gemini", lambda _s: _FakeGemini())
+    monkeypatch.setattr(cloudops.llm_service, "configured", lambda _s, _p: True)
 
-    async def fake_classify(_s, _system, _msg):
+    async def fake_classify(_s, _system, _msg, **_kw):
         return dict(llm_result)
 
     monkeypatch.setattr(cloudops.llm, "classify_json", fake_classify)

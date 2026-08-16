@@ -15,10 +15,18 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, Depends
 
+from fastapi import HTTPException, status
+from pydantic import BaseModel, Field
+
 from ..cache import redis as redis_client
+from ..db import repositories as repo
 from ..db import session as db
+from ..db.session import session_scope
 from ..graph_db import neo4j as neo4j_client
-from ..integrations.gemini import get_gemini
+from ..llm import bindings as llm_bindings
+from ..llm import catalog as llm_catalog
+from ..llm.adapters import for_provider
+from ..llm.errors import ModelError as LlmModelError
 from ..integrations.servicenow import get_servicenow
 from ..schemas.auth import User
 from ..security.deps import require_auth
@@ -27,6 +35,16 @@ from ..tools.github import get_github
 from ..tools.kubernetes import get_kubernetes
 
 router = APIRouter(tags=["integrations"])
+
+_BINDING_ADMIN_ROLES = {"platform-admin", "org-admin"}
+
+
+def _require_binding_admin(user: User) -> None:
+    """Bindings move an org's model traffic — a governed act, gated to org admins
+    (stricter than approver: cloud-architect approves plans, not routing policy)."""
+    if not any(r in _BINDING_ADMIN_ROLES for r in (user.roles or [])):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Model bindings require Org Admin or Platform Admin.")
 
 # Static design metadata (mark/color/cat) keyed by service name — status is live.
 _META: dict[str, dict[str, str]] = {
@@ -74,7 +92,6 @@ def _row(name: str, status: str) -> dict[str, Any]:
 async def list_integrations(
     _user: User = Depends(require_auth), settings: Settings = Depends(get_settings)
 ) -> dict[str, Any]:
-    gemini = get_gemini(settings)
     snow = get_servicenow(settings)
     github = get_github(settings)
     k8s = get_kubernetes(settings)
@@ -106,8 +123,13 @@ async def list_integrations(
         _row("Ansible", "connected" if shutil.which(settings.ansible_bin) else "unavailable"),
         _row("GitHub", gh_status),
         _row("ServiceNow", snow_status),
-        _row("Gemini", "connected" if gemini.enabled else "not configured"),
     ]
+    # One honest row per LLM provider in the catalog (multi-provider substrate, P1):
+    cat = llm_catalog.load()
+    rows += [_row(f"LLM: {name}",
+                  "connected" if cat.provider_configured(name, settings)
+                  else "not configured")
+             for name in cat.providers]
     return {"integrations": rows}
 
 
@@ -117,6 +139,99 @@ async def list_models(
 ) -> dict[str, Any]:
     """U3: the real LLM catalog — exactly the models the backend serves and validates. The
     model menu shows these and only these; anything else is rejected at /chat with a 400."""
-    from ..integrations.llm import available_models
+    cat = llm_catalog.load()
+    default = cat.purposes["general"].model
+    return {"models": [
+        {"id": m.id, "provider": m.provider,
+         "enabled": cat.provider_configured(m.provider, settings),
+         "default": m.id == default}
+        for m in cat.models.values() if "embeddings" not in m.capabilities]}
 
-    return {"models": available_models(settings)}
+
+@router.get("/capabilities")
+async def list_capabilities(
+    _user: User = Depends(require_auth), settings: Settings = Depends(get_settings)
+) -> dict[str, Any]:
+    """P4 capability packs: the provider-neutral view of what AegisOps can do across
+    AWS/Azure/GCP/K8s/GitHub — read/mutation families per pack, whether the provider is
+    configured, and the approved templates/day-2 verbs it owns. This is the multi-cloud
+    parity matrix the UI renders; an unconfigured provider lists honestly (no fake support)."""
+    from ..packs import registry as pack_registry
+    from ..security.governance_stamp import governance_stamp
+    g = governance_stamp(settings)
+    return {"packs": pack_registry.capability_catalog(settings),
+            "packs_enabled": getattr(settings, "aegisops_capability_packs", "off") == "on",
+            # P5 posture — the operator-visible governance flags for this deployment.
+            "posture": {"permission_mode": g["permission_mode"],
+                        "credential_broker": g["credential_broker"],
+                        "durable_engine": g["durable_engine"],
+                        "approval_model": g["approval_model"]}}
+
+
+@router.get("/models/providers")
+async def list_providers(
+    _user: User = Depends(require_auth), settings: Settings = Depends(get_settings)
+) -> dict[str, Any]:
+    """P1.7 live provider health: configured (credentials present) + a cheap adapter
+    probe. Unconfigured providers list honestly rather than disappearing."""
+    cat = llm_catalog.load()
+    out = []
+    for name in cat.providers:
+        configured = cat.provider_configured(name, settings)
+        healthy = False
+        if configured:
+            try:
+                healthy = await for_provider(name, cat, settings).ping()
+            except Exception:  # noqa: BLE001 — a probe failure is a health answer
+                healthy = False
+        out.append({"name": name, "configured": configured, "healthy": healthy,
+                    "models": [m.id for m in cat.models.values() if m.provider == name]})
+    return {"providers": out}
+
+
+class BindingRequest(BaseModel):
+    model: str = Field(min_length=1, max_length=120)
+    reason: str | None = Field(default=None, max_length=500)
+
+
+@router.get("/models/bindings")
+async def get_bindings(
+    user: User = Depends(require_auth), settings: Settings = Depends(get_settings)
+) -> dict[str, Any]:
+    """Every purpose with its effective routing (default vs org-bound). Read is open to
+    any authenticated user — routing posture is governance-visible, like /healthz."""
+    async with session_scope() as s:
+        org = await repo.org_for(s, user)
+        org_id = str(org.id)
+    return {"bindings": await llm_bindings.list_bindings(org_id, settings)}
+
+
+@router.put("/models/bindings/{purpose}")
+async def put_binding(
+    purpose: str, body: BindingRequest,
+    user: User = Depends(require_auth), settings: Settings = Depends(get_settings)
+) -> dict[str, Any]:
+    _require_binding_admin(user)
+    async with session_scope() as s:
+        org = await repo.org_for(s, user)
+        org_id = str(org.id)
+    try:
+        return await llm_bindings.set_binding(org_id, purpose, body.model,
+                                              actor=user.username or user.sub,
+                                              reason=body.reason, settings=settings)
+    except LlmModelError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
+
+
+@router.delete("/models/bindings/{purpose}")
+async def delete_binding(
+    purpose: str,
+    user: User = Depends(require_auth), settings: Settings = Depends(get_settings)
+) -> dict[str, str]:
+    _require_binding_admin(user)
+    async with session_scope() as s:
+        org = await repo.org_for(s, user)
+        org_id = str(org.id)
+    await llm_bindings.clear_binding(org_id, purpose, actor=user.username or user.sub,
+                                     settings=settings)
+    return {"status": "cleared", "purpose": purpose}

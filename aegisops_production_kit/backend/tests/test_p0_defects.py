@@ -62,10 +62,15 @@ def test_f10_chat_module_has_module_level_select():
 # ── D2: the dead lazy model-resolution path is gone ───────────────────────────────────────
 
 def test_d2_dead_model_resolution_removed():
-    from app.integrations.gemini import GeminiLLM
-    assert not hasattr(GeminiLLM, "_ensure_model")
-    assert not hasattr(GeminiLLM, "_resolve")
-    assert not hasattr(GeminiLLM, "astream_text")  # D7: zero callers
+    """P1 supersession (2026-08-10): D2's subject — the GeminiLLM client with its dead
+    lazy-resolution path — was deleted WHOLE at the end of P1 (07 removal table). The
+    surviving pin is stronger: no SDK client exists outside app/llm/adapters at all;
+    the transitional module keeps only GeminiError + the run-model contextvar."""
+    from app.integrations import gemini
+    for dead in ("GeminiLLM", "get_gemini", "usage_of"):
+        assert not hasattr(gemini, dead)
+    for alive in ("GeminiError", "set_run_model", "get_run_model"):
+        assert hasattr(gemini, alive)
 
 
 # ── D7: dead code deletions hold ──────────────────────────────────────────────────────────
@@ -76,13 +81,18 @@ def test_d7_agents_llm_generate_deleted():
 
 
 def test_d7_provider_seam_is_catalog_only():
-    """The validate-only seam keeps its honest catalog surface; the never-called dispatch
-    passthroughs are gone (they return with the real P1 provider layer)."""
-    from app.integrations.llm.gemini_provider import GeminiProvider
-    for dead in ("astream", "agenerate", "aembed"):
-        assert not hasattr(GeminiProvider, dead)
-    for alive in ("serves", "models", "default_model", "enabled"):
-        assert hasattr(GeminiProvider, alive)
+    """P1 supersession (2026-08-10): the real provider layer arrived (as this pin's own
+    docstring predicted), so the validate-only seam is deleted entirely — the catalog is
+    now the ONE model-resolution surface, and it validates rather than dispatches."""
+    import importlib.util
+    assert importlib.util.find_spec("app.integrations.llm") is None
+    from app.llm import catalog
+    cat = catalog.load()
+    assert cat.model("gemini-3.5-flash").provider == "google"
+    from app.llm.errors import ModelError
+    import pytest as _pytest
+    with _pytest.raises(ModelError):
+        cat.model("not-a-model")
 
 
 def test_d7_run_ended_at_is_written_at_every_terminal_transition():

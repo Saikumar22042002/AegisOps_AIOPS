@@ -32,7 +32,7 @@ def _load() -> list[dict[str, Any]]:
 
 
 async def _grade(case: dict[str, Any], sem: asyncio.Semaphore) -> float | None:
-    from app.integrations.gemini import get_gemini
+    from app.llm import service as llm_service
     from app.settings import get_settings
 
     prompt = (f"QUESTION:\n{case['question']}\n\nCONTEXT GIVEN TO THE ASSISTANT:\n"
@@ -40,13 +40,14 @@ async def _grade(case: dict[str, Any], sem: asyncio.Semaphore) -> float | None:
     async with sem:
         for attempt in (1, 2):
             try:
-                resp = await get_gemini(get_settings()).agenerate(_RUBRIC, prompt)
+                resp = await llm_service.generate(get_settings(), purpose="judge",
+                                                  system=_RUBRIC, prompt=prompt)
                 break
             except Exception:  # noqa: BLE001 — API error: retry once, then give up on the case
                 if attempt == 2:
                     return None
                 await asyncio.sleep(1.2)
-    m = re.search(r"\{.*\}", resp.text or "", re.DOTALL)
+    m = re.search(r"\{.*\}", resp.content or "", re.DOTALL)
     if not m:
         return None  # arrived but unparseable — never re-judged (reference lesson)
     try:

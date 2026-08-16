@@ -99,10 +99,24 @@ function AiMessage({ m }: { m: ChatMessage }) {
       <div style={avatarAI}><BrandShield size={15} filled={false} /></div>
       <div style={{ flex: 1, minWidth: 0, paddingTop: 2 }}>
         {/* meta chips */}
-        {(m.intent || m.workflow || conf) && (
+        {(m.intent || m.workflow || conf || m.servedBy) && (
           <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
             {m.intent && <Chip label="Intent" value={m.intent} />}
             {m.workflow && <Chip label="Workflow" value={m.workflow} mono />}
+            {m.servedBy && (
+              <span
+                style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 500,
+                         color: m.servedBy.fallbackHop > 0 ? "var(--amber)" : "var(--text-3)",
+                         padding: "4px 10px", borderRadius: 7, background: "var(--surface-2)", border: "1px solid var(--border)" }}
+                title={m.servedBy.fallbackHop > 0
+                  ? `Served by ${m.servedBy.provider}/${m.servedBy.model} after ${m.servedBy.fallbackHop} fallback hop(s) — requested ${m.servedBy.requestedModel ?? "default"}`
+                  : `Served by ${m.servedBy.provider}/${m.servedBy.model}`}
+              >
+                <span style={{ width: 6, height: 6, borderRadius: 99, background: "currentColor" }} />
+                {m.servedBy.model}
+                {m.servedBy.fallbackHop > 0 && ` · fallback ×${m.servedBy.fallbackHop}`}
+              </span>
+            )}
             {conf && (
               <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 500, color: confColor, padding: "4px 10px", borderRadius: 7, background: "var(--surface-2)", border: "1px solid var(--border)" }}
                 title={`Confidentiality ${conf.level} · ${(conf.score * 100).toFixed(0)}%`}>

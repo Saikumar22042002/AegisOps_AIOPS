@@ -28,6 +28,12 @@ jobs:
           pip install -e ".[dev]"
       - name: Lint
         run: ruff check .
+      # P1.9: the provider import boundary as a formal contract (the AST tests in
+      # tests/test_p1_import_boundary.py enforce the same law inside pytest).
+      - name: Import boundary (P1.9)
+        run: |
+          pip install import-linter
+          lint-imports --config .importlinter
       - name: Test
         run: pytest -q
 

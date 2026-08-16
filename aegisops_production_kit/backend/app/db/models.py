@@ -8,14 +8,16 @@ and audit rows are treated as immutable (insert-only; never updated/deleted in a
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     DateTime,
     Float,
     ForeignKey,
+    Identity,
     Integer,
     String,
     Text,
@@ -141,6 +143,9 @@ class Run(Base):
     workflow_version: Mapped[str | None] = mapped_column(String(40), nullable=True)
     mode: Mapped[str] = mapped_column(String(20), default="plan")  # dry_run|plan|apply|destroy
     status: Mapped[str] = mapped_column(String(30), default="running")
+    # P3: optional link to the Task container spanning runs (06 §8.1; migration 0015).
+    task_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True)
     plan_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     input_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     outcome: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
@@ -158,7 +163,7 @@ class RunStep(Base):
     id: Mapped[uuid.UUID] = _pk()
     run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
-    status: Mapped[str] = mapped_column(String(30), default="pending")  # pending|running|done|failed|cancelled
+    status: Mapped[str] = mapped_column(String(30), default="pending")  # pending|running|done|failed|cancelled|compensated
     tool: Mapped[str | None] = mapped_column(String(60), nullable=True)
     human_vs_auto: Mapped[str] = mapped_column(String(10), default="auto")  # auto | human
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -167,8 +172,33 @@ class RunStep(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     order_index: Mapped[int] = mapped_column(Integer, default=0)
+    # P3 durable-engine columns (06 §8.1 Step; migration 0015). Nullable — the legacy
+    # exec_loop path ignores them, so old rows stay valid (coexistence).
+    wave: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    depends_on: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    kind: Mapped[str | None] = mapped_column(String(16), nullable=True)  # module|day2|k8s|read|gate
+    compensation_of: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    evidence: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     run: Mapped[Run] = relationship(back_populates="steps")
+
+
+class Task(Base):
+    """P3 user-visible objective container that may span runs (Redesign/06 §8.1; migration
+    0015). A Run gains an optional `task_id` back-reference; legacy runs have none."""
+
+    __tablename__ = "tasks"
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    objective: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="open")  # open|running|completed|failed|cancelled
+    created_by: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
 
 class Approval(Base):
@@ -400,3 +430,91 @@ class LlmUsage(Base):
     cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     outcome: Mapped[str] = mapped_column(String(60), default="ok")
+
+
+class ModelBinding(Base):
+    """P1.7 org-level model routing override: who runs what (Redesign/04 §4.4, 06 §8.2).
+
+    `models.yaml` says what CAN run; this row says which model an org's purpose actually
+    uses. Eval-gated promotion: `eval_state` is the release control — a `failed` binding
+    never routes (router filter); every write is validated against the catalog's
+    capability requirements and lands an audit row.
+    """
+
+    __tablename__ = "model_bindings"
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), primary_key=True)
+    purpose: Mapped[str] = mapped_column(String(32), primary_key=True)
+    model: Mapped[str] = mapped_column(String(120))
+    # pending | passed | failed | waived (04 §4.4)
+    eval_state: Mapped[str] = mapped_column(String(12), default="pending")
+    updated_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC))
+
+
+class RunEvent(Base):
+    """P2.5 durable, event-sourced run log (Redesign/06 §8.2, ADR-16; migration 0012).
+
+    Append-only by convention; `seq` per-run monotonic and GAPLESS (10 §0 invariant 1);
+    payloads redacted BEFORE the write. `run_id`/`org_id` carry no FKs on purpose: the
+    record must outlive the rows it describes. The 18th kind, `agent_gate`, is the C-05
+    resolution (retrieval-gate decisions are observable events, per doc 10 scenario Q).
+    """
+
+    __tablename__ = "run_events"
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    run_id: Mapped[uuid.UUID] = mapped_column(Uuid, index=True)
+    org_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, default=dict)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+                                         default=lambda: datetime.now(UTC))
+    __table_args__ = (UniqueConstraint("run_id", "seq", name="uq_run_events_run_seq"),)
+
+
+class MemoryItem(Base):
+    """P2.6 episodic/semantic memory tier (Redesign/06 §1; migration 0013).
+
+    Written ONLY by consolidation proposals (human-accepted) or humans — never a direct
+    agent write (06 §2). Contradiction ⇒ supersede, not coexist. 768-d pgvector matches
+    the pinned embedding dimension (ADR-02)."""
+
+    __tablename__ = "memory_items"
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    org_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)         # fact | episode
+    subject: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBED_DIM), nullable=True)
+    provenance: Mapped[str] = mapped_column(String(24), nullable=False)
+    origin_run_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    confidence: Mapped[float] = mapped_column(Float, default=0.7)
+    importance: Mapped[float] = mapped_column(Float, default=0.5)
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    supersedes: Mapped[int | None] = mapped_column(
+        ForeignKey("memory_items.id", ondelete="SET NULL"), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    created_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
+
+
+class PromptRegistry(Base):
+    """P2.8 versioned prompt artifact (Redesign/05 §9; migration 0014). PromptRef(name,
+    version) resolves here; content_hash + eval_state make prompt changes auditable and
+    gate-able ('which prompt caused this regression?')."""
+
+    __tablename__ = "prompt_registry"
+    name: Mapped[str] = mapped_column(String(80), primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, primary_key=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    owner: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    changelog: Mapped[str | None] = mapped_column(Text, nullable=True)
+    eval_state: Mapped[str] = mapped_column(String(12), default="pending")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC))

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from ..integrations.gemini import get_gemini
+from ..llm import service as llm_service
 from ..logging_conf import get_logger
 from ..settings import Settings
 
@@ -42,11 +42,10 @@ async def embed_texts(settings: Settings, texts: list[str]) -> list[list[float]]
     None means "no vectors" — chunks persist with NULL embeddings and retrieval degrades
     to pg_trgm keyword search (the same documented degrade as running with no key at all).
     An unusable key is reported loudly, never silently swallowed into fake vectors."""
-    gemini = get_gemini(settings)
-    if not gemini.enabled:
+    if not llm_service.configured(settings, "embeddings"):
         return None
     try:
-        return await gemini.aembed(texts)
+        return await llm_service.embed(settings, texts)
     except Exception as exc:  # noqa: BLE001 — degrade to keyword recall, loudly
         log.warning("embeddings.unavailable_degrading_to_keyword", error=str(exc))
         return None

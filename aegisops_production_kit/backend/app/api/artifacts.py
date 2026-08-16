@@ -84,7 +84,10 @@ async def timeline(run_id: str, user: User = Depends(get_current_user)) -> dict:
     out_status = (run.outcome or {}).get("status")
     # PR-3: cancelled is a first-class terminal status — never rendered as failed.
     cancelled = run.status == "cancelled" or out_status == "cancelled"
-    failed = (not cancelled) and (
+    # P3.6: rolled_back is a first-class terminal (saga compensated a failed workflow) —
+    # honestly distinct from failed, never rendered as a plain failure.
+    rolled_back = run.status == "rolled_back" or out_status == "rolled_back"
+    failed = (not cancelled) and (not rolled_back) and (
         (bool(out_status) and str(out_status).endswith("_failed")) or out_status == "failed"
         or run.status == "failed")
     has_plan = bool(run.plan_json)
@@ -132,11 +135,13 @@ async def timeline(run_id: str, user: User = Depends(get_current_user)) -> dict:
         nodes.append(_node("Execute", out_status or "queued", dur.get("execute", "—"), exec_status))
         if applied:
             nodes.append(_node("Verification", "Post-apply read-only checks", dur.get("verify", "—"), "done"))
+    _final_status = ("failed" if run.status == "failed"
+                     else "cancelled" if run.status == "rolled_back"   # amber, honest
+                     else "done" if run.status == "completed" else "queued")
     nodes.append(_node("Finalize", run.outcome.get("resolution", run.status) if run.outcome else run.status,
-                       dur.get("finalize", "—"),
-                       "failed" if run.status == "failed" else ("done" if run.status == "completed" else "queued"),
-                       last=True))
-    elapsed = ("running" if run.status == "running" else "halted" if rejected else "failed" if failed
+                       dur.get("finalize", "—"), _final_status, last=True))
+    elapsed = ("running" if run.status == "running" else "halted" if rejected
+               else "rolled back" if rolled_back else "failed" if failed
                else "paused" if run.status == "awaiting_approval" else "completed")
     return {"nodes": nodes, "elapsed": elapsed, "mode": run.mode, "total": total}
 
@@ -146,6 +151,45 @@ async def reasoning(run_id: str, user: User = Depends(get_current_user)) -> dict
     _run, msg, _, _ = await _load(run_id, user)
     cards = (msg.analysis or {}).get("reasoning", []) if msg else []
     return {"cards": cards}
+
+
+# P2.5: the durable harness loop trail — OBSERVE → REASON → ACT → VERIFY as run_events.
+# CoT-SAFE by construction: only the one-line hypothesis + privacy-safe rationale summary
+# from each assistant_turn are exposed (never raw chain-of-thought), and payloads were
+# already redacted at write. Authorized by the same org predicate as every artifact read.
+_LOOP_KINDS = {"iteration_started", "assistant_turn", "tool_call", "observation",
+               "agent_gate", "verification", "budget", "run_finished",
+               "subagent_spawned", "subagent_result"}
+
+
+@router.get("/runs/{run_id}/events")
+async def run_events(run_id: str, user: User = Depends(get_current_user)) -> dict:
+    from ..harness import run_log
+    run, _msg, _, _ = await _load(run_id, user)  # S2 org predicate (404 on mismatch)
+    events = await run_log.replay(str(run.id))
+    out = []
+    for e in events:
+        if e.kind not in _LOOP_KINDS:
+            continue
+        p = e.payload or {}
+        item = {"seq": e.seq, "kind": e.kind, "at": e.at.isoformat()}
+        if e.kind == "assistant_turn":
+            item["hypothesis"] = p.get("hypothesis")      # one machine-comparable line
+            item["rationale"] = p.get("rationale")        # privacy-safe summary, not CoT
+            item["action"] = p.get("action_kind")
+        elif e.kind == "tool_call":
+            item["tool"] = p.get("tool")
+        elif e.kind == "observation":
+            item.update(tool=p.get("tool"), ok=p.get("ok"),
+                        error=(p.get("error") or {}).get("kind") if p.get("error") else None,
+                        preview=p.get("preview"))
+        elif e.kind == "verification":
+            item["verdict"] = p.get("verdict")
+        elif e.kind in ("budget", "run_finished", "agent_gate"):
+            item.update({k: v for k, v in p.items() if k in
+                         ("reason", "status", "retrieve", "skipped")})
+        out.append(item)
+    return {"events": out, "count": len(out)}
 
 
 @router.get("/runs/{run_id}/terraform")

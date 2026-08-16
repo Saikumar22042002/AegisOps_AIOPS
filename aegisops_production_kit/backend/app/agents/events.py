@@ -214,6 +214,11 @@ class Emitter:
     async def confidentiality(self, level: str, score: float) -> None:
         await self.ch.emit("confidentiality", {"level": level, "score": score})
 
+    async def served_by(self, data: dict) -> None:
+        """P1.7 honest serving metadata (04 §4.6): {provider, model, requested_model,
+        fallback_hop} — additive SSE event; the client renders it as a model badge."""
+        await self.ch.emit("served_by", data)
+
     async def console(self, stream: str, line: str) -> None:
         await self.ch.emit("console", {"stream": stream, "line": line})
 

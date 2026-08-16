@@ -179,12 +179,12 @@ Evidence keys: `[GN]` = GitNexus (fresh index 2026-08-10), `[GREP]` = repo-wide 
 
 | ID | Component | Current path | Target (path · owner) | Phase | Status | Key consumers / dependencies | Compatibility strategy | Verification | Removal gate | Rollback | Evidence |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| L-01 | LLM facade (`classify_json`/`stream_answer`) | `app/agents/llm.py` | `app/llm/service.py` · llm layer; **byte-compatible shim** kept at `agents/llm.py` | P1.3 | ANALYZED | 8 call sites / 6 modules (§1.1); `evals/runner.py`; 2 test files | Shim preserves signatures + `_TRUNCATION_NOTE` semantics; `purpose=` threaded per call site; **rule zero: eval gate green before re-route** | Eval gate exit 0 pre/post; `test_stream_resilience`, `test_p0_defects`, targeted caller tests | Shim deleted **end of P2** after all callers import `app/llm` directly (07 removal table) | Revert shim internals to direct Gemini call (git) | [GN] 0-impact false floor; [GREP] 8 sites; [07 §1.3] |
-| L-02 | Gemini singleton | `app/integrations/gemini.py` | `app/llm/adapters/google_.py` · adapters | P1.2→1.3 | ANALYZED | **[GN] CRITICAL / 19 impacted**: facade, `memory.build_context`, `rag/retriever`, `rag/embeddings`, `api/integrations`, `devops_plan`, cloudops extract fns | Singleton survives until P1.3 cutover; contextvar run-model pin (`set_run_model`) must map to RoutePlan run-pin semantics; embeddings path (`aembed`) migrates in the same slice or keeps the singleton alive | Adapter contract tests (recorded fixtures, P1.5 pattern); D2/D3 pinning tests; ledger rows still written at all 3 sites | **Deleted end of P1** with `integrations/llm/` seam (07 removal table) | Reinstate singleton import path (shim keeps it possible until deletion) | [GN] CRITICAL; [P0 §19] passthrough deletions; [07 removal] |
-| L-03 | Validate-only provider seam | `app/integrations/llm/` | `app/llm/catalog.py` + `config/models.yaml` · llm layer | P1.4 | ANALYZED | `GET /models` (frontend menu, D4), chat model validation, `test_llm_provider.py` | `GET /models` response shape (`{models:[{id,provider,enabled,default}]}`) is **frozen** until §4 FE-05 verified; catalog must serve it byte-compatibly | `test_llm_provider.py` ported; FE menu manual + Vitest | Deleted end of P1 | Re-point `GET /models` to registry seam | [GREP]; [D4 closed at P0] |
-| L-04 | Provider error taxonomy | `app/agents/provider_errors.py` | `app/llm/errors.py` · llm layer | P1.1 | ANALYZED | cloudops retry seam, exec_loop deviation, frontend `error.retry{label,retry_message,kind}` | Failure kinds + `suggest_retry` contract preserved verbatim (D1 pinned); frontend retry payload shape frozen | `test_p0_defects.py` D1 test; SSE `error` contract test | Old module removable only when no `agents/*` imports remain (end P2 with shim) | Keep old module as re-export | [D1]; [GREP] |
-| L-05 | Model routing / purposes / bindings | none (contextvar pin only) | `app/llm/router.py` + `model_bindings` + Settings UI | P1.6–1.7 | MIGRATION_PENDING | New consumers: every LLM call site via service | Greenfield; governed purposes (`router/planner/loop.main/judge`) never user-pinnable; two sources of truth rule: yaml = CAN run, DB = who runs what, boot cross-validation | P1 exit: UI rebind `knowledge → claude-sonnet-5` zero-code; scenario V (10) | n/a (new) | Binding rows revert to `models.yaml` default | [04 §4.4]; [07 §1.6-1.7] |
-| L-06 | Cost ledger | `app/integrations/usage_ledger.py` + `llm_usage` | `app/llm/usage.py` · llm layer (module move only; table is the contract) | P0 done; move in P1 | VERIFIED (P0) | `agents/llm.py`, `gemini.py` (3 wired sites), metrics, spill reconciler | Table schema frozen; `task_id`/`prompt_version` NULL until P2/P3 by design | 8 ledger tests + durability chain [P0 §10]; live-DB test container-gated | Old module path removable end of P1 after import move | Module re-export shim | [P0 §10]; [0010] |
+| L-01 | LLM facade (`classify_json`/`stream_answer`) | `app/agents/llm.py` | `app/llm/service.py` · llm layer; **byte-compatible shim** kept at `agents/llm.py` | P1.3 | **COMPATIBILITY_LAYER (P1, 2026-08-10)** — shim live over `app/llm`, `purpose=` threaded at all 8 call sites | 8 call sites / 6 modules (§1.1); `evals/runner.py`; 2 test files | Shim preserves signatures + `_TRUNCATION_NOTE` + `GeminiError` semantics; eval gate green BEFORE and AFTER the re-route (rule zero, both exits 0) | `test_p1_service_shim` (13); migrated `test_stream_resilience` (3, same three behaviors, seam moved one level down); `test_p0_defects` | Shim deleted **end of P2** after all callers import `app/llm` directly (07 removal table) | Revert shim internals (git) — the old code path is one commit back | [07 §1.3]; P1 report §4 |
+| L-02 | Gemini singleton | `app/integrations/gemini.py` | `app/llm/adapters/google_.py` · adapters | P1.2→1.3 | **MIGRATED (P1, 2026-08-10)** — `GeminiLLM`/`get_gemini`/`usage_of` deleted; all 19-impact consumers re-routed; a TRANSITIONAL stub keeps only `GeminiError` + the `set_run_model` contextvar (consumers: 3 agent nodes, shim, chat admission) | historical [GN] CRITICAL/19 — every consumer migrated: facade→service, rag embeddings/retriever→`service.embed`, judge→`service.generate(purpose="judge")`, integrations/chat→catalog, enabled-guards→`service.configured` | Contextvar pin now feeds `router.resolve(requested_model=…)`; D3 embedding-ledger labels preserved verbatim | `test_p1_adapters` (17 fixture tests); D3 path via `service.embed` ledger rows; suites green post-cut | Stub dies with the shim **end of P2** (T-01) | git revert of the P1 commit restores the singleton wholesale | 07 removal table; P1 report §3 |
+| L-03 | Validate-only provider seam | `app/integrations/llm/` | `app/llm/catalog.py` + `config/models.yaml` · llm layer | P1.4 | **REMOVED (P1, 2026-08-10)** — consumers (`GET /models`, chat admission, `test_llm_provider`) re-pointed to the catalog; `GET /models` shape frozen `{id,provider,enabled,default}` (FE-05), provider VALUE now the wire-family id (`google`, was `google-gemini` — display-only) | none remaining | Admission 400 message still names the served models ("AegisOps serves: …") | `test_llm_provider.py` rewritten against catalog + endpoint (7 pins incl. the multi-provider inversion) | done | git revert | P1 report §6 |
+| L-04 | Cloud-provider failure taxonomy | `app/agents/provider_errors.py` | **stays with the cloud tooling — NOT part of the LLM substrate** (correction: this module classifies CLOUD-side failures — `bad_location`, `iam_denied`, quota — for the Terraform retry seam; 07 P1.1's "errors" means LLM wire errors, which landed as `app/llm/errors.py`) | P4.2 (moves into packs with cloudops) | ANALYZED | cloudops retry seam, exec_loop deviation, frontend `error.retry{label,retry_message,kind}` | Untouched by P1; D1 pin intact | `test_p0_defects.py` D1 test | with cloudops dissolution (P4.2) | n/a | [D1]; ledger-mapping correction recorded 2026-08-10 |
+| L-05 | Model routing / purposes / bindings | none (contextvar pin only) | `app/llm/router.py` + `executor.py` + `model_bindings` (0011) + Settings UI | P1.6–1.7 | **MIGRATED (P1, 2026-08-10)** — resolution pin→binding→default live; resilient executor (retry/jitter/Retry-After · Redis breaker w/ in-memory fallback · turn-local pre-first-token failover with visible `ServedBy.fallback_hop` · governed purposes structurally fallback-free · org daily budget gate, default off); bindings API (GET/PUT/DELETE, org-admin-gated, audited, eval-gated `eval_state`) + Settings "Model routing" panel + `served_by` SSE badge | every LLM call via service; frontend Settings + TopNav menu (enabled-filtered) | UI rebind `knowledge → claude-sonnet-5` is a Settings action IF anthropic credentials exist — refused as a dead-end binding otherwise (catalog guard) | `test_p1_routing_executor` (17) · `test_p1_bindings` (5 + 1 live-tier) · Vitest 45/45 incl. `served_by` reducer | n/a (new) | Binding rows revert to defaults (DELETE endpoint); flag-free — the default path IS the fallback | [04 §4.4/4.6]; [07 §1.6-1.7] |
+| L-06 | Cost ledger | `app/integrations/usage_ledger.py` + `llm_usage` | table is the contract; module location unchanged (the 02-layout `llm/usage.py` move is DEFERRED to P2 — pure churn with zero behavior value while the shim exists; recorded in §21) | P0 done | VERIFIED (P0) | `app/llm/service.py` (all generate/stream/embed recording — now the ONLY writer besides spill replay), metrics, spill reconciler | Table schema frozen; every provider records identically via the service (served vs requested model now populated); `task_id`/`prompt_version` NULL until P2/P3 by design | 8 ledger tests + `test_p1_service_shim` recording pins (success/error/stream paths) | n/a | n/a | [P0 §10]; [0010]; P1 report §12 |
 | L-07 | Eval gate | `backend/evals/` + `app/evals/scoring.py` | same (grows P4.7 dimensions) | P0 done | VERIFIED (P0) | CI required job; rule-zero gate for P1.3 | One-scorer rule enforced by `app/evals/__init__.py` docstring + imports | Gate exit 0; self-test rejects known-bad | n/a — permanent control | n/a | [P0 §9] |
 | L-08 | Governance stamp | `app/security/governance_stamp.py` | same; artifact grows at P3 | P0 done | VERIFIED (P0) | `approval.py`, `exec_loop.py`, `api/health.py` | 9 flags incl. `approval_model: hitl`; additive fields only | Stamp tests; `/healthz` assertion updated at P0 | n/a | n/a | [P0 §11]; FE gap → §4 FE-09 |
 | L-09 | LangGraph 12-node spine | `app/agents/graph.py` | retired as spine; interrupt/checkpoint substrate behind `harness/interrupts.py` + `graph_glue.py` | P4.3 (**ADR-04 sign-off**) | CURRENT | `main.py:91` init; runner; all 12 node fns | Inversion ships **dark behind a flag** until eval parity on both topologies (07 risk #1) | Behavioral evals on both topologies; IP-1..4 re-run on loop-as-spine (10 P4 exit) | Graph-as-spine removable only after P4.3 parity + sign-off; substrate retained ≥1 quarter (ADR-04 gate) | Flag flip back to graph spine | [ADR-04]; [07 §4.3] |
@@ -315,7 +315,7 @@ upgrade · data-migration requirements and rollback implications recorded here.
 | Schema/Object | Current | Target | Migration | Consumers | Backward compatible | Data migration | Tests | Rollback | Removal gate |
 |---|---|---|---|---|---|---|---|---|---|
 | `llm_usage` | `0010` **APPLIED to the dev DB 2026-08-10** (alembic head `0010_llm_usage`; 17 columns verified column-for-column; `ix_llm_usage_org_ts` + `ix_llm_usage_run` + PK present; live write/read/idempotency proven — double-insert counts once) | unpartitioned **by decision C-07** (partition triggers recorded in §22) | done | ledger, SQL chargeback, budgets (P2) | yes (new table) | none; spill journal replays into it | `test_p0_ledger` 9/9 in the api-test container (live tier) | drop table (pre-adoption only) | never |
-| `model_bindings` | none | PK(org_id,purpose), eval_state, updated_by/reason (06 §8.2) | new migration P1.7 | llm router, Settings UI | yes (new) | seed from `models.yaml` defaults | binding CRUD + eval-gate promotion tests | table drop pre-adoption | never |
+| `model_bindings` | **0011 APPLIED to the dev DB 2026-08-10** (PK(org_id,purpose), eval_state CHECK pending/passed/failed/waived, updated_by/reason/updated_at) | as shipped (06 §8.2) | done (P1.7) | llm router (via injected resolver), bindings API, Settings UI | yes (new) | no seeding — absence of a row IS the default (models.yaml) | `test_p1_bindings` round-trip (live tier) incl. audit-row and eval-state pins | alembic downgrade drops the table | never |
 | `run_events` | none | 17-kind enum, `UNIQUE(run_id,seq)`, JSONB redacted-at-write (06 §8.2) | new migration P2.5 | kernel, replay, UI projections | yes (new) | none | gapless-seq invariant; replay drill | additive | never |
 | `memory_items` | none | DDL per 06 §1 (exact columns recorded in this plan's source extract) | new migration P2.6 | memory tiers, consolidation | yes (new) | none | supersede-not-coexist test (Q-c) | additive | never |
 | `prompt_registry` | none | PK(name,version), content_hash, eval_state (05 §9) | new migration P2.8 | PromptRefs, ledger `prompt_version` | yes (new) | backfill `prompt_version` on new rows only | registry tests | additive | never |
@@ -406,8 +406,8 @@ MIGRATION → VERIFICATION → REMOVE OLD`.
 
 | ID | Old implementation | New implementation | Adapter | Current consumers | Remaining consumers (exit condition) | Phase | Owner | Removal condition | Rollback | Evidence |
 |---|---|---|---|---|---|---|---|---|---|---|
-| T-01 | `agents/llm.py` direct-Gemini internals | `app/llm/service.py` | **byte-compatible shim at `agents/llm.py`** | 8 call sites (L-01) | 0 direct importers of shim | P1.3 → end P2 | llm layer | all callers import `app/llm`; eval gate green | revert shim internals | 07 removal table |
-| T-02 | `integrations/gemini.py` singleton + `integrations/llm/` seam | `app/llm/adapters/google_.py` + catalog | service dispatch | 19 impacted (L-02) | 0 | P1.2–1.4 → **deleted end of P1** | llm layer | grep `google.genai\|anthropic\|openai` in `app/agents app/packs` → 0 (P1 exit) | singleton retained until gate | [GN CRITICAL] |
+| T-01 | `agents/llm.py` direct-Gemini internals | `app/llm/service.py` | **byte-compatible shim at `agents/llm.py`** — LIVE since P1.3 (2026-08-10); also carries the TRANSITIONAL `integrations/gemini.py` stub (`GeminiError` + run-model contextvar, consumers: general/knowledge/sre/chat) | 8 call sites (L-01) + 4 stub importers | 0 direct importers of shim + stub | P1.3 → end P2 | llm layer | all callers import `app/llm`; eval gate green | revert shim internals | 07 removal table; P1 report §20 |
+| T-02 | `integrations/gemini.py` singleton + `integrations/llm/` seam | `app/llm/adapters/google_.py` + catalog | service dispatch | ~~19 impacted (L-02)~~ | **DONE — REMOVED at P1 (2026-08-10):** SDK client + singleton + validate-only seam deleted; exit grep 0 across the whole app (stronger than the agents/packs criterion) | P1.2–1.4 | llm layer | satisfied | git revert of the P1 commit | P1 report §3/§6 |
 | T-03 | Hardcoded read paths (`sre._collect_telemetry`, `cloudops._read_path`) | kernel-driven INV loop | flag: kernel-read-path (P2, to be created) | SRE/CloudOps read flows | legacy path callers = 0 after parity | P2.2 | harness | INV parity + P2 exit scenarios | flag off | 07 §2.2 |
 | T-04 | LangGraph checkpointer resume | `run_events` replay-resume | **dual-record, one owner each** (ADR-16): checkpointer = resume authority, run log = record | runner resume | replay covers every resume case the checkpointer serves | P2.5 → ADR-04 gate (≥1 quarter post-P4) | harness | measured gate + human sign-off | keep checkpointer (default) | ADR-04/16 |
 | T-05 | `exec_loop.py` | `app/engine/` | Step contract; compile closures verbatim | `execute.py` node, reconciler, flag | invariant tests green against engine; demo script passes | P3.1–3.2 | engine | full P3 exit + invariants unmodified | old module importable until gate | 07 risk #2 |
@@ -661,6 +661,12 @@ Work discovered but belonging to a later phase. **Do not implement opportunistic
 | DEF-12 | Grafana chart gap (7 uncharted metrics) | P5.6 dashboards | P5.6 | ADR-10 | LOW | dashboards adopted or Grafana removed |
 | DEF-13 | Frontend approval state per-run (global singleton today) | multi-run concurrency slice | P3 (FE-08) | status machine | MED | concurrent runs approve correctly |
 | DEF-14 | `.claude/settings.local.json` churn + staged `gcp-gcs/.terraform.lock.hcl` disposition | unrelated to any phase; keep out of P0 commit | operator, now | none | LOW | resolved at commit time (R-13) |
+| DEF-15 | `usage_ledger.py` module move to `app/llm/usage.py` (02 §9 layout) | pure churn while the shim exists; the TABLE is the contract and the service is already the only writer | P2 (with the shim retirement) | T-01 | LOW | module lives under `app/llm/`, importers updated, zero behavior diff |
+| DEF-16 | anthropic SDK cannot pip-install on this Windows dev host (long-path limit corrupts the wheel) | environment, not code — adapters import SDKs lazily; fixture tests are SDK-free; the Linux api-test container installs and imports it fine | environment fix (enable Windows long paths) or container-only | none | LOW | resolved on this host via a short-path venv junction (`C:/p2venv` → p0venv); `import anthropic` succeeds |
+| DEF-17 | Real durable-engine executors: module (Terraform via the wrapped runner), day-2 verb registry breadth (07 P3.4), K8s executor with dry-run diff + rollout (07 P3.5), cross-cloud VerifyPlan/EvidenceCard breadth (07 P3.3), `_todo`→real policy predicates (07 P3.8) | these execute/verify real cloud mutation — they need the CloudOps/K8s domain surface, which P3's boundary says not to migrate; the durable engine + saga + recovery + status machine (the P3 durability spine) are done and injected-executor-ready | P3 follow-up / P4-adjacent (with pack extraction) | T-P3-01; the injected `StepExecutor`/`Compensator` seams | MED | real executors registered; mutation runs durably end-to-end with saga |
+| DEF-18 | Reconciler auto-recovery of stranded durable-engine runs (calling `engine.driver.recover_run`) | recovery is proven (execute_workflow IS the recovery entry; `recover_run` wraps it); wiring it into the 60s reconciler sweep is a small additive step deferred to avoid touching the reconciler mid-phase | P3 follow-up | reconciler role-gating (already present) | LOW | a killed durable run is auto-resumed by the worker sweep |
+| DEF-19 | The parity-gated P4 CUTOVER: `cloudops.py` (1,531 LOC) dissolution + loop-as-production-spine (07 P4.3) + real mutation execution migrated into packs + P4.4 planner/critic purposes + P4.7 eval expansion | 07 P4.3 is "point of no return, ships DARK behind a flag until behavioral eval PARITY is proven on both topologies" (07 risk #1). Eval parity cannot be proven on this host — the sandbox Gemini key is dead (`API_KEY_INVALID`, pre-dates P1), so no live model can run the dataset. The read-path inversion + pack structure + objective model + permission modes are done and dark-launch-ready; the cutover is correctly gated on parity evidence a working key provides. | P4 completion under parity (a live key) or a P4 follow-up | T-P4-01; a working provider key for eval parity | HIGH | eval gate green on both topologies → flip the flag → dissolve cloudops.py |
+| DEF-20 | Azure/GCP storage/db/k8s READ tools (the F-12 read asymmetry: Azure 3 readers, GCP 2, vs the 7/7/6 write catalog) | genuinely absent in the underlying `tools/{azure,gcp}.py` — declared honestly in the packs (mutation templates present, read tools absent), never faked. Adding real Azure/GCP read SDKs is additive per-pack work | P5.1 (three-cloud read/verify parity gate, 07 §5.1) | Azure/GCP read SDK coverage | MED | per-row parity: a family ships read across all three clouds |
 
 ## 22. Architecture decision / contradiction register
 
@@ -880,3 +886,248 @@ preserved ✅ · eval gate green ✅ · security scan green ✅ · runtime smoke
 observability intact ✅ · no P2–P5 code ✅ · architecture boundary passes ✅
 
 **P1 may begin at P1.1 (canonical model contracts per 05 §11).**
+
+---
+
+## 29. P1 record (2026-08-10) — Multi-Provider LLM Substrate
+
+Implemented per the operator's P1 prompt after the Gemini-centric scaffolding removal.
+Verdict: **P1 COMPLETE** (implemented + verified, uncommitted, awaiting operator
+acceptance — the P0 pattern). Full evidence:
+`Redesign/implementations/P1 Implementation Report.md`.
+
+| Milestone | Status | Files | Gate evidence |
+|---|---|---|---|
+| P1.1 canonical contracts | DONE | `app/llm/{__init__,types,errors}.py` | `test_p1_contracts` 12/12 |
+| P1.2 Google adapter | DONE | `adapters/{base,google_}.py` | fixture tests; live error-path proof (typed + redacted) |
+| P1.3 service + shim | DONE | `service.py`; `agents/llm.py` rewritten as shim; `purpose=` at all 8 call sites; consumers migrated (rag embeddings/retriever, judge, chat admission, integrations, enabled-guards) | `test_p1_service_shim` 14; migrated `test_stream_resilience` 3; eval gate 10/10 BEFORE and AFTER (rule zero) |
+| P1.4 catalog | DONE | `catalog.py` + `config/models.yaml` + boot validation in `main.py` | `test_p1_catalog` 6/6; invalid-yaml refuses boot |
+| P1.5 provider adapters | DONE | `adapters/{anthropic_,openai_compat}.py`; **OpenRouter = pure yaml config over openai_compat (zero adapter code — the §4 extensibility proof)**; SDKs in pyproject, lazy-imported | `test_p1_adapters` 18/18 (recorded fixtures); real SDK imports verified in the Linux container (anthropic 0.121.0, openai 2.53.0) |
+| P1.6 routing + resilience | DONE | `router.py` (pin→binding→default; governed purposes ignore pins, visibly) + `executor.py` (retry/jitter/Retry-After · Redis breaker w/ in-memory fallback · pre-first-token turn-local failover w/ visible hops · budget gate) + 2 new metrics | `test_p1_routing_executor` 17/17 |
+| P1.7 bindings + Settings UI | DONE | `ModelBinding` model + **migration 0011 (applied to dev DB)** + `bindings.py` (audited writes, eval_state) + API (GET/PUT/DELETE bindings, GET providers) + FE: Settings "Model routing" panel, enabled-filtered menu, `served_by` SSE event + badge | `test_p1_bindings` 5+1-live; Vitest 45/45; tsc clean; live smoke on rebuilt image |
+| P1.8 native FC substrate | DONE | ToolDef→wire + ToolCall parsing + structured output in ALL adapters; schemas threaded at router + ports-extract; opt-in canaries (`AEGISOPS_FC_CANARY=1`) | substrate fixture tests; canaries skip honestly; eval gate green post-threading |
+| P1.9 import boundary | DONE | AST tests + `.importlinter` + CI step; **exit grep 0 across the whole app** (stronger than 07's agents/packs criterion) | `test_p1_import_boundary` 3/3 |
+
+**Removals executed (07 removal table):** `GeminiLLM`/`get_gemini`/`usage_of` deleted;
+`integrations/llm/` seam deleted; `integrations/gemini.py` reduced to the TRANSITIONAL
+stub (`GeminiError` + run-model contextvar — dies with the shim end of P2, T-01).
+**Ledger correction:** `agents/provider_errors.py` classifies CLOUD failures, not LLM
+wire errors — it stays with the cloud tooling until P4.2 (L-04 corrected).
+
+**Regression reconciliation (single full run, 21:33):** 1116 tests — 890 passed /
+59 failed / 167 skipped. vs baseline: **52/53 pre-existing environment failures
+unchanged; 1 healed; +76 P1 tests; 7 INTRODUCED_BY_P1, all root-caused and closed
+post-run** (2× a test fake missing the new `served_by` emitter method — caught by the
+container tier; 2× D2/D7 pins whose subjects P1 legitimately deleted — migrated to
+stronger successor pins; 3× stab-p11 fakes on the retired `get_gemini` seam — migrated).
+All 7 verified green in targeted re-runs; container live tier **122/122 + canary skips**
+after fixes. Zero unexplained regressions.
+
+**Runtime smoke (rebuilt image):** readyz 200 · healthz stamp intact
+(`approval_model: "hitl"`) · OIDC login · `GET /models` **genuinely multi-provider**
+(anthropic/openrouter listed `enabled:false` without keys) · `GET /models/providers`
+health probes · `GET /models/bindings` all 13 purposes · live `/chat` through the new
+dispatch: run→steps→**typed, redacted provider error** (the sandbox Gemini key is dead —
+`API_KEY_INVALID`, ENVIRONMENT) →honest done, **and the failed call landed on
+`llm_usage`** (`general/google/gemini-3.5-flash/error:400…`) — live proof of error-path
+accounting. The live finding drove one refinement: Google reports bad keys as HTTP 400
+`API_KEY_INVALID` → now mapped to `auth_permanent` (fixture-pinned).
+
+**Known limitations:** live Provider-B round-trip needs real anthropic/openrouter
+credentials (fixture-proven + container-SDK-verified only); the dead sandbox Gemini key
+blocks any live LLM answer on this host (pre-dates P1, fails identically through the old
+code); anthropic SDK cannot pip-install on this Windows host (DEF-16); `llm/usage.py`
+module move deferred (DEF-15).
+
+---
+
+## 30. P2 record (2026-08-10) — Agent Harness + intelligent execution foundation
+
+Implemented per the operator's P2 prompt. Verdict: **P2 COMPLETE** (implemented + verified,
+uncommitted, awaiting operator acceptance). Evidence: `Redesign/implementations/P2
+Implementation Report.md`. New package `app/harness/` (kernel-neutral, ≤500-line loop, no
+SDK imports, builds on P1).
+
+| Milestone | Status | Files | Gate evidence |
+|---|---|---|---|
+| M1 run_events (P2.5) | DONE | `harness/run_log.py`; `RunEvent` model; **migration 0012 (dev DB)** | `test_p2_run_events`; live gapless-seq + redaction-at-write + per-run independence proven |
+| M2 Tool Registry v2 (P2.1) | DONE | `harness/registry.py` | `test_p2_registry` 8/8: native schemas, read-only-by-construction, typed failures (unknown/timeout/bad-args/error) never raise (L3) |
+| M3 kernel loop (P2 core) | DONE | `harness/{loop,budgets,spec}.py` (loop 244 lines) | `test_p2_kernel` 8/8: **IP-1 intelligence proof** (failure→observation→changed hypothesis→different tool→recovery) + **IP-4 anti-scripting** (repeat-loop halted) + budgets + ask + failure-as-observation |
+| M4 INV production wiring (P2.2) | DONE | `harness/inv.py`; flag `aegisops_harness_read_paths`; additive SRE integration | `test_p2_inv_wiring`: kernel drives the frozen registry; flag off ⇒ byte-identical legacy path (T-P2-01 coexistence) |
+| M5 memory lifecycle (P2.3/2.6) | DONE | `harness/memory.py`; `MemoryItem` model; **migration 0013** | `test_p2_memory`: gate fails-open + deterministic override + observable `agent_gate`; consolidation = proposals-only; live supersede-not-coexist |
+| M6 subagents + prompts (P2.7/2.8) | DONE | `harness/{subagents,prompts}.py`; `PromptRegistry` model; **migration 0014** | `test_p2_subagents_prompts`: typed AgentResult (never transcript), depth-1 + shared budget; prompt registry versioned + hash-idempotent (live) |
+| Frontend slice (item 17) | DONE | `GET /runs/{id}/events` (CoT-safe); `ArtifactTab "events"` + `AgentLoop` tab + `RunEvent` type | `test_p2_events_api` (static CoT guard + live trail); tsc clean; existing generic artifact fetch — no store change |
+
+**Architecture mapping (frozen sources honored):** OBSERVE→REASON→ACT loop = 00 §4 / 04 §3
+(loop laws L1–L7); run_events = 06 §8.2 + ADR-16 (two records, one owner — checkpointer stays
+the graph-spine resume authority, `run_events` is the harness record); memory tiers/gate/
+consolidation = 06 §1/§4/§2; subagents = 05 §6; prompt registry = 05 §9; budgets = 04 §5;
+`agent_gate` 18th event kind = the C-05 resolution (§22).
+
+**Boundary (audited):** reads only (rule two) — mutation stays on exec_loop/approval, zero-diff
+in `graph.py`/`approval.py`/`exec_loop.py`/`runner.py`/`state.py`/`checkpointer.py`/`plan_guard.py`.
+LangGraph untouched (6 importers). No P3 engine, no P4 pack/domain migration, no P5 broker, no
+AUTONOMOUS. Harness is a parallel read-path runtime behind a default-off flag, not a spine swap.
+
+**Contradiction closed:** C-05 (`agent_gate` event) — now in the 06 §8.2 enum via migration 0012
++ `run_log.KINDS`. C-06 (`assistant_turn.hypothesis`) — the kernel writes it on every turn;
+`test_p2_kernel` pins its presence and CoT-safety.
+
+**Transitional (T-P2-01):** legacy hardcoded SRE read path coexists with the kernel path behind
+`aegisops_harness_read_paths` (default off). Owner: harness. Removal condition: INV read-path
+parity accepted across P2 exit scenarios; then the legacy branch is removed. Rollback: flag off.
+
+**DB:** migrations 0012/0013/0014 additive, applied to the dev DB only (:5433), each with a
+downgrade; no production/shared DB touched.
+
+---
+
+## 31. P3 record (2026-08-11) — Durable execution / workflow engine
+
+Implemented per the operator's P3 prompt. Verdict: **P3 COMPLETE** (implemented + verified,
+uncommitted, awaiting operator acceptance). Evidence: `Redesign/implementations/P3
+Implementation Report.md`. New package `app/engine/` orchestrates durability; the P2 harness
+stays authoritative for reasoning.
+
+| Milestone | Status | Files | Gate evidence |
+|---|---|---|---|
+| M1 durable schema | DONE | `Task`/`RunStep`+cols/`Run.task_id` models; **migration 0015 (dev DB)** | tables + columns verified live |
+| M2 status machine (P3.6) | DONE | `engine/status.py` (`applying` dead; guarded transitions) | `test_p3_engine` pure pins: transitions guarded, terminals honored |
+| M3 workflow compile + waves (P3.1) | DONE | `engine/dag.py` (Kahn layering + disjoint-output check; reuses `exec_loop.validate_dag` catalog guard verbatim) | compile→waves, cycle/dup/non-catalog/collision rejected |
+| M4 durable step store + idempotency | DONE | `engine/steps.py` (durable `run_steps` lifecycle + P0/A1 claim-or-recover) | no-double-apply proven live |
+| M5 durable engine + recovery | DONE | `engine/engine.py` (wave scheduler; recovery = replay durable state, skip done; single-writer status) | **headline demo**: crash mid-workflow → restart → recover `{vpc,s3}` → only `eks` executes → complete |
+| M6 saga (P3.2) | DONE | `engine/saga.py` (reverse-order compensation; freeze+page on compensator failure) | reverse-order + freeze proven live |
+| M7 P2 harness integration | DONE | `engine/driver.py` (`harness_step_executor` for read/verify/gate via P2 INV; `recover_run`) | mutation kinds return honest "not wired in P3" (boundary) |
+| Frontend slice | DONE | `statusColor` (+compensated/rolled_back/verifying/scheduled/awaiting_input); timeline API `rolled_back` terminal (honest, not "failed") | tsc clean |
+
+**Architecture mapping:** Task/Run/Step = 06 §8.1; status machine = 06 §8.3 (`applying` fully
+dead — D5 closed); durable run log = the P2 `run_events` (ADR-16 — checkpointer stays the
+graph-spine resume authority, run_events is the durable record + harness/engine replay
+source); waves + disjoint-output = 07 P3.1; saga reverse-order + freeze = 07 P3.2; max_steps
+5→8 = 07 P3.9.
+
+**Boundary (audited):** the P2 harness is unchanged and authoritative for reasoning — the
+engine only orchestrates durability (no second loop, no LLM abstraction, no provider logic).
+Real Terraform apply stays the untouched exec_loop/approval path — the durable engine executes
+idempotent/read/verify steps and returns an honest "not wired in P3" for mutation kinds; it
+does NOT migrate CloudOps mutations. LangGraph untouched (6 importers, spine files zero-diff).
+No P4 pack/domain migration, no P5 broker, no AUTONOMOUS. Gated by `aegisops_durable_engine`
+(default off) — exec_loop remains the default path.
+
+**Transitional (T-P3-01):** legacy `exec_loop` mutation path coexists with the durable engine
+behind `aegisops_durable_engine` (default off). Owner: engine. Replacement: durable engine +
+(P4) real module/day2/k8s executors. Dependency: real mutation executors + parity. Removal
+condition: durable-path parity accepted with real executors (P4). Rollback: flag off →
+exec_loop unchanged. (exec_loop's `_todo` policy rows, day-2 registry breadth, K8s executor,
+and cross-cloud verify remain — see §21 deferred; they border P4 domain work.)
+
+**DB:** migration 0015 additive (new `tasks` table, `runs.task_id`, six nullable `run_steps`
+columns), downgrade present, applied to the dev DB only; no existing column removed.
+
+---
+
+## 32. P4 record (2026-08-11) — Domain capability migration (harness-first inversion, read paths)
+
+Implemented per the operator's P4 prompt. Verdict: **P4 COMPLETE** (implemented + verified,
+uncommitted, awaiting operator acceptance). Evidence: `Redesign/implementations/P4
+Implementation Report.md`. New package `app/packs/`; the harness/engine/policy/model layers
+stay provider-neutral.
+
+**Scope delivered (the parity-safe, dark-launched core of 07 Phase 4):** capability-pack
+structure + contract (02 §4); AWS/Azure/GCP/K8s/GitHub packs as equal first-class thin
+specialists; the harness INV **read registry sourced from packs** cloud-neutrally (07 P4.2
+read path); provider-neutral **objective model** (P4.1 — "create a VM"→compute family →
+resolved provider); **permission-mode matrix + ESTOP** (P4.5, AUTONOMOUS never enabled);
+capability catalog API + frontend parity panel; governance-stamp posture flags. Gated by
+`aegisops_capability_packs` (default **off**, dark launch — 07 risk #1).
+
+| Milestone | Status | Files | Gate evidence |
+|---|---|---|---|
+| Pack contract (02 §4) | DONE | `packs/base.py` (CapabilityPack, ToolSpec, families) | contract pins |
+| CloudOps AWS/Azure/GCP packs | DONE | `packs/cloudops/{aws,azure,gcp}.py` | 5-pack/3-cloud parity test |
+| SREOps K8s + DevOps GitHub packs | DONE | `packs/sreops/k8s.py`, `packs/devops/github.py` | registered read tools |
+| Pack registry → harness read surface | DONE | `packs/registry.py`; `harness/inv.py` flag wiring | read-only-by-construction preserved; mutation declared not registered |
+| Objective model (P4.1) | DONE | `packs/objective.py` | intent→family→provider parametrized pins |
+| Permission modes + ESTOP (P4.5) | DONE | `harness/policy.py` | matrix gates mutation; destructive always gated; AUTONOMOUS never mutates; ESTOP |
+| Frontend/API slice | DONE | `GET /capabilities`; ModuleView `CapabilitiesPanel`; governance-stamp posture keys | tsc clean; catalog renders parity |
+| End-to-end read flow | DONE | (test) objective→packs→harness→verify→evidence | "find my Azure VMs" answered over the pack tool with evidence |
+
+**Multi-cloud parity matrix (P4 read layer; mutation DECLARED, executed by the governed path):**
+
+| Capability family | AWS | Azure | GCP | Read | Plan/Mutation | Verify | Parity |
+|---|---|---|---|---|---|---|---|
+| compute | ✅ list_compute | ✅ list_compute | ✅ list_compute | pack tool | declared (ec2/vm/gce templates) | harness INV | **READ parity** |
+| network | ✅ list_networks/subnets | ✅ list_networks | ✅ list_networks | pack tool | declared (vpc/vnet/vpc) | harness INV | **READ parity** |
+| storage | ✅ list_storage | (create only) | (create only) | aws read | declared (s3/blob/gcs) | — | AWS read; Az/GCP read DEFERRED (F-12) |
+| db | ✅ list_databases | (create only) | (create only) | aws read | declared (rds/sql/cloudsql) | — | AWS read; Az/GCP read DEFERRED |
+| k8s | ✅ list_k8s_clusters | (create only) | (create only) | aws + sreops.k8s | declared (eks/aks/gke + day2) | harness INV | mixed; read via sreops.k8s |
+| telemetry | — | — | — | sreops.k8s PromQL | — | harness INV | k8s/prom read |
+| repo/ci | — | — | — | devops.github | declared (PR-first) | — | github read |
+
+Az/GCP storage/db/k8s **read** tools are genuinely absent (the F-12 read/verify asymmetry
+predates P4 — Azure has 3 readers, GCP 2); declared honestly, not faked. Recorded DEF-19.
+
+**Boundary (audited):** the generic layers (`app/harness`, `app/engine`, `app/llm`, policy,
+memory) contain **zero provider-specific vocabulary** (grep-verified: no ec2/eks/s3/boto3/
+vnet/gce/gke leakage); packs import no harness/engine internals (thin, one-way). The P2
+harness is the only reasoning loop; the P3 engine the only durability; P1 the only model
+layer. LangGraph untouched (6 importers, spine zero-diff). No autonomous mutation. Mutation
+stays the governed exec_loop/approval path — packs DECLARE mutation (templates/day2) but the
+read registry only exposes read tools.
+
+**Transitional (T-P4-01):** legacy `cloudops.py`/`investigation.default_registry` read path
+coexists with the pack read path behind `aegisops_capability_packs` (default off). Owner:
+packs. Replacement: pack-sourced harness read surface. Dependency: eval parity across both
+topologies (07 P4.3 dark-until-parity). Removal condition: eval parity proven → cloudops.py
+dissolves + the loop becomes the production spine (07 P4.2/4.3 — the deferred cutover).
+Rollback: flag off.
+
+---
+
+## 33. P5 record (2026-08-11) — Production hardening, parity & controlled cutover (FINAL phase)
+
+Implemented per the operator's P5 prompt. Verdict: **P5 COMPLETE** (implemented + verified,
+uncommitted, awaiting the operator's single final commit after full local validation).
+Evidence: `Redesign/implementations/P5 Implementation Report.md`.
+
+| Priority | Item | Status | Files |
+|---|---|---|---|
+| P1 | DEF-19 parity + controlled cutover | DONE (decision: **stay dark**) | `app/evals/parity.py` |
+| P2 | DEF-20 multi-cloud breadth | honest matrix (read gaps declared, not faked) | packs + §32 matrix |
+| P3 | Credential broker (ADR-17, F-20) | DONE | `app/security/credential_broker.py`; `terraform.py` dual-path |
+| P4 | Production hardening | DONE | `app/preflight.py`; `main.py`; `/readyz` |
+| — | Frontend/API slice | DONE | `GET /capabilities` posture; ModuleView posture chips; governance stamp |
+
+**DEF-19 cutover decision (the headline): STAY DARK.** Deterministic parity dimensions
+(capability coverage, read-only boundary, mutation-governed, provider-neutral objective
+interpretation) all PASS. The live-model dimensions (tool-selection parity, plan quality,
+reasoning-trace parity, the eval gate on BOTH topologies) are **DEFERRED** — they need a
+working model over the eval dataset and the sandbox Gemini key is dead (`API_KEY_INVALID`).
+Per 07 P4.3 ("dark until eval parity proven; do not fake live parity"), `decide_cutover`
+returns **may_cutover=False**; `cloudops.py` is NOT dissolved and the flag stays default-off.
+Compliance, not a shortfall. A working key runs the harness on both topologies → green → flip
+→ dissolve cloudops.py (the one remaining cutover step, now with the harness to prove it).
+
+**Credential broker (ADR-17 / F-20):** `CredentialGrant` redaction-safe by construction
+(repr/str never reveal material — verified); sole egress `provider_env()` → Terraform
+subprocess. `EnvBackedBroker` is the dual-path default (byte-identical to the pre-broker path,
+proven); a vault/STS backend plugs in behind `CredentialBroker` (the ADR-17 sign-off item;
+real federation needs a vault + cloud — DEF-21). Grants audited with a NON-secret fingerprint.
+Gated by `aegisops_credential_broker` (default off).
+
+**Production hardening:** `preflight.run` validates event-bus/metrics-auth/tenancy/
+permission-mode/worker-role/broker posture — local lenient (warn), non-local blocks; logged at
+startup + surfaced on `/readyz`; **AUTONOMOUS permission mode is never permitted**; the
+preflight asserts the four-eyes setting does not exist (single-user HITL).
+
+**Boundary (audited):** no provider vocabulary in the broker/preflight/parity generic modules
+(grep-clean); P2 harness / P3 engine / P1 model layer / P4 packs / LangGraph (6 importers,
+spine zero-diff) / governance / Terraform safety / single-user HITL all untouched; no broad
+dead-code deletion (cloudops.py retained — removal is the DEF-19 parity-gated cutover).
+**DB: none** (P5 is code + config only).
+
+**Multi-cloud parity honesty (DEF-20):** AWS read is broadest (compute/network/storage/db/
+k8s); Azure read = compute/network/resource-groups; GCP read = compute/network. Storage/db/
+k8s **read** for Azure/GCP is genuinely absent (the pre-existing F-12 asymmetry), declared in
+the packs (mutation templates present, read tools absent) — never faked. Three-cloud read/
+verify parity is the P5.1 gate; recorded DEF-20.

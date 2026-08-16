@@ -50,7 +50,8 @@ async def knowledge(state: AgentState, config) -> dict:
     prompt = f"{convo}Context passages:\n{context_block}\n\nQuestion: {state['message']}"
 
     try:
-        answer = await llm.stream_answer(settings, _SYSTEM, prompt, emitter)
+        answer = await llm.stream_answer(settings, _SYSTEM, prompt, emitter,
+                                         purpose="knowledge")
     except GeminiError as e:
         # Without an LLM key we still return the retrieved citations.
         fallback = "Retrieved relevant documents (LLM answer unavailable until GEMINI_API_KEY is set):\n" + \

@@ -333,6 +333,7 @@ export function workflowNodes(approval: ApprovalState): WorkflowNode[] {
 export const artifactTitles: Record<string, string> = {
   timeline: "Workflow Timeline",
   reasoning: "Agent Reasoning",
+  events: "Agent Loop",
   terraform: "Terraform Plan",
   logs: "Execution Logs",
   metrics: "Metrics",
@@ -344,6 +345,7 @@ export const artifactTitles: Record<string, string> = {
 export const artifactTabList: [string, string][] = [
   ["timeline", "Timeline"],
   ["reasoning", "Reasoning"],
+  ["events", "Agent Loop"],
   ["terraform", "Terraform"],
   ["logs", "Logs"],
   ["metrics", "Metrics"],

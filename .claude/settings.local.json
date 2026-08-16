@@ -168,7 +168,26 @@
       "Bash(git add *)",
       "Bash(git commit -m 'docs: Stage A — plan amended per AEGISOPS_TARGET_ARCHITECTURE \\(decisions 7–13, checklist §8\\) *)",
       "Bash(grep -rn \"client.post\\(\\\\\"/\\\\|client.get\\(\\\\\"/\\\\|client.patch\\(\\\\\"/\\\\|client.delete\\(\\\\\"/\" backend/tests/*.py)",
-      "PowerShell(Start-Process \"C:\\\\Program Files\\\\Docker\\\\Docker\\\\Docker Desktop.exe\"; Write-Host \"Docker Desktop launching\")"
+      "PowerShell(Start-Process \"C:\\\\Program Files\\\\Docker\\\\Docker\\\\Docker Desktop.exe\"; Write-Host \"Docker Desktop launching\")",
+      "Bash(curl -s -o /dev/null -w \"localhost:3000 -> %{http_code}\\\\n\" -m 5 http://localhost:3000)",
+      "Bash(curl -s -o /dev/null -w \"port 3000 after stop -> %{http_code}\\\\n\" -m 3 http://localhost:3000)",
+      "Bash(NEXT_PUBLIC_API_BASE=http://localhost:8000 npm run dev)",
+      "Bash(curl -s -o /dev/null -m 3 http://localhost:3000)",
+      "Bash(curl -s -o /dev/null -w \"  http=%{http_code}\\\\n\" http://localhost:3000)",
+      "Bash(echo \"playwright exit=$?\")",
+      "Bash(docker rm *)",
+      "Bash(xargs -r docker rm -f)",
+      "Bash(set -o pipefail)",
+      "Bash(echo \"PYTEST_EXIT=$?\")",
+      "Bash(grep -n \"| pending |\\\\| pending$\\\\|pending |\" FIX.md)",
+      "Bash(echo \"\\(exit $?\\)\")",
+      "PowerShell(Get-NetTCPConnection *)",
+      "PowerShell(docker exec *)",
+      "PowerShell(psql *)",
+      "Bash(npm ls *)",
+      "Bash(npm root *)",
+      "PowerShell(Get-ChildItem \"Brainstorming\" | Select-Object Name, Length; Get-ChildItem \"aegisops_production_kit\" -Directory | Select-Object Name; \\(Get-Content \"aegisops_production_kit\\\\docs\\\\waku-agent\\\\GAP_ANALYSIS.md\" | Measure-Object -Line\\).Lines)",
+      "Bash(xargs wc -l)"
     ]
   }
 }

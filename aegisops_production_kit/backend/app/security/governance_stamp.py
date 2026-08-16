@@ -28,6 +28,13 @@ def governance_stamp(settings: Settings | None = None) -> dict[str, Any]:
         "exec_loop": s.aegisops_exec_loop,
         "drift": s.aegisops_drift,
         "default_execution_mode": s.default_execution_mode,
+        # P2/P3/P4 posture flags — visible so a durable/harness/pack cutover can never drift
+        # silently (the D9 lesson). All default off; the permission mode is never AUTONOMOUS.
+        "harness_read_paths": getattr(s, "aegisops_harness_read_paths", "off"),
+        "durable_engine": getattr(s, "aegisops_durable_engine", "off"),
+        "capability_packs": getattr(s, "aegisops_capability_packs", "off"),
+        "credential_broker": getattr(s, "aegisops_credential_broker", "off"),
+        "permission_mode": getattr(s, "aegisops_permission_mode", "APPROVAL_REQUIRED"),
         # Single-user human-in-the-loop is THE approval model (Redesign/00 §7): the
         # initiating human reviews and approves their own plan (initiator == approver).
         # There is no second-approver / four-eyes concept in AegisOps.

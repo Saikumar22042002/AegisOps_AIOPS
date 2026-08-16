@@ -18,7 +18,7 @@ import structlog
 from ..db.models import Run
 from ..db.session import session_scope
 from ..graph_db.context_graph import ContextGraph
-from ..integrations.gemini import get_gemini
+from ..llm import service as llm_service
 from ..security import idempotency
 from ..security.confidentiality import classify
 from ..settings import get_settings
@@ -38,13 +38,15 @@ async def _extract_ports(settings, message: str) -> list[int]:
     import re
 
     ports: list[int] = []
-    gemini = get_gemini(settings)
-    if gemini.enabled:
+    if llm_service.configured(settings, "extract"):
         try:
             r = await llm.classify_json(
                 settings,
                 'Extract only the TCP port numbers the user explicitly wants to open. '
-                'Respond with ONLY JSON: {"ingress_ports": [<int>, ...]}.', message)
+                'Respond with ONLY JSON: {"ingress_ports": [<int>, ...]}.', message,
+                purpose="extract",
+                response_schema={"type": "object", "properties": {
+                    "ingress_ports": {"type": "array", "items": {"type": "integer"}}}})
             ports = [int(p) for p in (r.get("ingress_ports") or []) if 0 < int(p) <= 65535]
         except Exception as e:  # noqa: BLE001
             log.warning("cloudops.port_extract_failed", error=str(e))
@@ -61,8 +63,7 @@ async def _extract_modification(settings, message: str) -> dict:
     import re
 
     changes: dict = {}
-    gemini = get_gemini(settings)
-    if gemini.enabled:
+    if llm_service.configured(settings, "extract"):
         try:
             r = await llm.classify_json(
                 settings,
@@ -73,7 +74,7 @@ async def _extract_modification(settings, message: str) -> dict:
                 '"instance_class": "<db.x.y>", "allocated_storage": <int GiB>, '
                 '"tags": {"<key>": "<value>"}}. '
                 '"start/power on" → power=running; "stop/power off/shut down" → power=stopped.',
-                message)
+                message, purpose="extract")
             for k in ("ingress_ports", "power", "versioning", "lifecycle_expire_days",
                       "instance_class", "allocated_storage", "tags"):
                 if r.get(k) not in (None, [], {}, ""):
@@ -182,8 +183,7 @@ async def _extract_inputs(settings, template, message: str, *, org_id: str | Non
             field = "location" if template.cloud == "azure" else "region"
             inputs.setdefault(field, usual)
             log.info("cloudops.usual_region_honored", region=usual, field=field)
-    gemini = get_gemini(settings)
-    if gemini.enabled:
+    if llm_service.configured(settings, "extract"):
         fields = params.extraction_fields(template.key) or ", ".join(template.schema.model_fields.keys())
         system = (
             "Extract provisioning parameter values from the user's message for a Terraform module. "
@@ -195,7 +195,7 @@ async def _extract_inputs(settings, template, message: str, *, org_id: str | Non
             "'none'/'closed'/'keep it closed'/'skip' -> \"none\". Lists as JSON arrays."
         )
         try:
-            extracted = await llm.classify_json(settings, system, message)
+            extracted = await llm.classify_json(settings, system, message, purpose="extract")
             clean = {k: v for k, v in extracted.items() if v not in (None, "")}
             # STAB P1-1: a NAME is never invented or silently "fixed". The live case:
             # the reply `mybucket-sai@22042792002` was extracted as the DIFFERENT (valid)

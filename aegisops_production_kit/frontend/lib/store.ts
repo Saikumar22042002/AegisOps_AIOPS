@@ -371,6 +371,13 @@ export const useUI = create<UIState>((set, get) => ({
           case "confidentiality":
             patchMsg(set, aiId, { confidentiality: { level: String(ev.data.level), score: Number(ev.data.score) } });
             break;
+          case "served_by":
+            // P1.7: honest serving metadata (provider/model badge; fallback hops visible).
+            patchMsg(set, aiId, { servedBy: {
+              provider: String(ev.data.provider ?? ""), model: String(ev.data.model ?? ""),
+              requestedModel: ev.data.requested_model ? String(ev.data.requested_model) : undefined,
+              fallbackHop: Number(ev.data.fallback_hop ?? 0) } });
+            break;
           case "console":
             patchMsg(set, aiId, { consoleLines: [...(m.consoleLines ?? []), { stream: String(ev.data.stream), line: String(ev.data.line) }] });
             break;

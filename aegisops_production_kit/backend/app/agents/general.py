@@ -66,7 +66,8 @@ async def general(state: AgentState, config) -> dict:
               f"User's current message: {state['message']}") if transcript else state["message"]
 
     try:
-        answer = await llm.stream_answer(settings, _SYSTEM, prompt, emitter)
+        answer = await llm.stream_answer(settings, _SYSTEM, prompt, emitter,
+                                         purpose="general")
     except GeminiError as e:
         # Honest failure, clean run: the graph completes with a real message instead of
         # crashing and persisting an empty "completed" state (Phase 7 / BUG-03).

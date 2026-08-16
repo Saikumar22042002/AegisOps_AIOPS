@@ -60,6 +60,21 @@ async def lifespan(app: FastAPI):
         raise RuntimeError(
             "AEGISOPS_EVENT_BUS=memory is a dev-only mode; app_env="
             f"{settings.app_env!r} requires Redis coordination (set AEGISOPS_EVENT_BUS=redis).")
+    # P1.4/P1.7: an invalid model catalog refuses startup in EVERY env (it is a packaging
+    # bug, not an environment condition); org bindings are wired into route resolution.
+    from .llm import bindings as llm_bindings
+    from .llm import catalog as llm_catalog_boot
+    llm_catalog_boot.boot_validate(settings)
+    llm_bindings.register()
+    # P5 hardening: log the production-config preflight at startup (visibility; the P0
+    # event-bus/Redis refusals above remain the hard gate). A block in a non-local env is
+    # loud in the logs and surfaced on /readyz.
+    from . import preflight as _preflight
+    _report = _preflight.run(settings)
+    for _f in _report.findings:
+        if _f.severity != "ok":
+            log.warning("preflight.finding", check=_f.check, severity=_f.severity,
+                        detail=_f.detail)
     setup_otel(settings)
     db.init_engine(settings)
     redis_client.init_redis(settings)

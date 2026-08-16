@@ -102,6 +102,163 @@ function countdown(iso?: string | null): string {
 // GW-1: per-user identity — bind a Telegram account to THIS Keycloak user. The code is a
 // one-time bearer secret shown exactly once (the API never re-serves it), so the countdown and
 // the plaintext live only in this component's state.
+interface BindingRow {
+  purpose: string; governed: boolean; default_model: string;
+  bound_model: string | null; effective_model: string; eval_state: string | null;
+  updated_by: string | null; reason: string | null;
+}
+
+interface PackRow {
+  pack: string; provider: string; domain: string; configured: boolean;
+  read: string[]; mutation: string[]; templates: string[]; day2: string[];
+}
+
+function CapabilitiesPanel() {
+  // P4: the multi-cloud capability parity matrix — what AegisOps can do across AWS/Azure/
+  // GCP/K8s/GitHub, provider-neutral. An unconfigured provider lists honestly (no fake
+  // support). `packs_enabled` reflects the dark-launch flag.
+  const [packs, setPacks] = useState<PackRow[] | null>(null);
+  const [enabled, setEnabled] = useState(false);
+  const [posture, setPosture] = useState<Record<string, string> | null>(null);
+  useEffect(() => {
+    api.get<{ packs: PackRow[]; packs_enabled: boolean; posture?: Record<string, string> }>("/capabilities")
+      .then((r) => { setPacks(r.packs); setEnabled(r.packs_enabled); setPosture(r.posture ?? null); })
+      .catch(() => setPacks(null));
+  }, []);
+  if (packs === null) return null;
+  return (
+    <div style={{ marginTop: 26 }} data-testid="capabilities">
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+        <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text)" }}>Capability packs</span>
+        <span style={{ fontSize: 11, color: "var(--text-4)" }}>
+          multi-cloud parity · AWS · Azure · GCP · K8s · GitHub · {enabled ? "harness read path ON" : "dark (flag off)"}
+        </span>
+      </div>
+      {posture && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }} data-testid="posture">
+          {[["approval", posture.approval_model], ["mode", posture.permission_mode],
+            ["cred broker", posture.credential_broker], ["durable engine", posture.durable_engine]]
+            .map(([label, val]) => (
+              <span key={label} style={{ fontSize: 10.5, color: "var(--text-3)", padding: "3px 9px",
+                     borderRadius: 6, background: "var(--surface-2)", border: "1px solid var(--border)" }}>
+                {label}: <b style={{ color: "var(--text-2)" }}>{val}</b>
+              </span>
+            ))}
+        </div>
+      )}
+      <div style={{ border: "1px solid var(--border)", borderRadius: 14, background: "var(--surface)", padding: "6px 18px" }}>
+        {packs.map((p) => (
+          <div key={p.pack} data-testid={`pack-${p.pack}`}
+            style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: "1px solid var(--border)" }}>
+            <span style={{ width: 7, height: 7, borderRadius: 99, flexShrink: 0,
+                           background: p.configured ? "var(--green)" : "var(--text-4)" }}
+              title={p.configured ? "provider configured" : "no credentials — capability listed, not callable"} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ fontSize: 12.5, color: "var(--text)", fontFamily: "'IBM Plex Mono',monospace" }}>{p.pack}</span>
+              <div style={{ fontSize: 10.5, color: "var(--text-4)" }}>
+                read: {p.read.join(", ") || "—"}{p.mutation.length ? ` · mutation: ${p.mutation.join(", ")}` : ""}
+              </div>
+            </div>
+            <span style={{ fontSize: 10.5, color: "var(--text-4)" }}>{p.configured ? "configured" : "not configured"}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ModelRoutingPanel() {
+  // P1.7: org-level model bindings — which model serves each purpose. models.yaml says
+  // what CAN run; these rows say what THIS org runs. Writes are server-side admin-gated
+  // (403 surfaces inline) and every change lands an audit row.
+  const [rows, setRows] = useState<BindingRow[] | null>(null);
+  const [models, setModels] = useState<{ id: string; provider: string }[]>([]);
+  const [err, setErr] = useState<string>("");
+  const [busy, setBusy] = useState<string>("");
+
+  const load = () =>
+    Promise.allSettled([
+      api.get<{ bindings: BindingRow[] }>("/models/bindings"),
+      api.get<{ models: { id: string; provider: string; enabled: boolean }[] }>("/models"),
+    ]).then(([b, m]) => {
+      setRows(b.status === "fulfilled" ? b.value.bindings : null);
+      setModels(m.status === "fulfilled" ? m.value.models.filter((x) => x.enabled) : []);
+    });
+  useEffect(() => { load(); }, []);
+
+  const bind = async (purpose: string, model: string) => {
+    setErr(""); setBusy(purpose);
+    try { await api.put(`/models/bindings/${purpose}`, { model, reason: "set via Settings" }); await load(); }
+    catch (e: any) { setErr(String(e?.message ?? e)); }
+    finally { setBusy(""); }
+  };
+  const reset = async (purpose: string) => {
+    setErr(""); setBusy(purpose);
+    try { await api.del(`/models/bindings/${purpose}`); await load(); }
+    catch (e: any) { setErr(String(e?.message ?? e)); }
+    finally { setBusy(""); }
+  };
+
+  return (
+    <div style={{ marginTop: 26 }} data-testid="model-routing">
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+        <span style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text)" }}>Model routing</span>
+        <span style={{ fontSize: 11, color: "var(--text-4)" }}>
+          which model serves each purpose · governed purposes ignore per-run picks · changes are audited
+        </span>
+      </div>
+      {err && <div style={{ fontSize: 12, color: "var(--red-2)", marginBottom: 10 }} data-testid="binding-error">{err}</div>}
+      <div style={{ border: "1px solid var(--border)", borderRadius: 14, background: "var(--surface)", padding: "6px 18px" }}>
+        {rows === null && (
+          <div style={{ padding: "14px 0", fontSize: 12, color: "var(--text-4)" }}>
+            model routing unavailable (GET /models/bindings)
+          </div>
+        )}
+        {rows?.map((r) => (
+          <div key={r.purpose} data-testid={`binding-${r.purpose}`}
+            style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: "1px solid var(--border)" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ fontSize: 12.5, color: "var(--text)", fontFamily: "'IBM Plex Mono',monospace" }}>{r.purpose}</span>
+              {r.governed && (
+                <span title="Governed purpose: never user-pinnable, never silent-fallback"
+                  style={{ marginLeft: 8, fontSize: 10, color: "var(--amber)", border: "1px solid var(--border-2)", borderRadius: 5, padding: "1px 6px" }}>
+                  governed
+                </span>
+              )}
+              <div style={{ fontSize: 10.5, color: "var(--text-4)" }}>
+                default {r.default_model}
+                {r.bound_model && r.eval_state ? ` · eval: ${r.eval_state}` : ""}
+                {r.updated_by ? ` · by ${r.updated_by}` : ""}
+              </div>
+            </div>
+            <select
+              value={r.bound_model ?? r.default_model}
+              disabled={busy === r.purpose}
+              onChange={(e) => void bind(r.purpose, e.target.value)}
+              data-testid={`binding-select-${r.purpose}`}
+              style={{ fontSize: 12, padding: "5px 8px", borderRadius: 7, border: "1px solid var(--border-2)", background: "var(--surface-2)", color: "var(--text-2)" }}
+            >
+              {!models.some((m) => m.id === (r.bound_model ?? r.default_model)) && (
+                <option value={r.bound_model ?? r.default_model}>{r.bound_model ?? r.default_model}</option>
+              )}
+              {models.map((m) => (
+                <option key={m.id} value={m.id}>{m.id} ({m.provider})</option>
+              ))}
+            </select>
+            {r.bound_model && (
+              <button onClick={() => void reset(r.purpose)} disabled={busy === r.purpose} className="ao-h-b3"
+                data-testid={`binding-reset-${r.purpose}`}
+                style={{ padding: "5px 11px", borderRadius: 7, border: "1px solid var(--border-2)", background: "transparent", color: "var(--text-3)", fontSize: 11.5, cursor: "pointer" }}>
+                Reset
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ConnectedAccounts() {
   const [st, setSt] = useState<TelegramStatus | null>(null);
   const [code, setCode] = useState<string>("");
@@ -305,6 +462,8 @@ export function ModuleView() {
               ))}
             </div>
 
+            {activeNav === "infrastructure" && <CapabilitiesPanel />}
+
             {activeNav === "infrastructure" && proposals.length > 0 && (
               <div style={{ marginTop: 26 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
@@ -370,6 +529,7 @@ export function ModuleView() {
             )}
 
             {/* GW-1: the Link Telegram control lives here — Settings → Connected accounts. */}
+            {isSettings && <ModelRoutingPanel />}
             {isSettings && <ConnectedAccounts />}
           </>
         )}

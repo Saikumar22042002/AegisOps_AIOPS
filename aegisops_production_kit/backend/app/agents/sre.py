@@ -14,7 +14,7 @@ import structlog
 
 from ..db.session import get_sessionmaker
 from ..graph_db.context_graph import ContextGraph
-from ..integrations.gemini import GeminiError, get_gemini
+from ..integrations.gemini import GeminiError
 from ..rag import retriever
 from ..security.confidentiality import classify
 from ..settings import get_settings
@@ -48,7 +48,8 @@ def decision_matrix(signals: dict) -> dict:
             "rationale": "No automated remediation matched; needs human investigation."}
 
 
-async def _collect_telemetry(settings, emitter) -> dict:
+async def _collect_telemetry(settings, emitter, *, run_id: str | None = None,
+                             org_id: str | None = None) -> dict:
     prom = get_prometheus(settings)
     # U2: recent_deploy is a REAL Prometheus signal (a deployment generation change in the last
     # 15m via kube-state-metrics), not the old hardcoded True. Default False when Prometheus is
@@ -77,18 +78,36 @@ async def _collect_telemetry(settings, emitter) -> dict:
     # INV: K8s triage evidence through the read-only investigation boundary — the investigator
     # can only reach the frozen read-only registry, so triage work is structurally unable to
     # mutate anything (mutation stays behind the approval gate in sre_execute).
+    #
+    # P2.2: when the harness-read-paths flag is on, the kernel's OBSERVE→REASON→ACT loop
+    # drives that same frozen registry — the deterministic single call becomes a genuine
+    # bounded investigation. Flag off ⇒ the exact prior behavior (coexistence, T-P2-01).
     try:
         from ..tools.kubernetes import get_kubernetes as _get_k8s
         if _get_k8s(settings).enabled:
-            from . import investigation
-            inv = investigation.Investigator(investigation.default_registry(settings))
-            ev = await inv.call("list_deployments", namespace="default")
-            if ev.ok:
-                signals["deployments"] = [d.get("name") for d in (ev.result or [])][:10]
+            if getattr(settings, "aegisops_harness_read_paths", "off") == "on":
+                from ..harness import inv as harness_inv
+                res = await harness_inv.investigate(
+                    settings,
+                    "Collect Kubernetes triage evidence (deployments, pods, recent restarts) "
+                    "relevant to the current incident and summarize what the telemetry shows.",
+                    run_id=run_id, org_id=org_id)
+                signals["harness_investigation"] = {
+                    "status": res.status, "iterations": res.iterations,
+                    "evidence_ok": res.evidence_ok, "findings": res.findings[:600]}
                 await emitter.console(
-                    "stdout", f"investigation (read-only): {len(ev.result or [])} deployments")
+                    "stdout", f"harness INV (read-only): {res.status} in "
+                              f"{res.iterations} iteration(s), evidence={res.evidence_ok}")
             else:
-                await emitter.console("stderr", f"investigation: {ev.error}")
+                from . import investigation
+                inv = investigation.Investigator(investigation.default_registry(settings))
+                ev = await inv.call("list_deployments", namespace="default")
+                if ev.ok:
+                    signals["deployments"] = [d.get("name") for d in (ev.result or [])][:10]
+                    await emitter.console(
+                        "stdout", f"investigation (read-only): {len(ev.result or [])} deployments")
+                else:
+                    await emitter.console("stderr", f"investigation: {ev.error}")
     except Exception as e:  # noqa: BLE001 — triage evidence is best-effort
         await emitter.console("stderr", f"investigation failed: {e}")
     return signals
@@ -99,7 +118,8 @@ async def sre_analyze(state: AgentState, config) -> dict:
     settings = get_settings()
     await emitter.step(2, "Triaging incident")
 
-    signals = await _collect_telemetry(settings, emitter)
+    signals = await _collect_telemetry(settings, emitter, run_id=state.get("run_id"),
+                                       org_id=state.get("org_id"))
 
     await emitter.step(3, "Collected telemetry")
     refs = []
@@ -118,7 +138,8 @@ async def sre_analyze(state: AgentState, config) -> dict:
     prompt = (f"Incident: {state['message']}\n\nSignals: {signals}\n\nDecision matrix suggests: "
               f"{decision}\n\nRunbooks:\n{runbook_ctx}")
     try:
-        analysis = await llm.stream_answer(settings, _SYSTEM, prompt, emitter)
+        analysis = await llm.stream_answer(settings, _SYSTEM, prompt, emitter,
+                                           purpose="sre.triage")
     except GeminiError:
         analysis = (f"Triage (heuristic): decision matrix → {decision['action']} on {decision['target']} "
                     f"({decision['rationale']}). Set GEMINI_API_KEY for a full LLM analysis.")

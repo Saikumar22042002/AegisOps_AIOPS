@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 import structlog
 
 from ..graph_db.context_graph import ContextGraph
-from ..integrations.gemini import get_gemini
+from ..llm import service as llm_service
 from ..security.confidentiality import classify
 from ..settings import get_settings
 from ..tools.github import GitHubError, get_github
@@ -53,12 +53,12 @@ async def _extract(settings, message: str) -> dict:
     from ..schemas.workflows import parse_freeform
 
     inputs = parse_freeform(message)
-    gemini = get_gemini(settings)
-    if gemini.enabled:
+    if llm_service.configured(settings, "extract"):
         system = ("Extract a DevOps deployment request as JSON with keys when present: "
                   "repo, branch, env (dev|stg|prod), namespace, image, description. Omit unknown keys.")
         try:
-            inputs = {**(await llm.classify_json(settings, system, message)), **inputs}
+            inputs = {**(await llm.classify_json(settings, system, message,
+                                                  purpose="extract")), **inputs}
         except Exception as e:  # noqa: BLE001
             log.warning("devops.extract_failed", error=str(e))
     return inputs

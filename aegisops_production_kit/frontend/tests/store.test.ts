@@ -54,6 +54,9 @@ describe("sendText — live run binding + streaming render", () => {
       { event: "token", data: { text: "Hello " } },
       { event: "token", data: { text: "world" } },
       { event: "confidentiality", data: { level: "High", score: 0.91 } },
+      // P1.7: honest serving metadata (multi-provider substrate) — additive event.
+      { event: "served_by", data: { provider: "google", model: "gemini-3.5-flash",
+                                    requested_model: "gemini-3.5-flash", fallback_hop: 0 } },
       { event: "done", data: { runId: "run-abc", messageId: "msg-1" } },
     ]);
 
@@ -65,6 +68,8 @@ describe("sendText — live run binding + streaming render", () => {
     expect(m.text).toBe("Hello world");              // token stream accumulated
     expect(m.showTimeline).toBe(false);              // switches to answer once tokens arrive
     expect(m.confidentiality).toEqual({ level: "High", score: 0.91 });  // badge data
+    expect(m.servedBy).toEqual({ provider: "google", model: "gemini-3.5-flash",
+                                 requestedModel: "gemini-3.5-flash", fallbackHop: 0 });
     expect(m.done).toBe(true);
     expect(m.messageId).toBe("msg-1");
     expect(m.streaming).toBe(false);

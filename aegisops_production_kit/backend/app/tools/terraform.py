@@ -167,24 +167,28 @@ class TerraformRunner:
         if self.state_workspace and include_ws:
             env["TF_WORKSPACE"] = self.state_workspace
         s = self.settings
-        if s.aws_access_key_id:
-            env["AWS_ACCESS_KEY_ID"] = s.aws_access_key_id
-            env["AWS_SECRET_ACCESS_KEY"] = s.aws_secret_access_key
-            env["AWS_DEFAULT_REGION"] = s.aws_default_region
-            if s.aws_session_token:
-                env["AWS_SESSION_TOKEN"] = s.aws_session_token
-        # Azure — the azurerm provider authenticates via ARM_* (service principal).
-        if s.azure_client_id:
-            env["ARM_CLIENT_ID"] = s.azure_client_id
-            env["ARM_CLIENT_SECRET"] = s.azure_client_secret
-            env["ARM_TENANT_ID"] = s.azure_tenant_id
-            env["ARM_SUBSCRIPTION_ID"] = s.azure_subscription_id
-        # GCP — the google provider authenticates via a service-account key file + project.
-        if s.google_cloud_project:
-            env["GOOGLE_PROJECT"] = s.google_cloud_project
-        if s.google_application_credentials:
-            env["GOOGLE_APPLICATION_CREDENTIALS"] = s.google_application_credentials
+        # P5.3: when the credential broker is on, mutation credentials come from a
+        # redaction-safe per-org grant (dual-path — the broker's default backend returns
+        # this same configured set, so flag-off behavior is byte-identical). The broker
+        # material is injected into the subprocess env ONLY (its one authorized egress);
+        # it is never logged/emitted. See app/security/credential_broker.py + inject_credentials.
+        # P5.3: the provider credential env comes from the ONE source of truth
+        # (credential_broker.global_provider_env) in BOTH modes, so broker on/off is
+        # byte-identical here (dual-path). When the broker is on, a per-instance brokered
+        # grant (set by the governed mutation caller via `set_credential_grant`) overrides
+        # this global set with a per-org, short-lived one. Credential material enters the
+        # subprocess env ONLY — never logged/emitted.
+        from ..security.credential_broker import global_provider_env
+        if getattr(self, "_cred_override", None):
+            env.update(self._cred_override)
+        else:
+            env.update(global_provider_env(s))
         return env
+
+    def set_credential_grant(self, grant) -> None:
+        """P5.3: inject a brokered credential grant for this runner's mutations. The grant's
+        material is the runner's per-instance credential env; nothing else may read it."""
+        self._cred_override = grant.provider_env() if grant is not None else None
 
     def _console(self, include_ws: bool = True, plugin_cache: bool = True) -> CommandConsole:
         if not os.path.isdir(self.workdir):

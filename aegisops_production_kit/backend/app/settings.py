@@ -57,6 +57,33 @@ class Settings(BaseSettings):
     # P0 ledger: local fsync'd spill journal for usage records that could not be
     # persisted to Postgres (replayed idempotently by the reconciler; gitignored).
     aegisops_ledger_spill_path: str = "./llm_usage_spill.jsonl"
+    # P2.2 Agent Harness on READ paths (07 §2.2). Default OFF: when on, read-only triage
+    # (SRE telemetry today) is driven by the kernel's OBSERVE→REASON→ACT loop over the
+    # frozen investigation registry instead of the single hardcoded call. Mutation paths
+    # are untouched (rule two). Old path remains the fallback — coexistence (T-P2-01).
+    aegisops_harness_read_paths: str = "off"  # off | on
+    # P3 durable execution / workflow engine (07 Phase 3). Default OFF: when on, a compiled
+    # goal-DAG runs as a durable, wave-scheduled, restart-safe Workflow (app/engine) that
+    # recovers from run_events + run_steps without repeating completed work. Mutation stays
+    # governed (real Terraform apply remains the exec_loop/approval path); the existing
+    # exec_loop remains the default path (coexistence, T-P3-01).
+    aegisops_durable_engine: str = "off"  # off | on
+    # P3.9: goal-DAG step ceiling raised 5→8 behind config (per-run concurrency capped by waves).
+    aegisops_max_steps: int = 8
+    # P4 capability packs (the harness-first inversion, 07 Phase 4). Default OFF — ships DARK
+    # (07 risk #1): when on, the harness INV read registry is sourced from the AWS/Azure/GCP/
+    # K8s/GitHub capability packs (cloud-neutral) instead of the hardcoded default registry.
+    # The legacy path and cloudops.py remain; the production-spine cutover + agent dissolution
+    # happen only at proven eval parity (T-P4-01). Mutation stays the governed exec_loop path.
+    aegisops_capability_packs: str = "off"  # off | on
+    # P4.5 default permission mode for a run (READ_ONLY | PLAN_ONLY | APPROVAL_REQUIRED).
+    # AUTONOMOUS is intentionally NOT an accepted value here (never enabled in P4).
+    aegisops_permission_mode: str = "APPROVAL_REQUIRED"
+    # P5.3 credential broker (ADR-17, closes F-20). Default OFF: mutation credentials come
+    # from the process's configured set exactly as before (dual-path fallback). When on, the
+    # broker resolves a redaction-safe per-org grant; a vault/STS backend plugs in behind it
+    # (the ADR-17 sign-off item). Either way credentials never reach prompts/logs/events/UI.
+    aegisops_credential_broker: str = "off"  # off | on
     # Approval model (Redesign/00 §7): single-user HUMAN-IN-THE-LOOP. The initiating human
     # reviews and approves or rejects their own plan (initiator == approver). There is no
     # second-approver / four-eyes concept; the active posture is stamped on every approval
@@ -81,6 +108,21 @@ class Settings(BaseSettings):
     # has no built-in price table for Gemini models).
     gemini_cost_per_1m_input: float = 0.30
     gemini_cost_per_1m_output: float = 2.50
+    # ── LLM: additional providers (P1.5; app/llm/config/models.yaml maps each provider
+    # to its settings_field + wire family — no provider branch is hardcoded in code).
+    # Empty key = provider unconfigured: it lists in the catalog but never routes.
+    anthropic_api_key: str = ""
+    openai_api_key: str = ""
+    # The openai_compat wire family serves ANY OpenAI-compatible endpoint;
+    # empty base_url = the SDK default (api.openai.com).
+    openai_base_url: str = ""
+    # OpenRouter: its own provider identity + credentials, served by the openai_compat
+    # wire family with a fixed base_url (declared in models.yaml).
+    openrouter_api_key: str = ""
+    # P1.6 budget gate (closes F-19's discoverability gap for LLM spend): 0 = off.
+    # When > 0, the resilient executor refuses NEW model calls for an org whose
+    # llm_usage cost for the current UTC day already exceeds this many USD.
+    aegisops_llm_daily_budget_usd: float = 0.0
 
     # ── PostgreSQL + pgvector ──
     postgres_host: str = "localhost"
