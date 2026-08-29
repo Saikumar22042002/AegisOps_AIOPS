@@ -131,6 +131,10 @@ async def test_sre_triage_collects_k8s_evidence_through_the_investigator(monkeyp
 
     monkeypatch.setattr(k8s_mod, "get_kubernetes", lambda s: _FakeK8s())
     monkeypatch.setattr(sre_mod, "get_prometheus", lambda s: _Prom())
+    # Prompt 4: pin the LEGACY deterministic read (flag-off path, T-P2-01 coexistence) —
+    # with harness-read-paths ON this would route into the LLM-driven kernel instead,
+    # which has its own coverage in test_p2_inv_wiring.py.
+    monkeypatch.setattr(get_settings(), "aegisops_harness_read_paths", "off")
     em = _Emitter()
     signals = await sre_mod._collect_telemetry(get_settings(), em)
     assert signals["deployments"] == ["orders-api", "checkout"]

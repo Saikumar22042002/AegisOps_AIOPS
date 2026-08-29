@@ -45,7 +45,8 @@ async def knowledge(state: AgentState, config) -> dict:
     transcript = await memory.build_context(state.get("session_id", ""), purpose="knowledge",
                                             org_id=state.get("org_id"),
                                             user_id=state.get("user", {}).get("user_id"),
-                                            current_message=state["message"], settings=settings)
+                                            current_message=state["message"], settings=settings,
+                                            run_id=state.get("run_id"))
     convo = f"Conversation so far:\n{transcript}\n\n" if transcript else ""
     prompt = f"{convo}Context passages:\n{context_block}\n\nQuestion: {state['message']}"
 

@@ -298,6 +298,38 @@ class Resource(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class ResourceRevision(Base):
+    """Immutable, append-only resource change history (forensic-audit remediation, 2026-08-16).
+
+    The `resources` table is an upsert-by-name inventory — every apply overwrites the row, so
+    "what was the previous configuration / what changed / when" was unanswerable. One revision
+    row is appended per lifecycle event, in the SAME transaction as the inventory write, and is
+    never updated or deleted afterward. `action` follows the lifecycle vocabulary: a modify is
+    recorded as `modified`, never as another `created`."""
+
+    __tablename__ = "resource_revisions"
+    id: Mapped[uuid.UUID] = _pk()
+    org_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    resource_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("resources.id", ondelete="SET NULL"), nullable=True, index=True)
+    run_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("runs.id", ondelete="SET NULL"), nullable=True, index=True)
+    session_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True)
+    actor_user: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
+    cloud: Mapped[str] = mapped_column(String(20), nullable=False)
+    region: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    resource_type: Mapped[str] = mapped_column(String(60), nullable=False)
+    # created | modified | destroyed | failed | partial | orphaned | no_change | unknown
+    action: Mapped[str] = mapped_column(String(20), nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)  # the user's request excerpt
+    before_state: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    after_state: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    inputs: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    execution_result: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    verification: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
 class UserMemory(Base):
     """M4: user-editable standing context that survives sessions ("my usual region is
     ap-south-1"). Org-scoped; user_id NULL = org-wide. One row per (org, user, key)."""

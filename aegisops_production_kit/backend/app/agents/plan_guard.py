@@ -19,6 +19,17 @@ from __future__ import annotations
 _MUTATING = ("create", "delete", "update")
 
 
+def zero_change(summary: dict | None) -> bool:
+    """True when a Terraform plan changes NOTHING (0 add / 0 change / 0 destroy).
+
+    Forensic-audit remediation (2026-08-16): a zero-change plan used to sail through the
+    approval gate and report `applied: true` while the requested change never happened
+    (live: "remove port 8501" → no-op → "applied"). A zero-change mutation plan must be
+    reported honestly as NO_CHANGE and never enter approval/apply."""
+    s = summary or {}
+    return not any(int(s.get(k) or 0) for k in ("add", "change", "destroy"))
+
+
 def _classify_rc(actions: list[str]) -> str:
     """One resource-change entry → create | delete | replace | update | noop."""
     acts = set(a.lower() for a in (actions or []))
@@ -59,8 +70,16 @@ def check_plan_actions(action: str, diff: list[dict]) -> str | None:
         return None
 
     if action == "modify":
-        if deletes or replaces:
-            victims = ", ".join((deletes + replaces)[:5])
+        # Firewall/SG RULE resources are permission entries, not infrastructure: closing a
+        # port legitimately DELETES its rule resource (aws_vpc_security_group_ingress_rule,
+        # google_compute_firewall, azurerm NSG rules). Only such rule-type deletes are
+        # allowed under modify; deleting/replacing anything else still halts (2026-08-17).
+        rule_types = ("aws_vpc_security_group_ingress_rule", "aws_security_group_rule",
+                      "google_compute_firewall", "azurerm_network_security_rule")
+        real_deletes = [a for a in deletes + replaces
+                        if not any(t in a for t in rule_types)]
+        if real_deletes:
+            victims = ", ".join(real_deletes[:5])
             return ("Safety guard: this modification would destroy or replace "
                     f"{victims} rather than update it in place. That is effectively a "
                     "destroy — halting so you can decide explicitly.")

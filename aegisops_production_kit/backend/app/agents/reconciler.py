@@ -32,9 +32,11 @@ from .supervisor import RunSupervisor, get_supervisor, hb_key
 log = structlog.get_logger(__name__)
 
 # P0/D5: "applying" removed — a phantom status written by nothing at HEAD (verified:
-# zero writers). The interim run-state machine is running → awaiting_approval →
-# completed | failed | cancelled; the full machine lands in P3.
-EXECUTING_STATES = ("running",)
+# zero writers). Prompt 3: the durable engine is LIVE and writes the P3 machine's
+# transient statuses (executing/verifying/scheduled) — a worker killed mid-workflow now
+# parks a run in those states, so the stuck-run sweep must cover them too (found by the
+# activation regression pass; without this a crashed durable run stayed stuck forever).
+EXECUTING_STATES = ("running", "executing", "verifying", "scheduled")
 SWEEP_INTERVAL = 60  # seconds between sweeps
 
 
@@ -60,8 +62,16 @@ class Reconciler:
                 continue
             try:
                 heartbeat_alive = bool(await redis.exists(hb_key(run_id)))
-            except Exception:  # noqa: BLE001 — treat an unreachable heartbeat as expired
-                heartbeat_alive = False
+            except Exception as exc:  # noqa: BLE001
+                # Prod-hardening (2026-08-17): an UNREACHABLE heartbeat store is UNKNOWN,
+                # not expired. Redriving on unknown is exactly wrong: the idempotency
+                # claims that make a redrive safe live in the same Redis and are equally
+                # unreachable — a blind redrive could run a concurrent apply. Skip this
+                # pass; the run is retried next sweep once Redis answers.
+                log.warning("reconciler.heartbeat_unknown_skipping", run_id=run_id,
+                            error=str(exc)[:120])
+                summary["skipped_heartbeat"] += 1
+                continue
             if heartbeat_alive:
                 summary["skipped_heartbeat"] += 1  # another worker is driving it
                 continue

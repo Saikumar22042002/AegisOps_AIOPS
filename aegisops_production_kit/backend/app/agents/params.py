@@ -300,6 +300,32 @@ def to_tf_vars(template_key: str, collected: dict) -> dict:
     return transform(collected) if transform else dict(collected)
 
 
+def _ec2_from_tf(tf_vars: dict) -> dict:
+    """Inverse of `_ec2_to_tf` — Terraform variables back to collection-spec values, so a
+    FAILED apply can preserve everything the user already answered in the shape the collector
+    understands (forensic-audit remediation, 2026-08-16: the retry re-asked key pair + CIDR
+    because the preserved values wore tf-var names)."""
+    out = dict(tf_vars)
+    if out.pop("create_key_pair", False):
+        out["key_pair"] = "create"
+        out.pop("key_name", None)
+    elif out.get("key_name"):
+        out["key_pair"] = out.pop("key_name")
+    if "allowed_cidr" in out and not (out.get("allowed_cidr") or "").strip():
+        out["allowed_cidr"] = "none"  # the collector's explicit "keep access closed" answer
+    return out
+
+
+_TF_INVERSES: dict[str, Callable[[dict], dict]] = {"aws.ec2": _ec2_from_tf}
+
+
+def from_tf_vars(template_key: str, tf_vars: dict) -> dict:
+    """Map validated Terraform variables back to collection-spec values (best-effort inverse
+    of `to_tf_vars`; identity for templates without a transform)."""
+    inverse = _TF_INVERSES.get(template_key)
+    return inverse(dict(tf_vars)) if inverse else dict(tf_vars)
+
+
 def extraction_fields(template_key: str) -> str:
     """Guidance for the LLM extractor: which fields to pull + allowed values."""
     parts = []

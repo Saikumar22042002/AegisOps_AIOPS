@@ -20,7 +20,11 @@ import json
 from collections import deque
 from typing import Any
 
+import structlog
+
 from ..settings import get_settings
+
+log = structlog.get_logger(__name__)
 
 DONE = object()  # sentinel: stream finished
 
@@ -82,10 +86,18 @@ class RedisChannel:
         return get_redis()
 
     async def emit(self, event: str, data: dict[str, Any]) -> None:
-        await self._redis().xadd(
-            self.key, {"event": event, "data": json.dumps(data)},
-            maxlen=_STREAM_MAXLEN, approximate=True,
-        )
+        # Prod-hardening (2026-08-17): the event stream is TRANSPORT — PostgreSQL
+        # (runs/run_steps/run_events) is the durable truth. A Redis outage mid-run must
+        # degrade to lost live frames, never propagate into the execution path (it used to
+        # cascade into the terraform console pump and abandon a live apply).
+        try:
+            await self._redis().xadd(
+                self.key, {"event": event, "data": json.dumps(data)},
+                maxlen=_STREAM_MAXLEN, approximate=True,
+            )
+        except Exception as exc:  # noqa: BLE001 — degraded transport, loudly logged
+            log.warning("events.emit_dropped_redis_unavailable", key=self.key,
+                        event=event, error=str(exc)[:160])
 
     async def current_cursor(self) -> str:
         """STAB P0-3: the newest stream id already in the run's redis stream. The approval
@@ -136,8 +148,10 @@ class RedisChannel:
                         except json.JSONDecodeError:
                             data = {}
                         await self.queue.put({"id": entry_id, "event": ev, "data": data})
-        except Exception:  # noqa: BLE001 — never wedge the SSE consumer; end the stream
-            pass
+        except Exception as exc:  # noqa: BLE001 — never wedge the SSE consumer; end the stream
+            # Prod-hardening (2026-08-17): silent truncation hid real transport failures.
+            log.warning("events.sse_pump_ended_early", key=getattr(self, "key", "?"),
+                        error=str(exc)[:160])
         finally:
             await self.queue.put(DONE)
 
@@ -229,7 +243,11 @@ class Emitter:
                     retry: dict | None = None) -> None:
         # U7: `retry` carries a one-click retry-with-fix suggestion ({label, retry_message, ...})
         # the client renders as a button; the retry is a genuine new user turn.
-        payload = {"message": message, "code": code, "retriable": retriable}
+        # Prod-hardening (2026-08-17): error text can embed raw exception strings
+        # (terraform stderr, SDK errors) — redact BEFORE it reaches the wire, matching the
+        # persistence backstop. Every other emitter path carries pre-shaped payloads.
+        from ..security.redaction import redact
+        payload = {"message": redact(message or ""), "code": code, "retriable": retriable}
         if retry:
             payload["retry"] = retry
         await self.ch.emit("error", payload)

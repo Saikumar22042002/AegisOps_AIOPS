@@ -110,24 +110,33 @@ async def _active_run_counts(org_id: str, user_id: str | None) -> tuple[int, int
     could drift or lock an org out after a crash; heartbeat-derived counts self-heal like
     the reconciler). awaiting_approval does NOT count — it may legitimately wait days and
     holds no worker/subprocess. Returns (org_active, user_active)."""
-    from ..agents.supervisor import hb_key
+    from ..agents.supervisor import HEARTBEAT_TTL, hb_key
     from ..cache.redis import get_redis
 
     redis = get_redis()
     org_active = user_active = 0
+    now = datetime.now(UTC)
     async with session_scope() as s:
         rows = (await s.execute(
-            select(Run.id, Run.initiated_by).where(
+            select(Run.id, Run.initiated_by, Run.created_at).where(
                 Run.org_id == uuid.UUID(org_id),
-                # P0/D5: "applying" removed — the status is written by nothing at HEAD
-                # (verified: zero writers; equivalence protocol in Redesign/09-review §10).
-                Run.status.in_(("running",))))).all()
-    for rid, initiated_by in rows:
-        try:
-            if not await redis.exists(hb_key(str(rid))):
-                continue                     # stale row (crashed worker) — not truly active
-        except Exception:                    # noqa: BLE001 — unreachable heartbeat ⇒ not active
-            continue
+                # P0/D5: "applying" removed (zero writers). Prod-hardening (2026-08-17):
+                # durable-engine runs live in executing/verifying/scheduled — they hold a
+                # worker + often a terraform subprocess, so they MUST count against the
+                # per-org/per-user concurrency caps (they previously dodged them).
+                Run.status.in_(("running", "executing", "verifying", "scheduled"))))).all()
+    for rid, initiated_by, created_at in rows:
+        # Prod-hardening (2026-08-17, live burst test): a run younger than the heartbeat
+        # TTL counts as active even before its first heartbeat lands — N simultaneous
+        # requests otherwise all pass the check in the ms-wide gap before any heartbeat
+        # exists. Still self-healing: a crashed young run blocks admission ≤ TTL seconds.
+        young = created_at is not None and (now - created_at).total_seconds() < HEARTBEAT_TTL
+        if not young:
+            try:
+                if not await redis.exists(hb_key(str(rid))):
+                    continue                 # stale row (crashed worker) — not truly active
+            except Exception:                # noqa: BLE001 — unreachable heartbeat ⇒ not active
+                continue
         org_active += 1
         if user_id and str(initiated_by) == user_id:
             user_active += 1
@@ -142,7 +151,11 @@ async def _force_terminal(run_id: str, message: str) -> None:
     try:
         async with session_scope() as s:
             run = await s.get(Run, uuid.UUID(run_id))
-            if run and run.status == "running":  # P0/D5: "applying" removed (no writers)
+            # P0/D5: "applying" removed (no writers). Prompt 3: the durable engine parks
+            # crashed runs in its transient statuses too — all non-terminal transients are
+            # force-terminable (the reconciler sweep selects them; this write must match,
+            # or the sweep is a silent no-op for engine runs — found by the kill-mid-apply pin).
+            if run and run.status in ("running", "executing", "verifying", "scheduled"):
                 run.status = "failed"
                 run.outcome = {"status": "failed", "error": message[:500]}
                 run.ended_at = datetime.now(UTC)  # P0/D7: run duration persisted
@@ -158,7 +171,11 @@ async def _mark_cancelled(run_id: str, message: str) -> None:
     try:
         async with session_scope() as s:
             run = await s.get(Run, uuid.UUID(run_id))
-            if run and run.status in ("running", "awaiting_approval"):  # P0/D5: no "applying"
+            # P0/D5: no "applying". Prod-hardening (2026-08-17): the durable engine's
+            # transients are cancellable states too — a cancel landing there must label the
+            # terminal `cancelled`, not fall through to the reconciler's `failed`.
+            if run and run.status in ("running", "awaiting_approval", "executing",
+                                      "verifying", "scheduled"):
                 run.status = "cancelled"
                 run.outcome = {"status": "cancelled", "note": message[:500]}
                 run.ended_at = datetime.now(UTC)  # P0/D7
@@ -222,8 +239,11 @@ async def _persist_result(run_id: str, session_id: str, org_id: str, state: dict
             content=answer, confidentiality_level=conf.get("level"),
             confidentiality_score=conf.get("score"), context_id=run_id,
             trace_id=state.get("trace_id"), run_id=uuid.UUID(run_id),
-            analysis={"references": state.get("references", []), "reasoning": state.get("reasoning_cards", []),
-                      "param_request": state.get("param_request")},
+            # Prod-hardening (2026-08-17): analysis is user-visible provenance — redact it
+            # like outcome (reasoning cards can quote tool errors that echo env values).
+            analysis=redact_dict({"references": state.get("references", []),
+                                  "reasoning": state.get("reasoning_cards", []),
+                                  "param_request": state.get("param_request")}),
         )
         s.add(msg)
         await s.flush()
@@ -285,6 +305,14 @@ async def prepare_run(*, user: User, message: str, context: ChatContext,
         # PR-2a: refuse a new run BEFORE persisting anything (no row leaked) when the org or
         # user is at its ACTIVE-run limit. Terraform processes are heavy; queueing isn't
         # supported yet, so the refusal is honest. Counts derive from the liveness truth.
+        # Prod-hardening (2026-08-17, live burst test): serialize ADMISSION per org with a
+        # PG advisory xact lock — without it, N simultaneous requests each count committed
+        # rows before any of them commits, and every one passes a cap of 2. The lock is
+        # held only through this transaction (count → insert → commit); still no separate
+        # counter anywhere (the count remains derived from runs+heartbeats).
+        from sqlalchemy import text as _text
+        await s.execute(_text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
+                        {"k": f"run-admission:{org_id}"})
         org_active, user_active = await _active_run_counts(org_id, user.user_id)
         if org_active >= settings.max_active_runs_per_org:
             raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS,
@@ -364,8 +392,14 @@ def build_drive(prepared: PreparedRun, channel: RunChannel) -> Callable[[], Awai
             status_ = "failed" if error else ("awaiting_approval" if res["interrupted"] else "completed")
             # PR-3c: the exec loop can finish with an honest cancelled outcome — that is a
             # terminal `cancelled`, not `completed`.
-            if not error and (state.get("outcome") or {}).get("status") == "cancelled":
+            _oc = (state.get("outcome") or {}).get("status") or ""
+            if not error and _oc == "cancelled":
                 status_ = "cancelled"
+            # Prod-hardening (2026-08-17): a partial/interrupted apply is NOT `completed` —
+            # the run mutated less than it promised. Persist it `failed` so the operator
+            # dashboard, retention, and the reconciler's orphan sweep all treat it as one.
+            elif not error and (_oc == "partial" or _oc.endswith("_interrupted")):
+                status_ = "failed"
             if error and not state.get("answer"):
                 state = {**state, "answer": f"⚠️ This run failed unexpectedly: {error}. "
                                             "Nothing was changed — please send that again.",
@@ -373,6 +407,16 @@ def build_drive(prepared: PreparedRun, channel: RunChannel) -> Callable[[], Awai
             msg_id = await _persist_result(run_id, session_id, org_id, state, status_)
             AGENT_RUNS.labels(domain=state.get("domain", "general"), workflow=state.get("workflow", "-"),
                               status=status_, env=prepared.env or "na").inc()
+            # Prompt 2 — intelligence layer post-run hooks (fire-and-forget, never block SSE):
+            # deterministic revision→Graphiti fact sync after any mutation outcome, and a
+            # consolidated episode (LLM via the P1 adapter) for completed mutation runs.
+            outcome_status = (state.get("outcome") or {}).get("status")
+            if outcome_status in ("applied", "destroyed", "apply_failed", "destroy_failed",
+                                  "no_change", "partial"):
+                from ..intelligence import facts as intel_facts
+                intel_facts.sync_soon(get_settings())
+                if status_ == "completed":
+                    asyncio.create_task(_consolidate_run(run_id, session_id, org_id, state))
             if res["interrupted"]:
                 # GW-1: a run parked at the gate is pushed to every LINKED, ELIGIBLE approver's
                 # channel, whichever gateway started it — so a browser-initiated change is
@@ -403,6 +447,38 @@ def build_drive(prepared: PreparedRun, channel: RunChannel) -> Callable[[], Awai
             await channel.close()
 
     return _drive
+
+
+async def _consolidate_run(run_id: str, session_id: str | None, org_id: str,
+                           state: dict) -> None:
+    """Prompt 2 consolidation: one completed mutation run → durable memory.
+
+    The P2 consolidation seam (harness/memory.consolidate — LLM via the P1 adapter, so
+    provider-neutral) proposes facts + one episode summary; the episode lands in Graphiti's
+    semantic layer (derived memory, idempotent per run); fact proposals stay PROPOSALS —
+    memory_items writes remain human-gated (06 §2). Raw provenance (revisions/runs/events)
+    is never touched. Best-effort by contract: failures log and skip, never affect the run."""
+    try:
+        from ..harness import memory as harness_memory
+        from ..intelligence import graphiti_layer
+        settings = get_settings()
+        outcome = state.get("outcome") or {}
+        transcript = (f"User request: {state.get('message', '')}\n"
+                      f"Outcome: {outcome.get('status')} — {str(outcome.get('resolution') or '')[:400]}\n"
+                      f"Answer: {str(state.get('answer') or '')[:1200]}")
+        proposals = await harness_memory.consolidate(settings, run_id=run_id,
+                                                     transcript=transcript, org_id=org_id)
+        episode = next((p.content for p in proposals if p.kind == "episode"), None)
+        if episode:
+            await graphiti_layer.add_conversation_episode(
+                org_id, session_id=str(session_id or ""), run_id=run_id,
+                summary=episode, settings=settings)
+        if proposals:
+            log.info("intelligence.consolidated", run_id=run_id,
+                     facts=sum(1 for p in proposals if p.kind == "fact"),
+                     episode=bool(episode))
+    except Exception as e:  # noqa: BLE001 — consolidation never fails a run
+        log.warning("intelligence.consolidation_hook_failed", run_id=run_id, error=str(e))
 
 
 async def _notify_gateways_awaiting_approval(prepared: PreparedRun, state: dict) -> None:
@@ -515,16 +591,45 @@ async def resolve_approval_core(run_id: str, *, decision: str, rationale: str | 
             state = res["state"]
             error = res.get("error")
             status_ = "failed" if error else "completed"
+            # PR-3c parity (Prompt 3): the continuation must label a cancelled outcome as
+            # the CANCELLED terminal too — the main drive already did; this path didn't.
+            _oc = (state.get("outcome") or {}).get("status") or ""
+            if not error and _oc == "cancelled":
+                status_ = "cancelled"
+            # Prod-hardening (2026-08-17): parity with the main drive — partial/interrupted
+            # applies persist `failed`, never `completed` (this path runs the actual apply).
+            elif not error and (_oc == "partial" or _oc.endswith("_interrupted")):
+                status_ = "failed"
             if error and not state.get("answer"):
                 state = {**state, "answer": f"⚠️ The continuation failed unexpectedly: {error}.",
                          "outcome": state.get("outcome") or {"status": "failed", "error": error}}
             msg_id = await _persist_result(run_id, session_id, org_id, state, status_)
+            # Prompt 2 — approval-completed mutations are THE main fact source; the hook must
+            # fire on this continuation path too (found live 2026-08-17: the close-port run
+            # completed here and its revision never reached Graphiti).
+            outcome_status = (state.get("outcome") or {}).get("status")
+            if outcome_status in ("applied", "destroyed", "apply_failed", "destroy_failed",
+                                  "no_change", "partial"):
+                from ..intelligence import facts as intel_facts
+                intel_facts.sync_soon(get_settings())
+                if status_ == "completed":
+                    asyncio.create_task(_consolidate_run(run_id, session_id, org_id, state))
             await emitter.done({
                 "messageId": msg_id, "runId": run_id, "traceId": run_id,
                 "contextId": state.get("context_id", run_id), "snowId": state.get("snow_id"),
                 "outcome": state.get("outcome") or ({"status": "failed", "error": error} if error
                                                     else {"status": decision}),
             })
+        except asyncio.CancelledError:
+            # Prod-hardening (2026-08-17): a cancelled continuation (worker drain/shutdown)
+            # may have a terraform apply in flight — the honest record is "interrupted,
+            # state requires reconciliation", NEVER "cancelled, nothing changed". The
+            # reconciler + stale-claim recovery own the follow-up. Re-raised so the task
+            # truly unwinds (drain's backstop persists the terminal).
+            log.warning("chat.approval_drive_interrupted", run_id=run_id)
+            await _force_terminal(run_id, "continuation interrupted mid-flight — live state "
+                                          "requires reconciliation before retrying")
+            raise
         except Exception as exc:  # noqa: BLE001 — B5: a failed continuation must still terminate
             log.error("chat.approval_drive_failed", run_id=run_id, error=str(exc))
             await _force_terminal(run_id, f"approval continuation failed: {exc}")
@@ -617,12 +722,28 @@ async def cancel_run(run_id: str, user: User = Depends(get_current_user)) -> dic
         current = run.status
 
     log.info("chat.cancel_requested", run_id=run_id, by=user.username, from_status=current)
-    await request_cancel(run_id)
-    # awaiting_approval holds no live drive — flip it terminal directly (equivalent to Reject
-    # for cancel purposes). Executing runs are flipped by their own drive at the next boundary;
-    # the reconciler is the backstop if that worker is already gone.
+    # Prod-hardening (2026-08-17): only a PRE-APPROVAL drive (status `running`) may be
+    # hard-cancelled — its drive handles CancelledError and nothing has mutated. Any other
+    # state (awaiting_approval with a live continuation, executing, verifying) gets ONLY the
+    # cooperative flag, honored at the next step boundary — never a mid-apply task kill.
+    await request_cancel(run_id, hard=(current == "running"))
+    # awaiting_approval with NO live drive anywhere (no local task, no cross-worker
+    # heartbeat) is genuinely parked at the gate — flip it terminal directly (equivalent to
+    # Reject). A live continuation instead honors the flag at its own boundary.
     if current == "awaiting_approval":
-        await _mark_cancelled(run_id, "cancelled while awaiting approval")
+        from ..agents.supervisor import get_supervisor, hb_key
+        from ..cache.redis import get_redis
+        live_here = get_supervisor().is_live(run_id)
+        try:
+            live_elsewhere = bool(await get_redis().exists(hb_key(run_id)))
+        except Exception as exc:  # noqa: BLE001 — unknown ⇒ assume live; the flag still lands
+            log.warning("chat.cancel_liveness_unknown_assuming_live", run_id=run_id,
+                        error=str(exc)[:120])
+            live_elsewhere = True
+        if not live_here and not live_elsewhere:
+            await _mark_cancelled(run_id, "cancelled while awaiting approval")
+        else:
+            log.info("chat.cancel_deferred_to_boundary", run_id=run_id)
     return {"id": run_id, "status": "cancelling",
             "note": "cancellation requested; the run will stop at the next safe point "
                     "(never mid-apply)."}

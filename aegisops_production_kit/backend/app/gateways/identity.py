@@ -328,10 +328,14 @@ async def set_active_session(identity_id: str, session_id: str | None) -> None:
         log.warning("gateway.set_active_session_failed", error=str(exc))
 
 
-async def notifiable_approvers(org_id: str, *, channel: str = TELEGRAM) -> list[BoundIdentity]:
+async def notifiable_approvers(org_id: str, *, channel: str = TELEGRAM,
+                               exclude_user_id: str | None = None) -> list[BoundIdentity]:
     """Linked identities in this org whose bound user can approve — the push list for an
-    approval card. Org-scoped (S0). The initiator is included: under single-user HITL the
-    initiating human is an authorized approver of their own plan."""
+    approval card. Org-scoped (S0). The initiator is included by default: under single-user
+    HITL the initiating human is an authorized approver of their own plan. `exclude_user_id`
+    filters one bound user out (e.g. "notify everyone but the actor") — the parameter the
+    lifecycle test always pinned but the implementation had drifted from (fixed 2026-08-17,
+    Prompt-3 regression pass)."""
     out: list[BoundIdentity] = []
     try:
         async with session_scope() as s:
@@ -342,6 +346,8 @@ async def notifiable_approvers(org_id: str, *, channel: str = TELEGRAM) -> list[
                        ChannelIdentity.org_id == uuid.UUID(org_id)))).all()
             for identity, user in rows:
                 if not rbac.can_approve(list(user.roles or [])):
+                    continue
+                if exclude_user_id and str(user.id) == str(exclude_user_id):
                     continue
                 out.append(_to_bound(identity, user))
     except Exception as exc:  # noqa: BLE001 — a push-list failure must never fail a run

@@ -20,6 +20,7 @@ from ..security.confidentiality import classify
 from ..settings import get_settings
 from ..tools.kubernetes import KubernetesError, get_kubernetes
 from ..tools.prometheus import get_prometheus
+from . import memory
 from . import llm
 from .runtime import emitter_of
 from .state import AgentState
@@ -49,7 +50,7 @@ def decision_matrix(signals: dict) -> dict:
 
 
 async def _collect_telemetry(settings, emitter, *, run_id: str | None = None,
-                             org_id: str | None = None) -> dict:
+                             org_id: str | None = None, context: str | None = None) -> dict:
     prom = get_prometheus(settings)
     # U2: recent_deploy is a REAL Prometheus signal (a deployment generation change in the last
     # 15m via kube-state-metrics), not the old hardcoded True. Default False when Prometheus is
@@ -91,7 +92,7 @@ async def _collect_telemetry(settings, emitter, *, run_id: str | None = None,
                     settings,
                     "Collect Kubernetes triage evidence (deployments, pods, recent restarts) "
                     "relevant to the current incident and summarize what the telemetry shows.",
-                    run_id=run_id, org_id=org_id)
+                    run_id=run_id, org_id=org_id, context=context)
                 signals["harness_investigation"] = {
                     "status": res.status, "iterations": res.iterations,
                     "evidence_ok": res.evidence_ok, "findings": res.findings[:600]}
@@ -118,8 +119,15 @@ async def sre_analyze(state: AgentState, config) -> dict:
     settings = get_settings()
     await emitter.step(2, "Triaging incident")
 
+    # Prompt 3 (mandate 24): the investigator reasons over the TYPED intelligence slice —
+    # incident history, recent changes, past sessions — not a bare objective.
+    sre_context = await memory.build_context(state.get("session_id", ""), purpose="sre",
+                                             org_id=state.get("org_id"),
+                                             user_id=state.get("user", {}).get("user_id"),
+                                             current_message=state.get("message"),
+                                             settings=settings, run_id=state.get("run_id"))
     signals = await _collect_telemetry(settings, emitter, run_id=state.get("run_id"),
-                                       org_id=state.get("org_id"))
+                                       org_id=state.get("org_id"), context=sre_context)
 
     await emitter.step(3, "Collected telemetry")
     refs = []

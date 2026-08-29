@@ -70,8 +70,19 @@ async def verify(state: AgentState, config) -> dict:
     await emitter.step(6, "Verification")
     cloud = state.get("cloud") or "aws"
     outputs = outcome.get("outputs", {}) or {}
+    # Prompt 3: a governed-exec-loop outcome carries PER-STEP outputs ({step: {…}}) — verify
+    # every applied step's real resource, not the (vacuous) top-level dict.
+    step_output_sets: list[dict] = []
+    if outcome.get("steps") and outputs and all(isinstance(v, dict) for v in outputs.values()):
+        step_output_sets = [v for v in outputs.values() if v]
     try:
-        checks = await asyncio.wait_for(_reconcile_checks(state, outputs), timeout=_VERIFY_TIMEOUT_S)
+        if step_output_sets:
+            checks = []
+            for outs in step_output_sets:
+                checks += await asyncio.wait_for(_reconcile_checks(state, outs),
+                                                 timeout=_VERIFY_TIMEOUT_S)
+        else:
+            checks = await asyncio.wait_for(_reconcile_checks(state, outputs), timeout=_VERIFY_TIMEOUT_S)
     except asyncio.TimeoutError:
         checks = [{"name": "Verification", "passed": False,
                    "detail": f"cloud reconciliation timed out after {_VERIFY_TIMEOUT_S}s — the apply "
@@ -81,6 +92,37 @@ async def verify(state: AgentState, config) -> dict:
         checks = [{"name": "Verification", "passed": False, "detail": str(e)[:160]}]
     for c in checks:
         await emitter.console("stdout", f"verification: {c['name']} = {'ok' if c['passed'] else 'warn'} {c['detail']}")
+
+    # Prompt 3 (mandate 9): only VERIFIED may read as unqualified success. A failed check
+    # never silently passes — the outcome carries verified=False, the user sees an explicit
+    # warning, and (when the harness read path is on) a bounded read-only investigation
+    # gathers real evidence about the discrepancy.
+    verified = bool(checks) and all(c.get("passed") for c in checks)
+    outcome = {**outcome, "verified": verified,
+               "verification": {"passed": sum(1 for c in checks if c.get("passed")),
+                                "total": len(checks)}}
+    if not verified and outcome.get("status") in ("applied", "destroyed"):
+        failed_names = ", ".join(c["name"] for c in checks if not c.get("passed"))[:200]
+        warn = (f"\n\n⚠️ **Applied but not fully verified** — live-cloud verification could "
+                f"not confirm: {failed_names}. Treat the change as unconfirmed until it is.")
+        await emitter.token(warn)
+        settings = get_settings()
+        if getattr(settings, "aegisops_harness_read_paths", "off") == "on":
+            try:
+                from ..harness import inv as harness_inv
+                res = await harness_inv.investigate(
+                    settings,
+                    f"Post-apply verification failed for: {failed_names}. Using read-only "
+                    "tools, determine whether the resources actually exist and what their "
+                    "live state is.", run_id=state.get("run_id"), org_id=state.get("org_id"))
+                await emitter.analysis(
+                    summary="Verification failed — the harness ran a bounded read-only "
+                            "investigation over live cloud state (evidence in run events).",
+                    cards=[{"title": "Verify-failure investigation", "conf": "",
+                            "body": f"status={res.status} · iterations={res.iterations} · "
+                                    f"evidence_ok={res.evidence_ok}"}])
+            except Exception as e:  # noqa: BLE001 — investigation is best-effort evidence
+                log.warning("verify.investigation_failed", error=str(e))
 
     updates: dict = {"tool_results": state.get("tool_results", []) + [{"verify": checks}],
                      "outcome": outcome}

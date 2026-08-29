@@ -142,7 +142,7 @@ services:
       # container's non-root user — this test service runs as root, and root-created
       # terraform.tfstate.d/ dirs would otherwise block the app's per-resource state
       # workspaces (found live in Phase 8). Exit code of pytest is preserved.
-      - "pip install -q pytest pytest-asyncio pytest-cov testcontainers anyio && pytest -q; rc=$?; chmod -R a+rwX /app/infra/terraform-workspaces 2>/dev/null || true; exit $rc"
+      - "pip install -q pytest pytest-asyncio pytest-cov testcontainers anyio && pytest -q; rc=$$?; chmod -R a+rwX /app/infra/terraform-workspaces 2>/dev/null || true; exit $$rc"
 
 volumes:
   # STAB P0-1: api-test's own root-owned provider cache — persists across test runs

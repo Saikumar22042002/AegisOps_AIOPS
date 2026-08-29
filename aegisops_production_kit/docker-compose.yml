@@ -111,7 +111,11 @@ services:
       LANGFUSE_INIT_ORG_ID: aegisops
       LANGFUSE_INIT_ORG_NAME: AegisOps
       LANGFUSE_INIT_PROJECT_ID: aegisops
-      LANGFUSE_INIT_PROJECT_NAME: AegisOps
+      # Must match the app's `langfuse_expected_project` (settings.py, default "aegisops"):
+      # assert_project() compares that value against the project NAME returned by
+      # /api/public/projects, so a differently-cased name makes every fresh boot log a false
+      # `langfuse.wrong_project` warning (surfaced by the 2026-08-29 from-scratch rebuild).
+      LANGFUSE_INIT_PROJECT_NAME: aegisops
       # Fixed init keys decoupled from the app's LANGFUSE_PUBLIC_KEY so INIT never reassigns the
       # app's key to this bootstrap project on restart (the app key can target any project).
       LANGFUSE_INIT_PROJECT_PUBLIC_KEY: pk-lf-aegisops-local

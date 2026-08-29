@@ -194,6 +194,18 @@ resource "aws_security_group" "this" {
   description = "AegisOps-managed SG for ${var.name}"
   vpc_id      = data.aws_subnet.selected.vpc_id
 
+  # Sentinel rule (2026-08-17): with ZERO inline ingress blocks the AWS provider treats
+  # `ingress` as unmanaged, so "close the last open port" planned NO change and the rule
+  # survived (proven live: ingress_ports=[] → "without changing any real infrastructure").
+  # One always-present self-scoped block keeps the inline rule set authoritative, so
+  # removals diff correctly. Self-only traffic in a dedicated per-instance SG is inert.
+  ingress {
+    description = "AegisOps sentinel (keeps inline rules authoritative; SG-internal only)"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    self        = true
+  }
   dynamic "ingress" {
     for_each = toset(var.ingress_ports)
     content {

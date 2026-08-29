@@ -56,7 +56,11 @@ async def test_investigate_runs_the_kernel_over_the_real_registry(monkeypatch):
     ])
     monkeypatch.setattr(harness_loop.service, "classify_json", model.classify_json)
 
-    res = await harness_inv.investigate(Settings(), "triage the incident",
+    # Prompt 4: pin packs OFF — with AEGISOPS_CAPABILITY_PACKS=on (default posture) the
+    # kernel builds the packs registry and the monkeypatched default_registry is bypassed;
+    # the packs path has its own coverage in the P4 pack tests.
+    res = await harness_inv.investigate(Settings(aegisops_capability_packs="off"),
+                                        "triage the incident",
                                         run_id="22222222-0000-0000-0000-000000000001")
     assert res.status == "answered" and res.evidence_ok
     assert "api-x" in res.findings and res.iterations == 2
@@ -74,7 +78,8 @@ async def test_sre_collector_uses_kernel_only_when_flag_on(monkeypatch):
 
     calls = {"harness": 0, "legacy": 0}
 
-    async def fake_investigate(settings, objective, *, run_id=None, org_id=None, purpose="inv_loop"):
+    async def fake_investigate(settings, objective, *, run_id=None, org_id=None,
+                               purpose="inv_loop", context=None):
         calls["harness"] += 1
         return harness_loop.RunResult(status="answered", findings="ok", iterations=2,
                                       evidence_ok=True)

@@ -36,14 +36,21 @@ def cancel_key(run_id: str) -> str:
 CANCEL_TTL = 3600  # the cancel flag outlives any single stage; cleared at terminal time
 
 
-async def request_cancel(run_id: str) -> None:
+async def request_cancel(run_id: str, *, hard: bool = True) -> None:
     """PR-3: raise the cooperative cancel flag. Checked at safe boundaries (pre-approval
-    drive, between DAG steps) — NEVER mid-apply. Also cancels the live asyncio drive in
-    THIS worker so a pre-approval run stops promptly."""
+    drive, between DAG steps) — NEVER mid-apply.
+
+    `hard=True` additionally cancels the live asyncio drive in THIS worker — safe ONLY for
+    a pre-approval run (classification/planning; its drive handles CancelledError).
+    Prod-hardening (2026-08-17): the approval CONTINUATION registers under the same run_id
+    while the run status is still `awaiting_approval` — hard-cancelling that task killed a
+    live terraform apply mid-mutation while the record claimed "cancelled, nothing was
+    changed". Callers must pass hard=False unless the run is provably pre-approval."""
     from ..cache.redis import get_redis
 
     await get_redis().set(cancel_key(run_id), "1", ex=CANCEL_TTL)
-    get_supervisor().signal_cancel(run_id)
+    if hard:
+        get_supervisor().signal_cancel(run_id)
 
 
 async def is_cancelled(run_id: str) -> bool:

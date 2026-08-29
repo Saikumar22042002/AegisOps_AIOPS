@@ -123,20 +123,32 @@ def inventory_payload(state: dict, template, outputs: dict) -> dict:
     }
 
 
-async def upsert_resource(s, org_id: str, payload: dict) -> None:
+async def upsert_resource(s, org_id: str, payload: dict) -> dict:
     """Upsert one inventory row from a payload WITHIN an existing session/transaction (no commit).
 
     Keyed by org+workspace+name so a re-apply or a sweeper recovery updates the same row rather
-    than duplicating it. Caller owns the transaction — used both by `record_from_apply` (its own
-    txn) and by `cloudops_execute` (atomically with the run outcome)."""
+    than duplicating it (a `partial` row from a failed apply is converted, never duplicated).
+    Caller owns the transaction — used both by `record_from_apply` (its own txn) and by
+    `cloudops_execute` (atomically with the run outcome).
+
+    Returns `{"action": "created"|"modified", "before": dict|None, "resource": Resource}` so the
+    caller can append the immutable revision row in the SAME transaction. A brand-new row (or a
+    partial row completing its create) is `created`; an update to an existing ACTIVE row is
+    `modified` — a modification is never recorded as another create."""
     name, workspace = payload["name"], payload["workspace"]
     row = (await s.execute(select(Resource).where(
         Resource.org_id == uuid.UUID(org_id), Resource.workspace == workspace,
-        Resource.name == name, Resource.status == "active"))).scalar_one_or_none()
+        Resource.name == name, Resource.status.in_(("active", "partial"))))).scalars().first()
     if row is None:
+        action, before = "created", None
         row = Resource(org_id=uuid.UUID(org_id), name=name, cloud=payload["cloud"],
                        resource_type=payload["resource_type"], workspace=workspace)
         s.add(row)
+    else:
+        # A partial row completing its apply IS the create finishing; an active row is a modify.
+        action = "created" if row.status == "partial" else "modified"
+        before = {"attributes": dict(row.attributes or {}), "inputs": dict(row.inputs or {}),
+                  "status": row.status, "provider_id": row.provider_id}
     row.session_id = uuid.UUID(payload["session_id"]) if payload.get("session_id") else None
     row.run_id = uuid.UUID(payload["run_id"]) if payload.get("run_id") else None
     row.region = payload.get("region")
@@ -145,11 +157,76 @@ async def upsert_resource(s, org_id: str, payload: dict) -> None:
     row.inputs = payload.get("inputs")
     row.state_workspace = payload.get("state_workspace") or row.state_workspace
     row.status = "active"
+    await s.flush()  # a fresh row needs its client-default id materialized for the revision FK
+    return {"action": action, "before": before, "resource": row}
 
 
-async def record_graph(state: dict, template, outputs: dict) -> None:
+async def add_revision(s, org_id: str, *, action: str, payload: dict,
+                       before: dict | None = None, after: dict | None = None,
+                       resource_id=None, actor_user: str | None = None,
+                       reason: str | None = None, execution_result: str | None = None) -> None:
+    """Append one immutable ResourceRevision row WITHIN the caller's transaction (no commit).
+
+    `payload` is the `inventory_payload` dict (name/cloud/region/type/inputs/session/run). The
+    row is never updated afterwards — history stays queryable even after the inventory row is
+    overwritten or destroyed."""
+    from ..db.models import ResourceRevision
+    s.add(ResourceRevision(
+        org_id=uuid.UUID(org_id), resource_id=resource_id,
+        run_id=uuid.UUID(payload["run_id"]) if payload.get("run_id") else None,
+        session_id=uuid.UUID(payload["session_id"]) if payload.get("session_id") else None,
+        actor_user=actor_user, name=payload["name"], cloud=payload["cloud"],
+        region=payload.get("region"), resource_type=payload["resource_type"], action=action,
+        reason=(reason or "")[:2000] or None, before_state=before, after_state=after,
+        inputs=payload.get("inputs"), execution_result=execution_result))
+
+
+async def record_partial(state: dict, template, error: str,
+                         leftover: list[str] | None) -> None:
+    """A FAILED apply that left resources in Terraform state must never be invisible: record a
+    `partial` inventory row (so destroy/retry can resolve it) + a `partial` revision. A failed
+    apply with an empty state records only a `failed` revision — nothing exists to manage.
+    Best-effort: bookkeeping must never mask the real apply error."""
+    payload = inventory_payload(state, template, {})
+    payload["attributes"] = {"partial_error": str(error)[:300],
+                             "partial_state_resources": list(leftover or [])[:20]}
+    actor = (state.get("user") or {}).get("username")
+    try:
+        async with session_scope() as s:
+            resource_id = None
+            if leftover:
+                row = (await s.execute(select(Resource).where(
+                    Resource.org_id == uuid.UUID(state["org_id"]),
+                    Resource.workspace == payload["workspace"],
+                    Resource.name == payload["name"],
+                    Resource.status.in_(("active", "partial"))))).scalars().first()
+                if row is None:
+                    row = Resource(org_id=uuid.UUID(state["org_id"]), name=payload["name"],
+                                   cloud=payload["cloud"], resource_type=payload["resource_type"],
+                                   workspace=payload["workspace"], status="partial",
+                                   region=payload.get("region"), attributes=payload["attributes"],
+                                   inputs=payload.get("inputs"),
+                                   state_workspace=payload.get("state_workspace"))
+                    s.add(row)
+                    await s.flush()
+                elif row.status == "partial":
+                    row.attributes = payload["attributes"]
+                    row.inputs = payload.get("inputs")
+                resource_id = row.id
+            await add_revision(s, state["org_id"], action="partial" if leftover else "failed",
+                               payload=payload, resource_id=resource_id, actor_user=actor,
+                               reason=state.get("message"), execution_result="apply_failed",
+                               after={"terraform_state_resources": list(leftover or [])[:20]})
+        log.info("inventory.partial_recorded", name=payload["name"],
+                 leftover=len(leftover or []), workspace=payload["workspace"])
+    except Exception as e:  # noqa: BLE001 - bookkeeping must never mask the real apply error
+        log.warning("inventory.partial_record_failed", error=str(e))
+
+
+async def record_graph(state: dict, template, outputs: dict, action: str = "created") -> None:
     """Mirror the resource into the context graph + the org-scoped world model (D3) —
-    best-effort, never fails a real apply."""
+    best-effort, never fails a real apply. `action` distinguishes a create from a day-2
+    modify so the graph never records a modification as another CREATED edge."""
     try:
         from ..graph_db.context_graph import ContextGraph
         inputs = state.get("parsed_inputs") or {}
@@ -166,7 +243,9 @@ async def record_graph(state: dict, template, outputs: dict) -> None:
         # D3: enrich the same Resource node with org scope + TF state refs and record the
         # DEPENDS_ON edges extracted from the REAL inputs/outputs (what impact_of answers from).
         from ..graph_db import world_model
-        await world_model.upsert_resource(state["org_id"], inventory_payload(state, template, outputs))
+        await world_model.upsert_resource(state["org_id"],
+                                          inventory_payload(state, template, outputs),
+                                          action=action)
     except Exception as e:  # noqa: BLE001
         log.warning("inventory.world_model_record_failed", error=str(e))
 
@@ -174,14 +253,21 @@ async def record_graph(state: dict, template, outputs: dict) -> None:
 async def record_from_apply(state: dict, template, outputs: dict) -> None:
     """Upsert an inventory row after a successful apply (keyed by org+workspace+name)."""
     payload = inventory_payload(state, template, outputs)
+    action = "created"
     try:
         async with session_scope() as s:
-            await upsert_resource(s, state["org_id"], payload)
+            up = await upsert_resource(s, state["org_id"], payload)
+            action = up["action"]
+            await add_revision(s, state["org_id"], action=action, payload=payload,
+                               before=up["before"], after={"attributes": outputs},
+                               resource_id=up["resource"].id,
+                               actor_user=(state.get("user") or {}).get("username"),
+                               reason=state.get("message"), execution_result="applied")
         log.info("inventory.recorded", name=payload["name"], provider_id=payload.get("provider_id"),
-                 workspace=template.workspace)
+                 workspace=template.workspace, action=action)
     except Exception as e:  # noqa: BLE001 - inventory write must never fail a real apply
         log.warning("inventory.record_failed", error=str(e))
-    await record_graph(state, template, outputs)
+    await record_graph(state, template, outputs, action=action)
 
 
 async def recover_missing(s, run) -> bool:
@@ -208,14 +294,25 @@ async def recover_missing(s, run) -> bool:
     return True
 
 
-async def mark_destroyed_txn(s, org_id: str, workspace: str, name: str | None = None) -> None:
-    """Mark matching active rows destroyed WITHIN the caller's transaction (no commit)."""
+async def mark_destroyed_txn(s, org_id: str, workspace: str, name: str | None = None) -> list[dict]:
+    """Mark matching active/partial rows destroyed WITHIN the caller's transaction (no commit).
+
+    Partial rows (failed applies that left state) are included — destroying a wedged partial
+    workspace is the designed recovery path. Returns the pre-destroy snapshots so the caller
+    can append the immutable `destroyed` revision rows in the same transaction."""
     q = select(Resource).where(Resource.org_id == uuid.UUID(org_id),
-                               Resource.workspace == workspace, Resource.status == "active")
+                               Resource.workspace == workspace,
+                               Resource.status.in_(("active", "partial")))
     if name:
         q = q.where(Resource.name == name)
+    before: list[dict] = []
     for row in (await s.execute(q)).scalars():
+        before.append({"resource_id": row.id, "name": row.name, "cloud": row.cloud,
+                       "region": row.region, "resource_type": row.resource_type,
+                       "status": row.status, "provider_id": row.provider_id,
+                       "attributes": dict(row.attributes or {}), "inputs": dict(row.inputs or {})})
         row.status = "destroyed"
+    return before
 
 
 async def mark_unreachable(org_id: str, name: str, reason: str, undo: bool = False) -> dict | None:
@@ -285,11 +382,17 @@ async def provenance(*, provider_id: str | None = None, name: str | None = None)
         return None
 
 
-async def list_active(org_id: str, clouds: list[str] | None = None) -> list[dict]:
-    """Every active resource for the org (optionally filtered by cloud), newest first (BUG-04)."""
+async def list_active(org_id: str, clouds: list[str] | None = None,
+                      statuses: tuple[str, ...] = ("active",)) -> list[dict]:
+    """Every active resource for the org (optionally filtered by cloud), newest first (BUG-04).
+
+    `statuses` widens the view for callers that must SHOW more than active rows — the broad
+    inventory listing passes ("active", "partial") so a failed apply's leftover state is
+    visible instead of silently absent. Placement/dependency callers keep the default:
+    a partial resource is never offered as a parent."""
     async with session_scope() as s:
         q = select(Resource).where(Resource.org_id == uuid.UUID(org_id),
-                                   Resource.status == "active").order_by(Resource.created_at.desc())
+                                   Resource.status.in_(statuses)).order_by(Resource.created_at.desc())
         if clouds:
             q = q.where(Resource.cloud.in_([c.lower() for c in clouds]))
         return [_dump(r) for r in (await s.execute(q)).scalars()]
@@ -314,12 +417,34 @@ async def last_applied(org_id: str, session_id: str | None) -> dict | None:
         return _dump(row) if row else None
 
 
-async def resolve(org_id: str, ref: str | None) -> tuple[list[dict], str]:
+async def named_in_message(org_id: str, message: str,
+                           statuses: tuple[str, ...] = ("active",)) -> list[dict]:
+    """Inventory rows whose exact recorded name appears (whole-token) in the message —
+    deterministic-first target binding (Prompt 3, mandate 10: an explicitly NAMED resource
+    always outranks fuzzy most-recent resolution; found live when 'open port 8501 on
+    SpineVM' resolved to the most-recently-created ProbeVM after a router target flake)."""
+    low = (message or "").lower()
+    if not low:
+        return []
+    out = []
+    for row in await list_active(org_id, statuses=statuses):
+        name = str(row.get("name") or "")
+        if name and re.search(rf"(?<![\w-]){re.escape(name.lower())}(?![\w-])", low):
+            out.append(row)
+    return out
+
+
+async def resolve(org_id: str, ref: str | None,
+                  statuses: tuple[str, ...] = ("active",)) -> tuple[list[dict], str]:
     """Resolve a reference to inventory. Returns (matches, kind) where kind ∈ all|name|recent|none.
 
     kind "all" = a broad reference ("all resources", "everything") → every active resource;
     the caller renders a listing (possibly empty). For the other kinds the caller disambiguates
     when len(matches) > 1 and asks the user when 0.
+
+    `statuses` widens the lookup for callers that must see beyond ACTIVE rows — the destroy
+    path passes ("active", "partial") so a failed apply's leftover state is destroyable
+    instead of wedged (forensic-audit remediation, 2026-08-16).
     """
     ref_l = (ref or "").strip().lower()
     # 0) broad reference → the whole active inventory, even when it's empty (the caller renders
@@ -328,7 +453,7 @@ async def resolve(org_id: str, ref: str | None) -> tuple[list[dict], str]:
         return await list_active(org_id), "all"
     async with session_scope() as s:
         active = list((await s.execute(select(Resource).where(
-            Resource.org_id == uuid.UUID(org_id), Resource.status == "active")
+            Resource.org_id == uuid.UUID(org_id), Resource.status.in_(statuses))
             .order_by(Resource.created_at.desc()))).scalars())
     if not active:
         return [], "none"
@@ -350,9 +475,49 @@ async def resolve(org_id: str, ref: str | None) -> tuple[list[dict], str]:
     want = _wanted_types(tokens)
     if not ref_l or tokens & set(_RECENT_WORDS) or want:
         cand = [r for r in active if not want or r.resource_type in want]
+        # Temporal reference ("the VM I created yesterday") — narrow DETERMINISTICALLY via
+        # the immutable revision journal, never by semantic similarity (Prompt 2 rule:
+        # similarity alone must never select a target).
+        window = _temporal_window_of(ref_l)
+        if cand and window:
+            try:
+                created_names = await _names_created_in(org_id, window)
+                narrowed = [r for r in cand if r.name in created_names]
+                if narrowed:
+                    cand = narrowed
+                else:
+                    return [], "none"  # nothing was created in that window — honest, no guess
+            except Exception as e:  # noqa: BLE001 — journal read fails ⇒ no narrowing, no guess
+                log.warning("inventory.temporal_narrow_failed", error=str(e))
         if cand:
             return [_dump(cand[0])], "recent"
     return [], "none"
+
+
+def _temporal_window_of(ref_l: str):
+    """(start, end) UTC window for a temporal word in the reference, else None."""
+    from datetime import datetime, timedelta
+    now = datetime.now(timezone.utc)
+    if "yesterday" in ref_l:
+        start = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        return start, start + timedelta(days=1)
+    if "today" in ref_l:
+        return now.replace(hour=0, minute=0, second=0, microsecond=0), now
+    if "last week" in ref_l or "this week" in ref_l:
+        return now - timedelta(days=7), now
+    return None
+
+
+async def _names_created_in(org_id: str, window) -> set[str]:
+    """Names whose CREATED revision falls inside the window (immutable journal read)."""
+    from ..db.models import ResourceRevision
+    async with session_scope() as s:
+        rows = (await s.execute(select(ResourceRevision.name).where(
+            ResourceRevision.org_id == uuid.UUID(org_id),
+            ResourceRevision.action == "created",
+            ResourceRevision.created_at >= window[0],
+            ResourceRevision.created_at <= window[1]))).scalars()
+        return set(rows)
 
 
 async def reconcile(resource: dict, settings) -> dict:
@@ -402,3 +567,64 @@ async def reconcile(resource: dict, settings) -> dict:
         except Exception as e:  # noqa: BLE001
             log.warning("inventory.reconcile_persist_failed", error=str(e))
     return {**resource, "attributes": attrs, "status": status}
+
+
+async def verify_aws_liveness(org_id: str, settings, max_rows: int = 40) -> int:
+    """Listing honesty (forensic-audit remediation, 2026-08-16): batch-verify the org's
+    active AWS rows against the live account and mark rows whose resource no longer exists
+    as `unreachable` (sandbox accounts rotate — July's "active" EC2 lives in a dead account).
+
+    Read-only cloud calls; three batched describes per region (ec2/vpc) + one bucket listing.
+    Best-effort and bounded: any error leaves rows untouched (never guesses a resource dead).
+    Returns the number of rows marked unreachable."""
+    rows = [r for r in await list_active(org_id, clouds=["aws"]) if r.get("provider_id")]
+    if not rows or len(rows) > max_rows:
+        return 0
+
+    def _live_ids() -> dict[str, set[str]]:
+        import boto3
+        live: dict[str, set[str]] = {"ec2": set(), "vpc": set(), "s3": set()}
+        regions = sorted({r.get("region") or settings.aws_default_region for r in rows
+                          if r["resource_type"] in ("ec2", "vpc")})
+        for region in regions:
+            ec2 = boto3.client("ec2", aws_access_key_id=settings.aws_access_key_id,
+                               aws_secret_access_key=settings.aws_secret_access_key,
+                               aws_session_token=settings.aws_session_token or None,
+                               region_name=region)
+            ids = [r["provider_id"] for r in rows if r["resource_type"] == "ec2"]
+            if ids:
+                for resv in ec2.describe_instances(
+                        Filters=[{"Name": "instance-id", "Values": ids}]).get("Reservations", []):
+                    live["ec2"] |= {i["InstanceId"] for i in resv.get("Instances", [])}
+            vids = [r["provider_id"] for r in rows if r["resource_type"] == "vpc"]
+            if vids:
+                live["vpc"] |= {v["VpcId"] for v in ec2.describe_vpcs(
+                    Filters=[{"Name": "vpc-id", "Values": vids}]).get("Vpcs", [])}
+        if any(r["resource_type"] in ("s3",) for r in rows):
+            s3 = boto3.client("s3", aws_access_key_id=settings.aws_access_key_id,
+                              aws_secret_access_key=settings.aws_secret_access_key,
+                              aws_session_token=settings.aws_session_token or None,
+                              region_name=settings.aws_default_region)
+            live["s3"] = {b["Name"] for b in s3.list_buckets().get("Buckets", [])}
+        return live
+
+    try:
+        import anyio
+        live = await anyio.to_thread.run_sync(_live_ids)
+    except Exception as e:  # noqa: BLE001 - verification is best-effort, never guesses
+        log.warning("inventory.liveness_check_failed", error=str(e))
+        return 0
+    marked = 0
+    for r in rows:
+        kind = r["resource_type"]
+        if kind not in live:
+            continue  # type we can't cheaply verify — leave untouched, never guess
+        if r["provider_id"] not in live[kind]:
+            done = await mark_unreachable(
+                org_id, r["name"],
+                "not found in the current AWS account — likely created in an expired sandbox")
+            if done:
+                marked += 1
+    if marked:
+        log.info("inventory.liveness_marked_unreachable", org_id=org_id, count=marked)
+    return marked

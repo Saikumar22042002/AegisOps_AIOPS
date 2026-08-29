@@ -132,6 +132,37 @@ _REPLY_NEW = re.compile(r"^\s*(?:a\s+|the\s+)?(?:new|fresh)"
                         r"(?:\s+(?:one|vpc|network|vnet|rg|resource\s*group))?\s*[.!]?\s*$",
                         re.IGNORECASE)
 
+# "the default VPC" / "use the account default subnet" — the user explicitly wants the
+# module's stated default placement. Before this (forensic audit, 2026-08-16) the default
+# was unreachable once ≥2 inventoried parents existed: the ask offered only inventoried
+# names or "new", and a "use the default VPC" reply just re-asked forever.
+_WANTS_DEFAULT = re.compile(
+    # bare reply form: "default", "the default", "use the account default", "default vpc."
+    r"^\s*(?:(?:use|take|pick)\s+)?(?:the\s+|account\s+)*default"
+    r"(?:\s+(?:one|vpc|network|vnet|subnet|rg|resource\s*group|placement))?\s*[.!]?\s*$"
+    # in-sentence form: needs the parent noun so "default settings" never triggers it.
+    r"|\b(?:account\s+|module\s+|the\s+)?default\s+(?:vpc|network|vnet|subnet|placement|"
+    r"resource\s*group|rg)\b",
+    re.IGNORECASE,
+)
+
+
+def _candidates_named_in(message: str, candidates: list[dict]) -> list[dict]:
+    """Candidates whose recorded name (or provider id) appears verbatim in the user's message
+    (whole-word, case-insensitive). Lets "create an EC2 in the audit-net VPC" bind the parent
+    the user actually named instead of forcing a menu (forensic audit, 2026-08-16). Pure."""
+    msg = (message or "").lower()
+    if not msg:
+        return []
+    out = []
+    for c in candidates:
+        for key in ("name", "provider_id"):
+            val = str(c.get(key) or "").strip().lower()
+            if val and re.search(rf"(?<![\w-]){re.escape(val)}(?![\w-])", msg):
+                out.append(c)
+                break
+    return out
+
 
 def slot_fields(template_key: str) -> set[str]:
     """STAB P2-4: every child input a DEP slot can fill (the slot's own field + its
@@ -158,6 +189,8 @@ def choice_from_reply(message: str, dep_ask: dict | None) -> dict | None:
     ptype = dep_ask.get("parent_type") or ""
     if _REPLY_NEW.match(message):
         return {"parent_type": ptype, "choice": "__new__"}
+    if _WANTS_DEFAULT.search(message):
+        return {"parent_type": ptype, "choice": "__default__"}
     msg = message.strip().strip("\"'“”‘’").lower()
     for opt in dep_ask.get("options") or []:
         name = str(opt.get("name") or "").strip().lower()
@@ -257,6 +290,14 @@ def resolve_closure(template_key: str, validated: dict, active: list[dict],
         wants_new = bool(choice == "__new__"
                          or (_WANTS_NEW.get(slot.parent_type)
                              and _WANTS_NEW[slot.parent_type].search(message or "")))
+        # The user explicitly asked for the module's default placement — honor it whenever
+        # the slot HAS a stated default (previously unreachable with ≥2 candidates).
+        wants_default = bool(slot.stated_default is not None and not wants_new
+                             and (choice == "__default__"
+                                  or _WANTS_DEFAULT.search(message or "")))
+        if wants_default:
+            notes.append(f"{slot.field}: defaulting to {slot.stated_default} (as you asked)")
+            continue
 
         # 1) named — the user already supplied it.
         if not wants_new and inputs.get(slot.field):
@@ -271,12 +312,20 @@ def resolve_closure(template_key: str, validated: dict, active: list[dict],
         # exactly that parent — the existing single-candidate path then fills from its REAL
         # recorded facts (or asks again honestly when they're missing). Never a guess: an
         # unrecognized name leaves the candidate set untouched.
-        if choice and choice != "__new__":
+        if choice and choice not in ("__new__", "__default__"):
             named = [c for c in candidates
                      if str(c.get("name") or "").lower() == str(choice).lower()
                      or str(c.get("provider_id") or "").lower() == str(choice).lower()]
             if named:
                 candidates = named[:1]
+
+        # A parent NAMED IN THE REQUEST binds directly — "create an EC2 in the audit-net VPC"
+        # must use audit-net, never open a menu (forensic audit, 2026-08-16). Only an
+        # unambiguous single match narrows; two message-named candidates still ask.
+        if not wants_new and len(candidates) >= 2:
+            named_in_msg = _candidates_named_in(message, candidates)
+            if len(named_in_msg) == 1:
+                candidates = named_in_msg
 
         # 2) world model — one candidate is used (and stated); several are OFFERED, never guessed.
         if not wants_new and len(candidates) == 1:
@@ -293,9 +342,12 @@ def resolve_closure(template_key: str, validated: dict, active: list[dict],
         if not wants_new and len(candidates) >= 2:
             names = ", ".join(f"“{c.get('name')}” ({c.get('provider_id') or 'no id'})"
                               for c in candidates[:6])
+            default_offer = (f", say “default” for {slot.stated_default},"
+                             if slot.stated_default is not None else "")
             return Closure(status="ask", inputs=inputs, notes=notes, parent_type=slot.parent_type,
                            question=(f"Which {slot.parent_type} should this use? You have "
-                                     f"{len(candidates)}: {names}. Or say “new” to create one."),
+                                     f"{len(candidates)}: {names}. Name one{default_offer} "
+                                     "or say “new” to create one."),
                            options=[{"name": c.get("name"), "provider_id": c.get("provider_id")}
                                     for c in candidates])
 

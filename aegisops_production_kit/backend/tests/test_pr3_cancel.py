@@ -50,6 +50,10 @@ async def test_dag_cancel_halts_after_current_step(live_redis, monkeypatch):
             return _f
     monkeypatch.setattr(exec_loop, "execute_governed_step", _fake_step)
     monkeypatch.setattr(exec_loop, "emitter_of", lambda cfg: _Em())
+    # This test pins the LEGACY in-process loop (flag-off path); the durable engine's
+    # step-boundary cancellation has its own coverage in test_p3_activation.py.
+    from app.settings import get_settings
+    monkeypatch.setattr(get_settings(), "aegisops_durable_engine", "off")
 
     state = {"run_id": rid,
              "goal_dag": [{"template_key": "aws.vpc", "inputs": {}},
@@ -77,6 +81,9 @@ async def test_dag_without_cancel_runs_to_completion(live_redis, monkeypatch):
             return _f
     monkeypatch.setattr(exec_loop, "execute_governed_step", _fake_step)
     monkeypatch.setattr(exec_loop, "emitter_of", lambda cfg: _Em())
+    # Legacy in-process loop (flag-off path) — see the note in the cancel test above.
+    from app.settings import get_settings
+    monkeypatch.setattr(get_settings(), "aegisops_durable_engine", "off")
 
     state = {"run_id": str(uuid.uuid4()),
              "goal_dag": [{"template_key": "aws.vpc", "inputs": {}},
@@ -115,7 +122,9 @@ async def test_reconciler_ignores_cancelled_runs(live_db, live_redis, throwaway_
     """A cancelled run is terminal — it is NOT in the reconciler's executing scan set."""
     from app.agents.reconciler import EXECUTING_STATES
     assert "cancelled" not in EXECUTING_STATES
-    assert set(EXECUTING_STATES) == {"running", "applying"}
+    # P0/D5 killed "applying"; Prompt 3 added the durable engine's transient statuses —
+    # a run parked in any of these with a dead heartbeat is sweepable.
+    assert set(EXECUTING_STATES) == {"running", "executing", "verifying", "scheduled"}
 
 
 # ── endpoint: authz + state transitions ─────────────────────────────────────────────────────

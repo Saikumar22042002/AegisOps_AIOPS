@@ -45,6 +45,14 @@ class Settings(BaseSettings):
     # U6: the Governed Executive Loop — multi-step goal DAGs (create-first closures) execute
     # under one whole-DAG approval. `off` keeps the DEP dag branch as a text proposal.
     aegisops_exec_loop: Literal["on", "off"] = "off"
+    # Intelligence layer (Prompt 2, 2026-08-17): the real retrieval pipeline (gate → planner
+    # → multi-source → budgets → typed context) on the live build_context path. `off` reverts
+    # to the pre-intelligence transcript+k3 behavior byte-for-byte.
+    aegisops_intelligence: Literal["on", "off"] = "on"
+    # Graphiti temporal knowledge layer (facts from revisions, episodes from consolidation,
+    # temporal/semantic search). `off` (or an unreachable graph) degrades gracefully — the
+    # deterministic PG/Neo4j answers still work; nothing fails.
+    aegisops_graphiti: Literal["on", "off"] = "on"
     # P0 worker foundation: which background responsibilities this process owns.
     #   all    — API + background loops (single-node default; today's behavior)
     #   api    — serve HTTP/SSE only; no reconciler/retention/drift/gateway pollers

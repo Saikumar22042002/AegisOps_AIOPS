@@ -126,6 +126,12 @@ def message_shape(message: str) -> str:
         return "question"
     if _ACTION_VERB_START.match(bare) and _RESOURCE_NOUN.search(bare):
         return "request"
+    # A message that STARTS with a destructive verb is always a new request, even when the
+    # target is a specific resource NAME rather than a generic noun ("Destroy FixProbe.").
+    # Found live 2026-08-17: a destroy was swallowed as a pending collection's next answer
+    # and re-asked the VPC menu. A legitimate collection answer never starts destructively.
+    if _DESTRUCTIVE.match(bare):
+        return "request"
     return "answer"
 
 
@@ -147,6 +153,41 @@ def explicitly_destructive(message: str) -> bool:
 def is_broad_inventory_question(message: str) -> bool:
     """A question about everything created ("did I create any resources in aws or azure?")."""
     return is_question(message) and bool(_BROAD_INVENTORY.search(message or ""))
+
+
+# Provenance/audit questions — "who approved this?", "who created/changed X and when?".
+# Deterministic route to the approvals/revisions record (forensic-audit remediation,
+# 2026-08-16: "Who approved the run that created MySource?" was LLM-routed to the DEVOPS
+# agent, which demanded a GitHub token — the answer sat complete in the approvals table).
+_PROVENANCE = re.compile(
+    r"\bwho\b[^.?!]*\b(?:approv|reject|creat|chang|modif|destroy|delet|initiat|request)"
+    r"|\b(?:approval|approver|approved\s+by|rejected\s+by)\b"
+    r"|\bwhen\s+was\b[^.?!]*\b(?:approv|creat|chang|modif)"
+    r"|\bwhy\s+was\b[^.?!]*\b(?:chang|modif|creat|approv)",
+    re.IGNORECASE,
+)
+
+# Change-history questions — "what changed on X?", "previous configuration", "what did I
+# change yesterday?", "what ports did I open, and when?". Answered from the immutable
+# resource_revisions journal, never from the LLM.
+_HISTORY = re.compile(
+    r"\bwhat\s+(?:did\s+i\s+|was\s+|has\s+)?chang" r"|\bwhat\s+changed\b"
+    r"|\bprevious\s+(?:config|configuration|state|version|value)"
+    r"|\bbefore\s+the\s+(?:last\s+)?chang" r"|\bchange\s+history\b|\bhistory\s+of\b"
+    r"|\bwhat\s+(?:ports?|rules?)\s+did\s+i\b" r"|\bwhen\s+did\s+i\b"
+    r"|\baudit\s+(?:trail|log|history)\b|\brevisions?\b",
+    re.IGNORECASE,
+)
+
+
+def is_provenance_question(message: str) -> bool:
+    """Asks WHO/WHEN/WHY about an approval or change — answered from approvals + revisions."""
+    return is_question(message) and bool(_PROVENANCE.search(message or ""))
+
+
+def is_history_question(message: str) -> bool:
+    """Asks what changed / previous state / change timeline — answered from revisions."""
+    return is_question(message) and bool(_HISTORY.search(message or ""))
 
 
 def guard_classification(message: str, cls: dict) -> dict | None:

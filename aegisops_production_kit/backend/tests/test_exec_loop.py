@@ -112,7 +112,13 @@ def _state(dag):
 
 @pytest.fixture
 def loop_env(monkeypatch, live_redis):
-    """Fake runner + captured graph/inventory writes; live Redis for step idempotency."""
+    """Fake runner + captured graph/inventory writes; live Redis for step idempotency.
+
+    Prompt 4: these tests pin the LEGACY in-process loop — with the durable-engine flag ON
+    (the default posture since Prompt 3) execute_goal_dag would route into app/engine, which
+    has its own coverage in test_p3_engine/test_p3_activation."""
+    from app.settings import get_settings
+    monkeypatch.setattr(get_settings(), "aegisops_durable_engine", "off")
     _FakeRunner.applies = []
     _FakeRunner.fail_applies = set()
     monkeypatch.setattr(exec_loop, "TerraformRunner", _FakeRunner)

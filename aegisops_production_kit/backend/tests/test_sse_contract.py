@@ -100,8 +100,12 @@ async def test_done_sentinel_stops_the_stream():
     assert all(int(o["id"]) != 99 for o in out)
 
 
-def test_channel_registry_roundtrip():
+def test_channel_registry_roundtrip(monkeypatch):
     # CLN-2: drop_channel removed with P13 — the registry contract is create/get; redis-mode
     # terminal streams evict via TTL (B1), memory-mode channels live for the dev process.
-    ch = create_channel("reg-1")
-    assert get_channel("reg-1") is ch
+    # Prompt 4: the IDENTITY contract is memory-mode-only (redis mode hands back a fresh
+    # stream reader per call by design) — pin memory mode so the test states what it means.
+    from app.agents import events
+    monkeypatch.setattr(events, "_redis_mode", lambda: False)
+    ch = events.create_channel("reg-1")
+    assert events.get_channel("reg-1") is ch

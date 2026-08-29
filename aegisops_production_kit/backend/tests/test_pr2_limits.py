@@ -82,10 +82,15 @@ async def test_active_counts_ignore_stale_rows(live_db, live_redis, throwaway_or
         s.add(User(id=uid, org_id=uuid.UUID(org), username="pr2-user"))
         s.add(DbSession(id=sid, org_id=uuid.UUID(org), title="pr2"))
         await s.flush()
+        # Prod-hardening (2026-08-17): rows younger than HEARTBEAT_TTL count as active even
+        # without a heartbeat (burst-admission fix), so a genuinely STALE row must be older
+        # than the TTL — which is what a crashed worker's leftover row actually looks like.
+        from datetime import UTC, datetime, timedelta
+        old = datetime.now(UTC) - timedelta(seconds=120)
         s.add(Run(id=live_id, org_id=uuid.UUID(org), session_id=sid, status="running",
-                  mode="apply", initiated_by=uid))
+                  mode="apply", initiated_by=uid, created_at=old))
         s.add(Run(id=stale_id, org_id=uuid.UUID(org), session_id=sid, status="running",
-                  mode="apply", initiated_by=uid))
+                  mode="apply", initiated_by=uid, created_at=old))
     redis = get_redis()
     await redis.set(hb_key(str(live_id)), "1", ex=30)     # only the live one heartbeats
     try:

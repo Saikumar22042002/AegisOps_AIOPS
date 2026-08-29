@@ -119,6 +119,17 @@ def apply_post_guard_rules(updates: dict, message: str, confidence: float) -> di
     diverted the run to clarification — mirroring the node's early return."""
     if updates.get("needs_clarification"):
         return updates
+    # Provenance/history questions are answered from the deterministic audit record
+    # (approvals + resource_revisions), whatever domain the LLM guessed (forensic-audit
+    # remediation, 2026-08-16: "who approved the run that created X?" was routed to devops,
+    # which demanded a GitHub token). Always a READ — these can never mutate.
+    if intent_guard.is_provenance_question(message) or intent_guard.is_history_question(message):
+        updates["domain"] = "cloudops"
+        updates["action"] = "read"
+        if not (updates.get("intent") or "").lower().startswith(("query_", "read_")):
+            updates["intent"] = "query_history"
+        updates["routing_reason"] = ((updates.get("routing_reason") or "").strip()
+                                     + " [guard: provenance/history question → audit record]").strip()
     # Broad inventory question with no usable target → list everything (Phase 7 / BUG-04).
     if (updates["domain"] == "cloudops" and updates["action"] == "read"
             and not updates.get("target") and intent_guard.is_broad_inventory_question(message)):
@@ -187,7 +198,8 @@ async def router(state: AgentState, config) -> dict:
     # the last 8 turns — so a reference to something said 30 turns ago still resolves.
     ctx = await memory.build_context(session_id or "", purpose="router", current_message=message,
                                      settings=get_settings(), org_id=state.get("org_id"),
-                                     user_id=state.get("user", {}).get("user_id"))
+                                     user_id=state.get("user", {}).get("user_id"),
+                                     run_id=state.get("run_id"))
     classify_input = (f"Recent conversation (context for resolving references — classify ONLY "
                       f"the current message):\n{ctx}\n\nCurrent message: {message}") if ctx else message
     try:

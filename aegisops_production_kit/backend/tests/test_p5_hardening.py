@@ -110,9 +110,13 @@ def test_preflight_blocks_unsafe_production_posture():
 
 def test_preflight_flags_global_creds_without_broker_offlocal():
     from app import preflight
+    # Prompt 4: the posture must otherwise be production-safe — the hardened preflight now
+    # blocks shipped-default secrets, so give it real ones to isolate the broker warn.
     rpt = preflight.run(Settings(app_env="production", aegisops_event_bus="redis",
                                  aegisops_metrics_token="t", aws_access_key_id="AKIA-x",
-                                 aegisops_credential_broker="off"))
+                                 aegisops_credential_broker="off",
+                                 secret_key="unit-test-long-random-value-0123456789abcdef",
+                                 keycloak_admin_password="unit-test-not-default"))
     cred = next(f for f in rpt.findings if f.check == "credential_broker")
     assert cred.severity == "warn" and "broker" in cred.detail
     assert not rpt.blocked                            # a warn, not a hard block
@@ -124,6 +128,32 @@ def test_preflight_never_permits_autonomous_mode():
                                  aegisops_metrics_token="t",
                                  aegisops_permission_mode="AUTONOMOUS"))
     assert any(f.check == "permission_mode" and f.severity == "block" for f in rpt.findings)
+
+
+def test_preflight_blocks_shipped_defaults_offlocal():
+    """Prompt 4: default SECRET_KEY, default Keycloak admin password, and wildcard CORS are
+    startup-blocking off-local; the same posture only warns in local dev."""
+    from app import preflight
+    bad = Settings(app_env="production", aegisops_event_bus="redis",
+                   aegisops_metrics_token="t", cors_origins="*")  # defaults left in place
+    rpt = preflight.run(bad)
+    sev = {f.check: f.severity for f in rpt.findings}
+    assert sev["secret_key"] == "block"
+    assert sev["keycloak_admin_password"] == "block"
+    assert sev["cors_origins"] == "block"
+    assert rpt.blocked
+    local = preflight.run(Settings(app_env="local", cors_origins="*"))
+    assert not local.blocked                          # local keeps booting (warn posture)
+
+
+def test_preflight_accepts_hardened_production_posture():
+    from app import preflight
+    rpt = preflight.run(Settings(
+        app_env="production", aegisops_event_bus="redis", aegisops_metrics_token="t",
+        secret_key="unit-test-long-random-value-0123456789abcdef",
+        keycloak_admin_password="unit-test-not-default",
+        cors_origins="https://ops.example.com"))
+    assert not rpt.blocked
 
 
 # ── DEF-19 parity + cutover decision ─────────────────────────────────────────────────────────

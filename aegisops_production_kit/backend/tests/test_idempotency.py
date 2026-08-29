@@ -78,6 +78,12 @@ async def test_cloudops_execute_aborts_on_in_flight_claim(live_redis, monkeypatc
     key = idempotency.make_key("tf-exec", run_id, mode)
     await idempotency.release(key)
     assert await idempotency.claim(key) is True  # simulate a peer already applying
+    # Prompt 4: abort-on-in-flight requires the claimant to be provably ALIVE (run
+    # heartbeat up). A dead claimant now takes the honest interrupted/partial path —
+    # covered by test_cloudops_execute_dead_claimant_records_partial below.
+    from app.agents.supervisor import hb_key
+    from app.cache.redis import get_redis
+    await get_redis().set(hb_key(run_id), "1", ex=60)
 
     # If apply() were ever reached this test would fail loudly rather than silently pass.
     def _boom(*a, **k):
@@ -93,4 +99,44 @@ async def test_cloudops_execute_aborts_on_in_flight_claim(live_redis, monkeypatc
     cfg = {"configurable": {"emitter": Emitter(RunChannel(run_id))}}
     out = await cloudops.cloudops_execute(state, cfg)
     assert out["outcome"]["status"] == f"{mode}_aborted"
+    await get_redis().delete(hb_key(run_id))
+    await idempotency.release(key)
+
+
+async def test_cloudops_execute_dead_claimant_records_partial(live_redis, monkeypatch):
+    """Prompt 4 (H1): claim held, NO stored result, claimant's run heartbeat DEAD → the
+    node must NOT abort with the misleading 'refresh to see the result' forever. It records
+    a VISIBLE partial and returns an honest `{mode}_interrupted` outcome. runner.apply must
+    still never run."""
+    from app.agents import cloudops, templates
+    from app.agents.events import Emitter, RunChannel
+
+    run_id = "run-a1-dead"
+    mode = "apply"
+    key = idempotency.make_key("tf-exec", run_id, mode)
+    await idempotency.release(key)
+    assert await idempotency.claim(key) is True   # dead peer: claim held, no heartbeat
+
+    def _boom(*a, **k):
+        raise AssertionError("runner.apply must NOT run on a held claim (A1)")
+    monkeypatch.setattr(cloudops.TerraformRunner, "apply", _boom, raising=False)
+
+    async def _no_state(*a, **k):
+        return []
+    monkeypatch.setattr(cloudops.TerraformRunner, "state_list", _no_state, raising=False)
+
+    recorded: list[tuple] = []
+
+    async def _spy_record_partial(state, template, reason, leftover):
+        recorded.append((state["run_id"], reason))
+    monkeypatch.setattr(cloudops.inventory, "record_partial", _spy_record_partial)
+
+    state = {"run_id": run_id, "approval_status": "approved", "execution_mode": mode,
+             "cloud": "aws", "resource": "s3", "org_id": "00000000-0000-0000-0000-000000000000",
+             "state_workspace": None, "plan_json": {"summary": {"add": 1}},
+             "parsed_inputs": {}}
+    cfg = {"configurable": {"emitter": Emitter(RunChannel(run_id))}}
+    out = await cloudops.cloudops_execute(state, cfg)
+    assert out["outcome"]["status"] == f"{mode}_interrupted"
+    assert recorded and recorded[0][0] == run_id      # the partial is VISIBLE, not silent
     await idempotency.release(key)

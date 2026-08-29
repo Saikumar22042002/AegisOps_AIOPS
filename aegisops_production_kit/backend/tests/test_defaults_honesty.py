@@ -18,7 +18,11 @@ def test_aws_ec2_resolved_subnet_from_plan_is_named():
 
 
 def test_aws_ec2_user_specified_vpc_not_flagged():
-    d = _defaulted_dependencies("aws", "ec2", {"name": "web", "vpc_id": "vpc-user"}, [])
+    # The schema's REAL placement input is subnet_id (user-named or DEP-resolved). The old
+    # pin keyed on vpc_id — a field no aws.ec2 input carries — so the "don't flag real
+    # placements" behavior never actually fired (audit 2026-08-17: the approval card claimed
+    # "account's default VPC" while the resolver had bound a named VPC's subnet).
+    d = _defaulted_dependencies("aws", "ec2", {"name": "web", "subnet_id": "subnet-user"}, [])
     assert d == []
 
 

@@ -122,9 +122,14 @@ def test_metrics_bearer_token_enforced(client: TestClient, monkeypatch):
     assert ok.status_code == 200 and "aegisops_api_requests_total" in ok.text
 
 
-def test_rate_limiter_uses_process_store_only_in_memory_mode():
-    """In the redis coordination posture the limiter is constructed with the shared
-    storage; the unit tier runs memory mode → no storage kwargs (see app/ratelimit.py)."""
+def test_rate_limiter_storage_matches_coordination_posture():
+    """Memory mode → process-local store (no storage kwargs); redis coordination → the
+    SHARED storage (multi-worker limits must not be per-process). Prompt 4: asserted for
+    whichever posture the suite runs under, so the invariant holds in-container (redis)
+    and on the host unit tier (memory) alike."""
     from app import ratelimit
-    assert ratelimit._settings.aegisops_event_bus == "memory"
-    assert ratelimit._storage_kwargs == {}
+    if ratelimit._settings.aegisops_event_bus == "memory":
+        assert ratelimit._storage_kwargs == {}
+    else:
+        uri = ratelimit._storage_kwargs.get("storage_uri", "")
+        assert uri.startswith("redis://") or uri.startswith("async+redis://")

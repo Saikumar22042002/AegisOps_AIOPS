@@ -186,17 +186,29 @@ def _step_name(step: dict) -> str:
 
 
 async def _record_step_bookkeeping(step_state: dict, template, outputs: dict) -> None:
-    """Inventory row + graph/world-model mirror for one applied step (best-effort — the D2
-    same-txn guarantee for loop steps rides on the outcome's per-step reports; bookkeeping
-    never fails a real apply)."""
+    """Inventory row + IMMUTABLE REVISION + graph/world-model mirror for one applied step
+    (best-effort — the D2 same-txn guarantee for loop steps rides on the outcome's per-step
+    reports; bookkeeping never fails a real apply).
+
+    Prompt 3 regression fix: this dark path predated the Prompt-1 revision journal and never
+    wrote revisions — a loop-applied resource would have been invisible to history/temporal
+    answers. Now records exactly what the single-step apply path records."""
     payload = inventory.inventory_payload(step_state, template, outputs)
+    action = "created"
     try:
         from ..db.session import session_scope
         async with session_scope() as s:
-            await inventory.upsert_resource(s, step_state["org_id"], payload)
+            up = await inventory.upsert_resource(s, step_state["org_id"], payload)
+            action = up["action"]
+            await inventory.add_revision(
+                s, step_state["org_id"], action=action, payload=payload,
+                before=up["before"], after={"attributes": outputs},
+                resource_id=up["resource"].id,
+                actor_user=(step_state.get("user") or {}).get("username"),
+                reason=step_state.get("message"), execution_result="applied")
     except Exception as e:  # noqa: BLE001
         log.warning("exec_loop.inventory_failed", error=str(e))
-    await inventory.record_graph(step_state, template, outputs)
+    await inventory.record_graph(step_state, template, outputs, action=action)
 
 
 async def execute_governed_step(state: AgentState, step: dict, index: int, config,
@@ -215,8 +227,19 @@ async def execute_governed_step(state: AgentState, step: dict, index: int, confi
         done = await idempotency.get_result(idem_key) or await idempotency.wait_for_result(idem_key)
         if done:
             return done["result"]
-        return {"status": "aborted",
-                "error": "this step is already being applied by another request — aborted, never doubled"}
+        # CRASH RECOVERY (Prompt 3, found by the live restart test): a claim held with NO
+        # result after the wait means the claimant died mid-step. Re-claim and re-execute —
+        # terraform re-plans against its state, so a completed-but-unrecorded apply
+        # reconciles to zero-change (already_satisfied), never a duplicate resource. A
+        # claim re-won by a LIVE concurrent worker still aborts below (never doubled).
+        log.warning("exec_loop.stale_claim_reclaimed", run_id=run_id, step=index)
+        await idempotency.release(idem_key)
+        if not await idempotency.claim(idem_key):
+            done = await idempotency.wait_for_result(idem_key)
+            if done:
+                return done["result"]
+            return {"status": "aborted",
+                    "error": "this step is already being applied by another request — aborted, never doubled"}
 
     await timing.start_step(run_id, step_label, tool="terraform")
     try:
@@ -243,7 +266,15 @@ async def execute_governed_step(state: AgentState, step: dict, index: int, confi
             names = ", ".join(c["name"] for c in failed)
             raise TerraformError(f"policy check(s) failed on the real plan: {names} — not applying")
 
-        await emitter.step(5, f"Step {index + 1} · {template.key} · apply")
+        # STATE-AWARE (Prompt 3, mandate 8): a 0/0/0 plan means the desired state already
+        # holds — report ALREADY_SATISFIED honestly, never another phantom mutation. The
+        # (no-op) apply still runs so the step's real outputs remain available for wires.
+        already_satisfied = plan_guard.zero_change(plan["summary"])
+        if already_satisfied:
+            await emitter.step(5, f"Step {index + 1} · {template.key} · already satisfied "
+                                  "(0 add / 0 change / 0 destroy)")
+        else:
+            await emitter.step(5, f"Step {index + 1} · {template.key} · apply")
         result = await runner.apply(on_line)
         outputs = result.get("outputs", {})
 
@@ -251,9 +282,11 @@ async def execute_governed_step(state: AgentState, step: dict, index: int, confi
         step_state = {**state, "parsed_inputs": validated,
                       "state_workspace": state_slug(_step_name({"inputs": validated,
                                                                 "template_key": template.key}))}
-        await _record_step_bookkeeping(step_state, template, outputs)
+        if not already_satisfied:
+            await _record_step_bookkeeping(step_state, template, outputs)
 
-        observation = {"status": "applied", "template": template.key,
+        observation = {"status": "already_satisfied" if already_satisfied else "applied",
+                       "template": template.key,
                        "name": _step_name(step), "inputs": validated, "outputs": outputs,
                        "policy_checks": checks}
         await timing.end_step(run_id, step_label, status="done", result={"applied": True})
@@ -271,7 +304,16 @@ async def execute_governed_step(state: AgentState, step: dict, index: int, confi
 async def execute_goal_dag(state: AgentState, config) -> dict:
     """EXECUTE phase (post-approval): run the approved DAG in order, wiring real outputs
     forward. A replanned (revised) step is a DEVIATION → fresh approval interrupt. Bounds and
-    failures halt honestly with a partial report — later steps are never attempted blind."""
+    failures halt honestly with a partial report — later steps are never attempted blind.
+
+    Prompt 3: with `aegisops_durable_engine=on` the SAME approved DAG executes through the
+    P3 durable engine (waves, claim-or-recover restart safety, retain-on-failure policy,
+    step-boundary cancellation) via the terraform StepExecutor — one execution semantic,
+    two durability levels; the in-process path below remains the flag-off default."""
+    settings = get_settings()
+    if getattr(settings, "aegisops_durable_engine", "off") == "on":
+        return await _execute_dag_durable(state, config)
+
     emitter = emitter_of(config)
     dag: list[dict] = state.get("goal_dag") or []
     observations: dict[str, dict] = {}
@@ -287,10 +329,10 @@ async def execute_goal_dag(state: AgentState, config) -> dict:
         current = step
         while True:
             obs = await execute_governed_step(state, current, i, config, observations)
-            if obs.get("status") == "applied":
+            if obs.get("status") in ("applied", "already_satisfied"):
                 observations[current["template_key"]] = obs
                 step_reports.append({"order": i + 1, "template": obs["template"],
-                                     "name": obs["name"], "status": "applied"})
+                                     "name": obs["name"], "status": obs["status"]})
                 break
 
             step_reports.append({"order": i + 1, "template": current.get("template_key"),
@@ -317,8 +359,9 @@ async def execute_goal_dag(state: AgentState, config) -> dict:
             current = revised
 
     answer = ("Governed plan complete: " +
-              "; ".join(f"step {r['order']} ({r['template']} “{r['name']}”) applied"
-                        for r in step_reports if r["status"] == "applied") + ".")
+              "; ".join(f"step {r['order']} ({r['template']} “{r['name']}”) {r['status'].replace('_', ' ')}"
+                        for r in step_reports
+                        if r["status"] in ("applied", "already_satisfied")) + ".")
     await emitter.token(answer)
     cc = classify(answer)
     await emitter.confidentiality(cc.level, cc.score)
@@ -326,6 +369,90 @@ async def execute_goal_dag(state: AgentState, config) -> dict:
                         "outputs": {k: v.get("outputs", {}) for k, v in observations.items()}},
             "answer": answer, "tool_results": [step_reports],
             "confidentiality": {"level": cc.level, "score": cc.score}}
+
+
+async def _execute_dag_durable(state: AgentState, config) -> dict:
+    """Durable EXECUTE (Prompt 3 / DEF-17): the approved DAG runs through the P3 engine —
+    durable RunStep rows + run_events, claim-or-recover restart safety, retain-on-failure
+    (mandate 20), step-boundary cancellation (mandate 22). The terraform StepExecutor reuses
+    `execute_governed_step`, so plan-guard/policy/idempotency/bookkeeping are identical to
+    the in-process path. A process crash mid-DAG resumes via the reconciler calling
+    `driver.recover_run` with this same draft — completed steps are never re-applied."""
+    emitter = emitter_of(config)
+    settings = get_settings()
+    run_id = state.get("run_id")
+    dag: list[dict] = state.get("goal_dag") or []
+
+    from ..engine import driver as engine_driver
+    draft = [{"id": s["template_key"], "kind": "module", "name": _step_name(s),
+              "template_key": s["template_key"], "params": dict(s),
+              "depends_on": [s["depends_on"]] if s.get("depends_on") else []}
+             for s in dag]
+    order = {d["id"]: i for i, d in enumerate(draft)}
+    captured: dict[str, dict] = {}
+    base_exec = engine_driver.terraform_step_executor(settings, dict(state), config, order)
+
+    async def capturing_exec(step, outputs):
+        outcome = await base_exec(step, outputs)
+        if outcome.result:
+            captured[step.id] = outcome.result
+        return outcome
+
+    async def should_cancel() -> bool:
+        return await _cancel_requested(run_id)
+
+    await emitter.step(5, f"Durable engine · {len(draft)} step(s), wave-scheduled, "
+                          "restart-safe")
+    result = await engine_driver.run_durable_workflow(
+        settings, run_id, draft, org_id=state.get("org_id"),
+        executor=capturing_exec, on_failure="retain", should_cancel=should_cancel)
+
+    step_reports = [{"order": order.get(sid, 0) + 1, "template": sid,
+                     "name": captured.get(sid, {}).get("name", sid),
+                     "status": captured.get(sid, {}).get("status", "applied"),
+                     "recovered": sid in result.recovered}
+                    for sid in result.completed]
+    outputs = {sid: captured.get(sid, {}).get("outputs", {}) for sid in result.completed}
+
+    if result.status == "completed":
+        answer = ("Governed plan complete (durable): " +
+                  "; ".join(f"step {r['order']} ({r['template']} “{r['name']}”) "
+                            + ("recovered — not re-applied" if r["recovered"]
+                               else r["status"].replace("_", " "))
+                            for r in step_reports) + ".")
+        await emitter.token(answer)
+        cc = classify(answer)
+        await emitter.confidentiality(cc.level, cc.score)
+        return {"outcome": {"status": "applied", "steps": step_reports, "outputs": outputs,
+                            "recovered": result.recovered},
+                "answer": answer, "tool_results": [step_reports],
+                "confidentiality": {"level": cc.level, "score": cc.score}}
+
+    if result.status == "cancelled":
+        applied_txt = (f"steps {', '.join(str(r['order']) for r in step_reports)} applied"
+                       if step_reports else "no steps applied")
+        answer = f"🛑 Cancelled: {applied_txt}; cancelled before step “{result.failed_step}”."
+        await emitter.token(answer)
+        cc = classify(answer)
+        await emitter.confidentiality(cc.level, cc.score)
+        return {"outcome": {"status": "cancelled", "steps": step_reports,
+                            "halted": "cancelled"},
+                "answer": answer, "confidentiality": {"level": cc.level, "score": cc.score}}
+
+    failed_err = next((captured[s].get("error") for s in captured
+                       if captured[s].get("status") == "failed"), None) or "step failed"
+    applied_txt = (f"steps {', '.join(str(r['order']) for r in step_reports)} applied and "
+                   "RETAINED (never auto-destroyed)" if step_reports else "no steps applied")
+    answer = (f"⚠️ Governed plan halted: {applied_txt}; step “{result.failed_step}” failed: "
+              f"{failed_err}. Ask me to retry (completed steps recover, never re-apply) or "
+              "to destroy the retained resources.")
+    await emitter.token(answer)
+    cc = classify(answer)
+    await emitter.confidentiality(cc.level, cc.score)
+    return {"outcome": {"status": "partial_failure", "steps": step_reports,
+                        "halted": "failure", "error": failed_err,
+                        "retained": [r["template"] for r in step_reports]},
+            "answer": answer, "confidentiality": {"level": cc.level, "score": cc.score}}
 
 
 async def _cancel_requested(run_id: str | None) -> bool:

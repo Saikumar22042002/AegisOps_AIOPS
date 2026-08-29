@@ -260,21 +260,28 @@ _PURPOSE_BUDGET = {"router": 1600, "cloudops": 3000, "devops": 3000, "sre": 3000
 
 async def build_context(session_id: str, *, purpose: str = "general", budget_tokens: int | None = None,
                         current_message: str | None = None, settings=None,
-                        org_id: str | None = None, user_id: str | None = None) -> str:
-    """M1/M3/M4 — the session context slice for a purpose, threaded into EVERY LLM call.
+                        org_id: str | None = None, user_id: str | None = None,
+                        run_id: str | None = None, return_trace: bool = False):
+    """M1/M3/M4 + Prompt 2 — THE session context slice, threaded into EVERY LLM call.
 
-    Always returns: (a) the user's STANDING MEMORY block when org/user ids are supplied (M4 —
-    session-independent, user-editable facts like "usual_region: ap-south-1"); (b) a
-    RELEVANT-EARLIER-TURNS slot — the exact earlier turn when the current message asks for one
-    by position (M2 positional recall, verbatim), plus top-k semantic/keyword hits for fuzzy
-    references; and (c) the transcript (recent verbatim + older-user digest / rolling summary),
-    fitted to the purpose's budget. Never returns a lie about "no history"."""
+    Always returns: (a) the user's STANDING MEMORY block when org/user ids are supplied
+    (M4); (b) the retrieval slice — with `aegisops_intelligence=on` this is the canonical
+    pipeline (gate → planner → revisions/Graphiti/messages/accepted-facts → budgets → typed
+    blocks, observable trace); with the flag off it is the original positional-recall +
+    top-3 session hits, byte-identical; and (c) the transcript (recent verbatim + digest),
+    compacted to a durable SESSION STATE block when it would overflow — never blind
+    truncation. `return_trace=True` additionally returns the RetrievalTrace (or None)."""
     max_chars = (budget_tokens * 4) if budget_tokens else _PURPOSE_BUDGET.get(purpose, 3000)
     standing = ""
     if org_id:
         from . import user_memory
         standing = await user_memory.render_block(org_id, user_id)
+
+    intelligence_on = bool(settings is not None and org_id
+                           and getattr(settings, "aegisops_intelligence", "off") == "on")
+    trace = None
     slot: list[str] = []
+    retrieved_block = ""
     if current_message:
         rec = detect_recall(current_message)
         if rec:
@@ -283,19 +290,42 @@ async def build_context(session_id: str, *, purpose: str = "general", budget_tok
             if turn:
                 slot.append(f"[Exact recall] The user's {_ordinal_label(turn['ordinal'])} {role} "
                             f"turn was, verbatim:\n{turn['content']}")
-        for hit in await retrieve(session_id, current_message, k=3, settings=settings):
-            text = (hit["content"] or "").strip()
-            if text and text != (current_message or "").strip():
-                slot.append(f"[Related earlier {hit['role']} turn] {text[:600]}")
-    base = await build_transcript(session_id, max_chars=max_chars, exclude_last_user=current_message)
+        if intelligence_on:
+            from ..intelligence import pipeline as intel
+            bundle = await intel.assemble(settings, message=current_message, org_id=org_id,
+                                          session_id=session_id, run_id=run_id,
+                                          purpose=purpose, max_chars=max(max_chars // 2, 800))
+            retrieved_block, trace = bundle.text, bundle.trace
+        else:
+            for hit in await retrieve(session_id, current_message, k=3, settings=settings):
+                text = (hit["content"] or "").strip()
+                if text and text != (current_message or "").strip():
+                    slot.append(f"[Related earlier {hit['role']} turn] {text[:600]}")
+
+    transcript_budget = max(max_chars - len(retrieved_block) - len(standing), 600)
+    base = await build_transcript(session_id, max_chars=transcript_budget,
+                                  exclude_last_user=current_message)
+    if intelligence_on and base and len(base) > transcript_budget * 0.9:
+        # Long session: replace blind digesting with the durable compacted state block.
+        from ..intelligence import compaction
+        state_block = await compaction.session_state_block(org_id, session_id, run_id=run_id)
+        if state_block:
+            base = await build_transcript(session_id,
+                                          max_chars=max(transcript_budget - len(state_block), 400),
+                                          exclude_last_user=current_message)
+            base = state_block + ("\n\n" + base if base else "")
+
     parts: list[str] = []
     if standing:
         parts.append(standing)
     if slot:
         parts.append("Relevant earlier turns:\n" + "\n\n".join(slot))
+    if retrieved_block:
+        parts.append(retrieved_block)
     if base:
         parts.append(base)
-    return "\n\n".join(parts)
+    result = "\n\n".join(parts)
+    return (result, trace) if return_trace else result
 
 
 async def classification_context(session_id: str, max_chars: int = 1500) -> str:

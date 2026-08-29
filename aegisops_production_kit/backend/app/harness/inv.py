@@ -48,13 +48,20 @@ def _read_registry(settings: Settings):
 
 
 async def investigate(settings: Settings, objective: str, *, run_id: str | None = None,
-                      org_id: str | None = None, purpose: str = "inv_loop") -> RunResult:
+                      org_id: str | None = None, purpose: str = "inv_loop",
+                      context: str | None = None) -> RunResult:
     """Run a read-only investigation to completion; every iteration is durably logged to
-    run_events under `run_id` (a fresh id when the caller has no run context)."""
+    run_events under `run_id` (a fresh id when the caller has no run context).
+
+    `context` (Prompt 3, mandate 24): the TYPED context slice the intelligence layer
+    assembled (bounded, provenance-labeled) — prepended so the investigator reasons over
+    real history/state instead of a bare objective. Never the raw transcript or graph."""
     rid = run_id or str(uuid.uuid4())
     registry = _read_registry(settings)
     kernel = Kernel(settings, inv_spec(purpose), registry, run_id=rid, org_id=org_id)
-    result = await kernel.run(objective)
+    framed = (f"Relevant context (typed, provenance-labeled):\n{context[:2400]}\n\n"
+              f"Objective: {objective}") if context else objective
+    result = await kernel.run(framed)
     log.info("harness.inv_complete", run_id=rid, status=result.status,
              iterations=result.iterations, evidence_ok=result.evidence_ok)
     return result

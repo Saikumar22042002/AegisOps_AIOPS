@@ -66,15 +66,20 @@ async def lifespan(app: FastAPI):
     from .llm import catalog as llm_catalog_boot
     llm_catalog_boot.boot_validate(settings)
     llm_bindings.register()
-    # P5 hardening: log the production-config preflight at startup (visibility; the P0
-    # event-bus/Redis refusals above remain the hard gate). A block in a non-local env is
-    # loud in the logs and surfaced on /readyz.
+    # P5 hardening + Prompt 4 (2026-08-17): the production-config preflight is now a HARD
+    # startup gate off-local — a `block` finding refuses to serve, exactly like the P0
+    # event-bus/Redis refusals above. Findings carry no secret values (KEY=PRESENT form),
+    # so the refusal message is safe to raise. Local dev keeps booting with warnings.
     from . import preflight as _preflight
     _report = _preflight.run(settings)
     for _f in _report.findings:
         if _f.severity != "ok":
             log.warning("preflight.finding", check=_f.check, severity=_f.severity,
                         detail=_f.detail)
+    if _report.blocked and settings.app_env != "local":
+        _blocks = "; ".join(f"{f.check}: {f.detail}" for f in _report.findings
+                            if f.severity == "block")
+        raise RuntimeError(f"production preflight refused startup — {_blocks}")
     setup_otel(settings)
     db.init_engine(settings)
     redis_client.init_redis(settings)

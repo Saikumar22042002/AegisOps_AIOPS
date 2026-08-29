@@ -53,7 +53,3 @@ A fresh clone: fill `.env` → `docker compose up -d` → `make migrate && make 
 Router→CloudOps→discovery→`terraform plan`→approval→`terraform apply`→verify with full
 context-graph + ServiceNow + Langfuse/OTel/Prometheus; every checklist box passes; all tests
 green; no TODO/mock/placeholder in app code.
-
-## Reference docs (in `docs/`)
-00 prompt · 01 requirements · 02 design · 03 architecture · 04 backend · 05 agents ·
-06 checklist · 07 setup. Read them before coding.

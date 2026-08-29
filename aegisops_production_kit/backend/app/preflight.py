@@ -75,6 +75,15 @@ def run(settings: Settings) -> PreflightReport:
     add("worker_role", getattr(s, "aegisops_role", "all") in ("all", "worker") or local,
         "no worker role owns background sweeps (set AEGISOPS_ROLE=all|worker somewhere)",
         warn_only=True)
+    # Prod-hardening (2026-08-17): shipped defaults must never survive into a real env.
+    add("secret_key", local or (s.secret_key != "change-me-to-a-long-random-string"
+                                and len(s.secret_key) >= 32),
+        "SECRET_KEY is the shipped default or shorter than 32 chars — set a long random value")
+    add("keycloak_admin_password", local or s.keycloak_admin_password != "admin",
+        "KEYCLOAK_ADMIN_PASSWORD is the shipped default 'admin'")
+    # CORS wildcard off-local turns every browser into a caller of an authenticated API.
+    add("cors_origins", local or "*" not in s.cors_origin_list,
+        "CORS_ORIGINS contains '*' — off-local requires an explicit origin allowlist")
     # Production credentials: off-local, prefer the broker over the global set (F-20/ADR-17).
     if not local and getattr(s, "aegisops_credential_broker", "off") != "on" and (
             s.aws_access_key_id or s.azure_client_id or s.google_cloud_project):

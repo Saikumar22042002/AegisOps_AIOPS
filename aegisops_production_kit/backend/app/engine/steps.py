@@ -95,14 +95,56 @@ async def claim_or_recover(step: Step) -> tuple[bool, dict | None]:
 
     `should_execute` is True only when this process wins a fresh idempotency claim; if the
     step already ran (before a crash, or on another worker), returns (False, stored_result)
-    so completed work is returned, never repeated (06 §8.1 idempotency; P0/A1 machinery)."""
+    so completed work is returned, never repeated (06 §8.1 idempotency; P0/A1 machinery).
+
+    CRASH RECOVERY (Prompt 3, found by the live restart test): a worker killed MID-STEP
+    leaves the claim held with NO stored result. Waiting yields nothing — the claimant is
+    dead. Treating that as "done with empty outputs" would poison downstream wires, so the
+    stale claim is released and re-claimed: the step RE-EXECUTES, which is safe for module
+    steps because Terraform re-plans against its state (a completed-but-unrecorded apply
+    reconciles to zero-change → ALREADY_SATISFIED, never a duplicate resource)."""
     key = idempotency.make_key("dstep", step.idempotency_key)
     if await idempotency.claim(key):
         return True, None
     stored = await idempotency.get_result(key) or await idempotency.wait_for_result(key)
+    if stored is not None:
+        return False, stored
+    # Prod-hardening (2026-08-17): a held claim with no result after the wait is only
+    # reclaimable when the DRIVING RUN is provably dead — the run heartbeat, not the 20s
+    # result deadline, is the liveness signal (a live 45-minute terraform apply must never
+    # be misidentified as stale). idempotency_key = "dstep:{run_id}:{step_id}".
+    run_id = step.idempotency_key.split(":")[1] if ":" in step.idempotency_key else None
+    if run_id:
+        try:
+            from ..cache.redis import get_redis
+            from ..agents.supervisor import hb_key
+            if bool(await get_redis().exists(hb_key(run_id))):
+                log.warning("engine.claim_held_by_live_run_waiting", step=step.id, run=run_id)
+                return False, await idempotency.wait_for_result(key)
+        except Exception:  # noqa: BLE001 — unknown liveness ⇒ do NOT reclaim
+            log.warning("engine.claim_liveness_unknown_not_reclaiming", step=step.id)
+            return False, None
+    log.warning("engine.stale_claim_reclaimed", step=step.id,
+                detail="claim held with no result and the driving run's heartbeat is dead — "
+                       "prior worker died mid-step; re-executing (terraform reconciles)")
+    await idempotency.release(key)
+    if await idempotency.claim(key):
+        return True, None
+    # Another live worker re-claimed it in the same instant — genuinely in flight now.
+    stored = await idempotency.wait_for_result(key)
     return False, stored
 
 
 async def store_result(step: Step, result: dict) -> None:
     await idempotency.store_result(idempotency.make_key("dstep", step.idempotency_key),
                                    result)
+
+
+async def release_claim(step: Step) -> None:
+    """Release a FAILED step's idempotency claim so a retry/recovery can re-claim it.
+
+    Prompt 3 fix (found by the retain-then-recover pin): without this, a failed step's
+    stale claim made `claim_or_recover` treat it as already-done on the next attempt —
+    the step was skipped with an empty result and a failed workflow could never truly
+    resume. Successful steps keep their claim + stored result (never re-applied)."""
+    await idempotency.release(idempotency.make_key("dstep", step.idempotency_key))

@@ -33,28 +33,53 @@ from .state import AgentState
 log = structlog.get_logger(__name__)
 
 
-async def _extract_ports(settings, message: str) -> list[int]:
-    """Pull the TCP ports the user wants to open (day-2 SG modify)."""
-    import re
+# The user's verb decides the DIRECTION of a port change. Before this (forensic audit,
+# 2026-08-16), extraction only ever produced ports-to-OPEN: "remove port 8501" was planned
+# as "open inbound TCP [8501]", terraform saw no diff, and the run reported applied=true
+# while the port stayed open. remove/close/delete/revoke can never become add/open again.
+_PORT_CLOSE_VERBS = re.compile(
+    r"\b(?:remove|close|delete|revoke|block|drop|disable|shut)\b", re.IGNORECASE)
 
-    ports: list[int] = []
+
+async def _extract_port_changes(settings, message: str) -> dict:
+    """Pull the TCP port changes the user asked for (day-2 SG modify), verb-aware.
+
+    Returns {"open": [ports], "close": [ports]} — only explicitly requested changes."""
+    changes: dict = {"open": [], "close": []}
+
+    def _valid(ports) -> list[int]:
+        return sorted({int(p) for p in (ports or []) if 0 < int(p) <= 65535})
+
     if llm_service.configured(settings, "extract"):
         try:
             r = await llm.classify_json(
                 settings,
-                'Extract only the TCP port numbers the user explicitly wants to open. '
-                'Respond with ONLY JSON: {"ingress_ports": [<int>, ...]}.', message,
+                'Extract the TCP port changes the user explicitly asked for on an existing '
+                'resource. Ports to OPEN/allow go in open_ports; ports to CLOSE/remove/'
+                'revoke/block go in close_ports. Respond with ONLY JSON: '
+                '{"open_ports": [<int>, ...], "close_ports": [<int>, ...]}.', message,
                 purpose="extract",
                 response_schema={"type": "object", "properties": {
-                    "ingress_ports": {"type": "array", "items": {"type": "integer"}}}})
-            ports = [int(p) for p in (r.get("ingress_ports") or []) if 0 < int(p) <= 65535]
+                    "open_ports": {"type": "array", "items": {"type": "integer"}},
+                    "close_ports": {"type": "array", "items": {"type": "integer"}}}})
+            changes["open"] = _valid(r.get("open_ports"))
+            changes["close"] = _valid(r.get("close_ports"))
         except Exception as e:  # noqa: BLE001
             log.warning("cloudops.port_extract_failed", error=str(e))
-    if not ports:  # fallback: digits following the word "port(s)"
+    if not changes["open"] and not changes["close"]:
+        # Deterministic fallback: digits following "port(s)", direction from the verb.
         m = re.search(r"ports?\b([\d,\s/and]+)", message, re.IGNORECASE)
         if m:
-            ports = [int(n) for n in re.findall(r"\d{1,5}", m.group(1)) if 0 < int(n) <= 65535]
-    return sorted(set(ports))
+            ports = _valid(re.findall(r"\d{1,5}", m.group(1)))
+            key = "close" if _PORT_CLOSE_VERBS.search(message) else "open"
+            changes[key] = ports
+    # The DETERMINISTIC verb check always wins over the model: a message whose own words
+    # say close/remove (and never open/allow) can only ever close — whatever the LLM said.
+    if changes["open"] and _PORT_CLOSE_VERBS.search(message) and not re.search(
+            r"\b(?:open|allow|add|permit|expose|enable)\b", message, re.IGNORECASE):
+        changes["close"] = sorted(set(changes["close"]) | set(changes["open"]))
+        changes["open"] = []
+    return changes
 
 
 async def _extract_modification(settings, message: str) -> dict:
@@ -69,24 +94,37 @@ async def _extract_modification(settings, message: str) -> dict:
                 settings,
                 'Extract ONLY the modifications the user explicitly asked for on an existing '
                 'cloud resource. Respond with ONLY JSON, omitting keys the user did not ask '
-                'about: {"ingress_ports": [<int>], "power": "running|stopped", '
+                'about: {"ingress_ports": [<int ports to OPEN/allow>], '
+                '"ingress_ports_remove": [<int ports to CLOSE/remove/revoke/block>], '
+                '"power": "running|stopped", '
                 '"versioning": <bool>, "lifecycle_expire_days": <int>, '
                 '"instance_class": "<db.x.y>", "allocated_storage": <int GiB>, '
                 '"tags": {"<key>": "<value>"}}. '
-                '"start/power on" → power=running; "stop/power off/shut down" → power=stopped.',
+                '"start/power on" → power=running; "stop/power off/shut down" → power=stopped. '
+                'NEVER put a port the user wants removed/closed into ingress_ports.',
                 message, purpose="extract")
-            for k in ("ingress_ports", "power", "versioning", "lifecycle_expire_days",
-                      "instance_class", "allocated_storage", "tags"):
+            for k in ("ingress_ports", "ingress_ports_remove", "power", "versioning",
+                      "lifecycle_expire_days", "instance_class", "allocated_storage", "tags"):
                 if r.get(k) not in (None, [], {}, ""):
                     changes[k] = r[k]
         except Exception as e:  # noqa: BLE001
             log.warning("cloudops.modify_extract_failed", error=str(e))
 
     low = message.lower()
-    if "ingress_ports" not in changes:
-        ports = await _extract_ports(settings, message)
-        if ports:
-            changes["ingress_ports"] = ports
+    if "ingress_ports" not in changes and "ingress_ports_remove" not in changes:
+        pc = await _extract_port_changes(settings, message)
+        if pc["open"]:
+            changes["ingress_ports"] = pc["open"]
+        if pc["close"]:
+            changes["ingress_ports_remove"] = pc["close"]
+    # Deterministic direction guard over the LLM extraction (same rule as
+    # _extract_port_changes): close-verbed messages with no open-verb can only close.
+    if (changes.get("ingress_ports") and _PORT_CLOSE_VERBS.search(message)
+            and not re.search(r"\b(?:open|allow|add|permit|expose|enable)\b", message,
+                              re.IGNORECASE)):
+        changes["ingress_ports_remove"] = sorted(
+            set(changes.get("ingress_ports_remove") or []) | set(changes["ingress_ports"]))
+        changes.pop("ingress_ports")
     if "power" not in changes:
         if re.search(r"\b(start|power\s*on|boot|turn\s*on)\b", low):
             changes["power"] = "running"
@@ -123,9 +161,9 @@ async def _extract_modification(settings, message: str) -> dict:
 # change lands on the module inputs. Power is Terraform-encoded (owner Option A) — AWS via
 # aws_ec2_instance_state, GCE via desired_status; Azure has no TF-native power path.
 _MODIFY_CAPS: dict[str, set[str]] = {
-    "aws.ec2": {"ingress_ports", "power", "tags"},
-    "gcp.vm": {"ingress_ports", "power"},
-    "azure.vm": {"ingress_ports"},
+    "aws.ec2": {"ingress_ports", "ingress_ports_remove", "power", "tags"},
+    "gcp.vm": {"ingress_ports", "ingress_ports_remove", "power"},
+    "azure.vm": {"ingress_ports", "ingress_ports_remove"},
     "aws.s3": {"versioning", "lifecycle_expire_days", "tags"},
     "aws.rds": {"instance_class", "allocated_storage", "tags"},
 }
@@ -135,13 +173,31 @@ _AZURE_POWER_ANSWER = ("Power on/off isn't supported for Azure — use the porta
 
 
 def _apply_modification(base: dict, changes: dict) -> tuple[dict, list[str]]:
-    """Merge the requested changes onto the stored inputs; return (merged, descriptions)."""
+    """Merge the requested changes onto the stored inputs; return (merged, descriptions).
+
+    Ports compute the DESIRED STATE: opens are unioned, closes are subtracted (a close wins
+    over a simultaneous open of the same port — "remove" is the decisive request). Requests
+    that change nothing (opening an already-open port, closing a port that isn't open) are
+    described honestly so the caller can report NO_CHANGE instead of a phantom apply."""
     merged = dict(base)
     desc: list[str] = []
-    if "ingress_ports" in changes:
-        current = [int(p) for p in (base.get("ingress_ports") or [])]
-        merged["ingress_ports"] = sorted(set(current) | set(changes["ingress_ports"]))
-        desc.append(f"open inbound TCP {changes['ingress_ports']}")
+    if "ingress_ports" in changes or "ingress_ports_remove" in changes:
+        current = {int(p) for p in (base.get("ingress_ports") or [])}
+        opens = {int(p) for p in (changes.get("ingress_ports") or [])}
+        closes = {int(p) for p in (changes.get("ingress_ports_remove") or [])}
+        merged["ingress_ports"] = sorted((current | opens) - closes)
+        really_opened = sorted(opens - current - closes)
+        already_open = sorted((opens & current) - closes)
+        really_closed = sorted(closes & (current | opens))
+        not_open = sorted(closes - current - opens)
+        if really_opened:
+            desc.append(f"open inbound TCP {really_opened}")
+        if really_closed:
+            desc.append(f"close inbound TCP {really_closed}")
+        if already_open:
+            desc.append(f"port(s) {already_open} already open — nothing to do there")
+        if not_open:
+            desc.append(f"port(s) {not_open} not open — nothing to close there")
     if "power" in changes:
         merged["power_state"] = changes["power"]
         desc.append(f"set power state to {changes['power']} (Terraform-managed, no SDK call)")
@@ -161,6 +217,42 @@ def _apply_modification(base: dict, changes: dict) -> tuple[dict, list[str]]:
         merged["extra_tags"] = {**(base.get("extra_tags") or {}), **dict(changes["tags"])}
         desc.append("update tags " + ", ".join(f"{k}={v}" for k, v in changes["tags"].items()))
     return merged, desc
+
+
+async def _live_ingress_ports(settings, res: dict) -> list[int] | None:
+    """OBSERVE-BEFORE-ACT (Prompt 3): the MANAGED app ports actually open on the resource's
+    security group, read from the live cloud. Only rules this platform manages are counted
+    (description-tagged "AegisOps app port …") — the admin SSH/RDP rule and the sentinel
+    self-rule are separate concerns and never leak into `ingress_ports`. None = could not
+    inspect (no SG recorded / provider unreachable) → the caller falls back to recorded
+    state, stated honestly."""
+    sg_id = (res.get("attributes") or {}).get("security_group_id")
+    if not sg_id or res.get("cloud") != "aws":
+        return None
+
+    def _describe() -> list[int]:
+        import boto3
+        ec2 = boto3.client("ec2", aws_access_key_id=settings.aws_access_key_id,
+                           aws_secret_access_key=settings.aws_secret_access_key,
+                           aws_session_token=settings.aws_session_token or None,
+                           region_name=res.get("region") or settings.aws_default_region)
+        sg = ec2.describe_security_groups(GroupIds=[sg_id])["SecurityGroups"][0]
+        ports: set[int] = set()
+        for perm in sg.get("IpPermissions", []):
+            fp, tp = perm.get("FromPort"), perm.get("ToPort")
+            if fp is None or fp != tp:
+                continue
+            descriptions = [r.get("Description", "") for r in perm.get("IpRanges", [])]
+            if any(d.startswith("AegisOps app port") for d in descriptions):
+                ports.add(int(fp))
+        return sorted(ports)
+
+    try:
+        import anyio
+        return await anyio.to_thread.run_sync(_describe)
+    except Exception as e:  # noqa: BLE001 — inspection is best-effort, never blocks a modify
+        log.warning("cloudops.live_sg_inspect_failed", sg=sg_id, error=str(e))
+        return None
 
 
 # STAB P1-1: identity fields where the user's literal token is the only honest value.
@@ -240,7 +332,11 @@ def _defaulted_dependencies(cloud: str, resource: str, validated: dict, resource
     out: list[dict] = []
     r = (resource or "").lower()
     if cloud == "aws" and r in ("ec2", "vm", "instance", "server"):
-        if not validated.get("vpc_id"):
+        # A filled subnet_id is a REAL placement (user-named or DEP-resolved — the closure
+        # note states its provenance); only a genuinely-defaulted placement is flagged here.
+        # (Was keyed on vpc_id, which no input carries — so the card claimed "account's
+        # default VPC" even when the resolver had bound a named VPC. Audit 2026-08-17.)
+        if not validated.get("subnet_id"):
             inst = next((x.get("after", {}) for x in (resources or []) if x.get("type") == "aws_instance"), {})
             sub = inst.get("subnet_id")
             out.append({"name": "VPC / subnet", "value": sub or "account default VPC + subnet",
@@ -539,8 +635,16 @@ async def cloudops_plan(state: AgentState, config) -> dict:
     # all returned above, so this flow can only ever produce a create plan (Phase 8 / N-08).
     session_id = state.get("session_id")
     pending_rec: dict = {}
-    if state.get("collecting") and session_id:
-        pending_rec = await params.load_pending(session_id) or {}
+    if session_id:
+        rec = await params.load_pending(session_id) or {}
+        # Same-template guard: a pending record from a DIFFERENT workflow must never leak
+        # its values into this one (defensive — pending is keyed per session, not template).
+        if rec and rec.get("template") in (None, template.key):
+            # Continue an in-progress collection (existing behavior), OR reuse the inputs a
+            # FAILED apply preserved (forensic-audit remediation, 2026-08-16: "retry with
+            # t2.micro" used to forget OS/key/subnet from the attempt seconds earlier).
+            if state.get("collecting") or rec.get("after_failure"):
+                pending_rec = rec
 
     await timing.start_step(run_id, "cloudops_agent")
 
@@ -789,6 +893,24 @@ async def cloudops_plan(state: AgentState, config) -> dict:
                 "confidentiality": {"level": cc.level, "score": cc.score},
                 "outcome": {"status": "blocked_by_guard", "error": violation}}
 
+    # ZERO-CHANGE GUARD (idempotency, forensic-audit remediation 2026-08-16): a create whose
+    # plan is 0/0/0 means the desired state already exists in this workspace (a repeated
+    # request reconciled cleanly). Honest NO_CHANGE — never a phantom "applied".
+    if plan_guard.zero_change(plan["summary"]):
+        msg = (f"**{res_name} already matches the requested state** — the Terraform plan is "
+               "0 add / 0 change / 0 destroy, so there is nothing to create. No approval "
+               "needed; nothing was applied. (A repeated create reconciles instead of "
+               "duplicating.)")
+        log.info("cloudops.create_no_change", run_id=run_id, name=res_name)
+        await emitter.step(4, f"No change needed — {res_name} already satisfied")
+        await emitter.token(msg)
+        cc = classify(msg)
+        await emitter.confidentiality(cc.level, cc.score)
+        return {"needs_change": False, "approval_status": "not_required", "answer": msg,
+                "cloud": cloud, "resource": resource,
+                "confidentiality": {"level": cc.level, "score": cc.score},
+                "outcome": {"status": "no_change", "resolution": msg}}
+
     await timing.start_step(run_id, "policy_evaluation")
     policy_checks = template.policy_fn(validated, runner.planned_resources())  # U1: over the real plan
     policy_checks = policy_checks + cost.checks_for(template.key, validated)  # COST: estimate + guardrail on the card
@@ -936,7 +1058,27 @@ async def _read_path(state, config) -> dict:
     region = state.get("user", {}).get("region", "us-east-1")
     kind = _read_kind(state.get("resource"))
 
-    clouds = [c for c, pat in _CLOUD_WORDS.items() if re.search(pat, message)]
+    # History/provenance question with no single resolvable resource → answer org-wide from
+    # the immutable journal ("what did I change yesterday?", "who approved recent changes?").
+    raw_message = state.get("message", "")
+    if intent_guard.is_history_question(raw_message) or intent_guard.is_provenance_question(raw_message):
+        hist = await _history_answer(state["org_id"], raw_message)
+        if hist:
+            await emitter.step(3, "Answering from the immutable change journal")
+            await emitter.token(hist)
+            c = classify(hist)
+            await emitter.confidentiality(c.level, c.score)
+            await emitter.analysis(
+                summary="Answered from the immutable resource-revision journal joined with the "
+                        "approvals table — deterministic audit data, no model-generated history.",
+                cards=[{"title": "Audit journal read", "conf": "", "body": "org-wide history"}])
+            return {"needs_change": False, "approval_status": "not_required", "answer": hist,
+                    "confidentiality": {"level": c.level, "score": c.score}}
+
+    # Clouds the QUESTION names scope the whole answer — including the inventory listing
+    # below (forensic-audit remediation, 2026-08-16: an "in AWS" question listed GCP rows).
+    named_clouds = [c for c, pat in _CLOUD_WORDS.items() if re.search(pat, message)]
+    clouds = list(named_clouds)
     if not clouds:
         resolved, _why = resolve_cloud(state)
         clouds = [resolved] if resolved else [c for c, tool in
@@ -964,11 +1106,22 @@ async def _read_path(state, config) -> dict:
     # What AegisOps itself provisioned (the inventory) — always part of the answer. For a
     # broad "did I create any resources" question, render the full grouped listing.
     try:
+        # Listing honesty: rows whose AWS resource no longer exists in the CURRENT account
+        # (rotated sandbox) are marked `unreachable` before rendering — live cloud overrides
+        # stale memory (best-effort, read-only, bounded).
+        if "aws" in clouds and not failed_clouds:
+            try:
+                await inventory.verify_aws_liveness(state["org_id"], settings)
+            except Exception as le:  # noqa: BLE001
+                log.warning("cloudops.liveness_verify_failed", error=str(le))
         mine = await inventory.list_active(state["org_id"], clouds=clouds)
         if inventory.is_broad_ref(state.get("target")) or intent_guard.is_broad_inventory_question(message):
-            # Broad = everything created, across ALL clouds (not just the ones asked about).
-            sections.append("\n" + _render_inventory_list(await inventory.list_active(state["org_id"]),
-                                                          unverified_clouds=failed_clouds))
+            # Broad = everything created — but a question that NAMES clouds is scoped to
+            # them ("resources I created in AWS" must never list GCP rows). Partial rows
+            # (failed applies with leftover state) are shown honestly, never hidden.
+            broad = await inventory.list_active(state["org_id"], clouds=named_clouds or None,
+                                                statuses=("active", "partial"))
+            sections.append("\n" + _render_inventory_list(broad, unverified_clouds=failed_clouds))
         elif mine:
             # P1-2c: a row on a cloud whose live discovery just failed is not "active" as far
             # as anyone can verify right now — say so inline, never imply it was checked.
@@ -1008,7 +1161,8 @@ def _render_inventory_list(matches: list[dict], unverified_clouds: set[str] | fr
                 "in the inventory. (Failed applies leave no active resource, and destroyed ones "
                 "are removed from this list.) Ask me to create something — e.g. "
                 "“create an EC2 instance in AWS”.")
-    lines = [f"I've provisioned **{len(matches)}** active resource(s):", "",
+    lines = [f"I've provisioned **{len(matches)}** recorded resource(s) "
+             "(see Status — partial rows are failed applies with leftover state):", "",
              "| Name | Type | Cloud | Region | Created | Id | Status |",
              "|---|---|---|---|---|---|---|"]
     for m in sorted(matches, key=lambda x: (x.get("cloud") or "", x.get("name") or "")):
@@ -1019,6 +1173,90 @@ def _render_inventory_list(matches: list[dict], unverified_clouds: set[str] | fr
         lines.append(f"| **{m.get('name')}** | {m.get('resource_type')} | {m.get('cloud')} "
                      f"| {m.get('region') or '—'} | {created} | {pid} | {status} |")
     lines += ["", "Ask about any of them by name for full details (IPs, VPC, ports, …)."]
+    return "\n".join(lines)
+
+
+# Deterministic time-window words for history questions ("what did I change yesterday?").
+_TIME_WORDS = (("yesterday", 1, 1), ("today", 0, 0), ("this week", 7, 0), ("last week", 14, 7))
+
+
+def _history_window(message: str) -> tuple | None:
+    """(since, until) datetimes for a time word in the message, else None (no time filter)."""
+    from datetime import datetime, time, timedelta, timezone
+    low = (message or "").lower()
+    for word, back_start, back_end in _TIME_WORDS:
+        if word in low:
+            today = datetime.now(timezone.utc).date()
+            start = datetime.combine(today - timedelta(days=back_start), time.min, timezone.utc)
+            end = datetime.combine(today - timedelta(days=back_end), time.max, timezone.utc)
+            return (start, end)
+    return None
+
+
+def _fmt_revision(rev, approval) -> str:
+    """One immutable revision → one honest timeline line (never LLM-generated)."""
+    when = rev.created_at.strftime("%Y-%m-%d %H:%M UTC") if rev.created_at else "—"
+    line = (f"| {when} | **{rev.action}** | {rev.name} ({rev.cloud} {rev.resource_type}) "
+            f"| {rev.actor_user or '—'} ")
+    detail = ""
+    b = (rev.before_state or {}).get("attributes") or (rev.before_state or {})
+    a = (rev.after_state or {}).get("attributes") or (rev.after_state or {})
+    if isinstance(b, dict) and isinstance(a, dict) and (b.get("ingress_ports") is not None
+                                                        or a.get("ingress_ports") is not None):
+        detail = f"ports {b.get('ingress_ports') or []} → {a.get('ingress_ports') or []}"
+    elif rev.action == "modified" and isinstance(b, dict) and isinstance(a, dict):
+        changed = [k for k in set(b) | set(a) if b.get(k) != a.get(k)]
+        detail = "changed: " + ", ".join(sorted(changed)[:6]) if changed else ""
+    elif rev.action in ("partial", "failed"):
+        detail = (rev.reason or "")[:80]
+    appr = (f"{approval.decision} by {approval.actor_user} "
+            f"{approval.ts.strftime('%H:%M UTC') if approval.ts else ''}" if approval else "—")
+    run_short = str(rev.run_id)[:8] if rev.run_id else "—"
+    return line + f"| {appr} | {detail or '—'} | `{run_short}` |"
+
+
+async def _history_answer(org_id: str, message: str, name: str | None = None) -> str | None:
+    """Answer a history/provenance question from the immutable audit record — the
+    resource_revisions journal joined with the approvals table (forensic-audit remediation,
+    2026-08-16: 'who approved / what changed / previous configuration' previously fell into
+    generic discovery, a devops misroute, or a raw LLM guess). Deterministic; returns None
+    only when the journal read itself fails (the caller falls back honestly)."""
+    from ..db.models import Approval, ResourceRevision
+    from sqlalchemy import select as _select
+    try:
+        async with session_scope() as s:
+            q = _select(ResourceRevision).where(ResourceRevision.org_id == uuid.UUID(org_id))
+            if name:
+                q = q.where(ResourceRevision.name == name)
+            window = _history_window(message)
+            if window:
+                q = q.where(ResourceRevision.created_at >= window[0],
+                            ResourceRevision.created_at <= window[1])
+            revs = list((await s.execute(
+                q.order_by(ResourceRevision.created_at.desc()).limit(15))).scalars())
+            approvals: dict = {}
+            run_ids = [r.run_id for r in revs if r.run_id]
+            if run_ids:
+                for ap in (await s.execute(_select(Approval).where(
+                        Approval.run_id.in_(run_ids)))).scalars():
+                    approvals[ap.run_id] = ap
+    except Exception as e:  # noqa: BLE001 - an audit read failure must be visible, not guessed over
+        log.warning("cloudops.history_read_failed", error=str(e))
+        return None
+    scope = f"**{name}**" if name else "your resources"
+    window = _history_window(message)
+    when_note = (f" between {window[0].date()} and {window[1].date()}" if window else "")
+    if not revs:
+        return (f"No recorded changes for {scope}{when_note}. The immutable change journal "
+                "starts at its introduction (2026-08-16) — changes made before that exist "
+                "only as run records. Nothing matched this question.")
+    lines = [f"Change history for {scope}{when_note} (from the immutable audit journal, "
+             f"newest first — {len(revs)} event(s)):", "",
+             "| When | Action | Resource | By | Approval | Detail | Run |",
+             "|---|---|---|---|---|---|---|"]
+    lines += [_fmt_revision(r, approvals.get(r.run_id)) for r in revs]
+    lines += ["", "Every row is an append-only revision written in the same transaction as "
+                  "the change itself; approvals come from the immutable approvals table."]
     return "\n".join(lines)
 
 
@@ -1048,11 +1286,34 @@ async def _read_resource(state: AgentState, config, target: str) -> dict:
         return await _say(_render_inventory_list(matches))
 
     if not matches:
+        # A history/provenance question about something not in the CURRENT inventory may
+        # still have journal rows (e.g. a destroyed or failed resource) — check before refusing.
+        message = state.get("message", "")
+        if intent_guard.is_history_question(message) or intent_guard.is_provenance_question(message):
+            hist = await _history_answer(org_id, message, name=target)
+            if hist:
+                await emitter.step(3, "Answering from the immutable change journal")
+                return await _say(hist)
         return await _say(f"I couldn't find a resource matching “{target}” in what I've provisioned for you. "
                           "Tell me its exact name, or create it first — I won't guess.")
     if len(matches) > 1:
         return await _say(f"More than one resource matches “{target}”: "
                           f"{', '.join(m['name'] for m in matches)}. Which one do you mean?")
+
+    # History/provenance question about THIS resource → the immutable audit record answers
+    # (who/when/what changed/previous state), never the current-state card and never the LLM.
+    message = state.get("message", "")
+    if intent_guard.is_history_question(message) or intent_guard.is_provenance_question(message):
+        hist = await _history_answer(org_id, message, name=matches[0]["name"])
+        if hist:
+            await emitter.step(3, f"Change history of {matches[0]['name']} · audit journal")
+            await emitter.analysis(
+                summary="Answered from the immutable resource-revision journal joined with the "
+                        "approvals table — deterministic audit data, no model-generated history.",
+                cards=[{"title": "Audit journal read", "conf": "",
+                        "body": f"resource {matches[0]['name']}"}])
+            return await _say(hist)
+
     res = await inventory.reconcile(matches[0], settings)
     await emitter.step(3, f"Recalled {res['name']} · {res.get('provider_id') or ''}")
     attrs = res.get("attributes") or {}
@@ -1158,7 +1419,10 @@ async def _destroy_resource(state: AgentState, config, target: str | None) -> di
         ref = last["name"]
         await emitter.console("stdout", f"undo → last applied in this conversation: {ref}")
     await emitter.step(2, f"Resolving “{ref or state.get('resource') or 'resource'}” for destruction")
-    matches, kind = await inventory.resolve(org_id, ref or (state.get("resource") or ""))
+    # Partial rows (failed applies that left Terraform state) ARE destroyable — that's the
+    # designed recovery for a wedged workspace (forensic-audit remediation, 2026-08-16).
+    matches, kind = await inventory.resolve(org_id, ref or (state.get("resource") or ""),
+                                            statuses=("active", "partial"))
     if kind == "all":
         names = ", ".join(m["name"] for m in matches[:8]) or "none recorded"
         return await _say("I don't bulk-destroy in one shot — that's how accidents happen. "
@@ -1293,6 +1557,21 @@ async def _modify_resource(state: AgentState, config, target: str | None) -> dic
 
     await emitter.step(2, f"Resolving “{target or 'resource'}” for modification")
     matches, _kind = await inventory.resolve(org_id, target)
+    # Deterministic-first (Prompt 3, mandate 10): a resource NAMED VERBATIM in the message
+    # always outranks fuzzy most-recent resolution — a flaked router target must never
+    # redirect a mutation to a different resource (found live: "on SpineVM" resolved to the
+    # most-recently-created ProbeVM). Two names in one message still ask, never guess.
+    named = await inventory.named_in_message(org_id, state.get("message", ""))
+    if len(named) == 1 and (not matches or _kind != "name"
+                            or matches[0]["name"] != named[0]["name"]):
+        if matches and matches[0]["name"] != named[0]["name"]:
+            await emitter.step(2, f"Target corrected to “{named[0]['name']}” — named "
+                                  "verbatim in your request")
+        matches, _kind = [named[0]], "name"
+    elif len(named) > 1 and _kind != "name":
+        return await _say("Your message names more than one resource "
+                          f"({', '.join(n['name'] for n in named)}). Which one should I "
+                          "modify? I won't guess on a mutation.")
     if not matches:
         return await _say(f"I couldn't find a resource matching “{target or 'that'}” to modify. "
                           "Tell me its exact name, or create it first — I won't invent one.")
@@ -1327,12 +1606,72 @@ async def _modify_resource(state: AgentState, config, target: str | None) -> dic
                           f"{hints.get(template.key, '')}")
 
     base = dict(res.get("inputs") or {})
+    # OBSERVE BEFORE ACT (Prompt 3, mandate 5): inspect the LIVE security configuration
+    # before computing the desired state — never mutate from remembered conversation state.
+    # A port the memory says is open but the cloud says is closed (or vice versa) must be
+    # decided by the cloud. Best-effort: an unreachable provider falls back to the recorded
+    # inputs, stated on the card.
+    live_note = None
+    if template.key == "aws.ec2" and ("ingress_ports" in changes
+                                      or "ingress_ports_remove" in changes):
+        live_ports = await _live_ingress_ports(settings, res)
+        if live_ports is not None:
+            recorded = sorted(int(p) for p in (base.get("ingress_ports") or []))
+            if sorted(live_ports) != recorded:
+                live_note = (f"live inspection: open ports {sorted(live_ports)} "
+                             f"(recorded state said {recorded}) — live cloud wins")
+            else:
+                live_note = f"live inspection: open ports {sorted(live_ports)} — matches records"
+            base["ingress_ports"] = sorted(live_ports)
+            await emitter.step(2, f"Inspected live security group · ports {sorted(live_ports)}")
     merged, change_desc = _apply_modification(base, changes)
+    # Day-2 pins the RECORDED image (2026-08-17, caught live by the plan guard): the
+    # module's AMI data source tracks the latest release, so a mere port change planned an
+    # instance REPLACEMENT the day Amazon published a newer AL2023 AMI. A modify never
+    # changes the image implicitly — the image recorded at apply time is the image.
+    if template.key == "aws.ec2" and not merged.get("ami"):
+        recorded_ami = (res.get("attributes") or {}).get("ami_used")
+        if recorded_ami:
+            merged["ami"] = recorded_ami
     try:
         validated = template.schema(**merged).model_dump()
     except Exception as e:  # noqa: BLE001
         return await _say(f"Couldn't build a valid modification for {res['name']}: {e}")
     change_text = "; ".join(change_desc)
+
+    async def _no_change(detail: str) -> dict:
+        """Honest NO_CHANGE terminal: the requested state already holds — nothing to approve,
+        nothing to apply, and the run must NEVER claim a change happened (forensic-audit
+        remediation, 2026-08-16). Recorded as an immutable `no_change` revision."""
+        msg = (f"**Nothing to change on {res['name']}** — {detail} "
+               "The live configuration already matches the requested state, so no plan was "
+               "sent for approval and nothing was applied.")
+        try:
+            async with session_scope() as s:
+                payload = {"name": res["name"], "cloud": res["cloud"],
+                           "region": res.get("region"), "resource_type": res["resource_type"],
+                           "inputs": base, "session_id": state.get("session_id"),
+                           "run_id": state.get("run_id")}
+                await inventory.add_revision(
+                    s, org_id, action="no_change", payload=payload,
+                    resource_id=uuid.UUID(res["id"]) if res.get("id") else None,
+                    actor_user=(state.get("user") or {}).get("username"),
+                    reason=state.get("message"), execution_result="no_change")
+        except Exception as e:  # noqa: BLE001 - bookkeeping never blocks the honest answer
+            log.warning("cloudops.no_change_revision_failed", error=str(e))
+        await emitter.step(3, f"No change needed on {res['name']}")
+        await emitter.token(msg)
+        cc = classify(msg)
+        await emitter.confidentiality(cc.level, cc.score)
+        return {"needs_change": False, "approval_status": "not_required", "answer": msg,
+                "confidentiality": {"level": cc.level, "score": cc.score},
+                "outcome": {"status": "no_change", "resolution": msg}}
+
+    # Input-level no-op: the merged desired state equals the recorded state (e.g. closing a
+    # port that isn't open). Cheaper and clearer than planning a guaranteed-empty diff.
+    if merged == base:
+        return await _no_change(change_text.capitalize() + "." if change_text else
+                                "the request resolves to the current configuration.")
 
     await emitter.step(3, f"Planning day-2 change on {res['name']}: {change_text}")
     await timing.start_step(run_id, "cloudops_agent")
@@ -1372,6 +1711,15 @@ async def _modify_resource(state: AgentState, config, target: str | None) -> dic
         await emitter.error(violation, code="plan_guard", retriable=False)
         return await _say(violation)
 
+    # ZERO-CHANGE GUARD (forensic-audit remediation, 2026-08-16): a plan of 0/0/0 means the
+    # requested change does not exist as far as Terraform is concerned. It must never enter
+    # approval and must never be reported as applied — say NO_CHANGE honestly.
+    if plan_guard.zero_change(plan["summary"]):
+        log.info("cloudops.modify_no_change", run_id=run_id, name=res["name"],
+                 requested=change_text)
+        return await _no_change(
+            f"the Terraform plan is 0 add / 0 change / 0 destroy for “{change_text}”.")
+
     await timing.start_step(run_id, "policy_evaluation")
     policy_checks = template.policy_fn(validated, runner.planned_resources())  # U1: over the real plan
     policy_checks = policy_checks + cost.checks_for(template.key, validated)  # COST: estimate + guardrail on the card
@@ -1389,6 +1737,8 @@ async def _modify_resource(state: AgentState, config, target: str | None) -> dic
         {"title": "Plan", "conf": "",
          "body": f"+{plan['summary']['add']} ~{plan['summary']['change']} -{plan['summary']['destroy']}"},
     ]
+    if live_note:
+        reasoning.insert(0, {"title": "Observed live state", "conf": "", "body": live_note})
     await emitter.analysis(summary=f"Planned a day-2 change on {res['name']}; awaiting approval.", cards=reasoning)
     interrupt_payload = {"kind": "approval", "runId": state["run_id"], "workflow": template.key, "plan": plan_json,
                          "diff": plan["diff"], "policyChecks": policy_checks, "mode": "apply",
@@ -1436,12 +1786,44 @@ async def cloudops_execute(state: AgentState, config) -> dict:
         done = await idempotency.get_result(idem_key) or await idempotency.wait_for_result(idem_key)
         if done:
             return {"outcome": done["result"], "tool_results": [done["result"]]}
-        log.warning("cloudops.execute_already_in_flight", run_id=state["run_id"], mode=mode)
-        return {"outcome": {"status": f"{mode}_aborted",
-                            "error": "This change is already being applied by another request; "
-                                     "aborting to avoid a duplicate apply."},
-                "answer": "⚠️ This change is already being applied — I stopped here so nothing "
-                          "runs twice. Refresh to see the result of the in-flight apply."}
+        # Prod-hardening (2026-08-17): distinguish a LIVE concurrent apply (heartbeat up →
+        # abort, never double) from a DEAD claimant (worker crashed mid-apply → the claim
+        # will never resolve). The dead case used to return the misleading "refresh to see
+        # the result" abort forever, leaving whatever terraform half-created INVISIBLE.
+        # Now it is recorded as an honest, VISIBLE partial (Prompt-1 recovery machinery):
+        # destroy/retry can operate on it and the user is told the truth.
+        from .supervisor import hb_key as _hb_key
+        try:
+            from ..cache.redis import get_redis as _get_redis
+            claimant_alive = bool(await _get_redis().exists(_hb_key(state["run_id"])))
+        except Exception:  # noqa: BLE001 — unknown ⇒ assume alive; abort is the safe answer
+            claimant_alive = True
+        if claimant_alive:
+            log.warning("cloudops.execute_already_in_flight", run_id=state["run_id"], mode=mode)
+            return {"outcome": {"status": f"{mode}_aborted",
+                                "error": "This change is already being applied by another request; "
+                                         "aborting to avoid a duplicate apply."},
+                    "answer": "⚠️ This change is already being applied — I stopped here so nothing "
+                              "runs twice. Refresh to see the result of the in-flight apply."}
+        log.error("cloudops.execute_claim_stale_dead_worker", run_id=state["run_id"], mode=mode)
+        try:
+            leftover = await runner.state_list()
+        except Exception:  # noqa: BLE001 — the state report is best-effort
+            leftover = None
+        if mode != "destroy":
+            await inventory.record_partial(state, template,
+                                           "apply interrupted mid-flight (worker died holding "
+                                           "the claim)", leftover)
+        msg = ("⚠️ A previous attempt to apply this change was interrupted mid-flight (the "
+               "worker died). Its Terraform state "
+               + (f"holds {len(leftover)} resource(s)" if leftover else "may hold partial resources")
+               + " — recorded as PARTIAL so it stays visible. Say “retry” to re-plan against "
+                 "the recorded state (safe — Terraform reconciles), or ask me to destroy it.")
+        return {"outcome": {"status": f"{mode}_interrupted", "partial": bool(leftover),
+                            "partial_resources": (leftover or [])[:20],
+                            "error": "prior apply interrupted mid-flight; state requires "
+                                     "reconciliation"},
+                "answer": msg}
 
     plan = state.get("plan_json", {}).get("summary", {})
     n = plan.get("destroy", 0) if mode == "destroy" else plan.get("add", 0) + plan.get("change", 0)
@@ -1490,8 +1872,33 @@ async def cloudops_execute(state: AgentState, config) -> dict:
         cc = classify(friendly)
         await emitter.confidentiality(cc.level, cc.score)
         await _cg(cg.update_step(order=3, status="failed", error=str(e)))
+        # Forensic-audit remediation (2026-08-16): a failed APPLY that left resources in
+        # Terraform state used to be INVISIBLE — not in inventory, so it could neither be
+        # retried with different inputs (plan guard) nor destroyed ("not something I
+        # provisioned") while the real infrastructure kept existing. Record it as a
+        # `partial` inventory row + immutable revision so destroy/retry can operate on it.
+        if mode != "destroy":
+            await inventory.record_partial(state, template, str(e), leftover)
+            # Parameter continuity: preserve the validated inputs so a follow-up
+            # "retry with t2.micro" doesn't force the user to re-answer everything.
+            if state.get("session_id"):
+                try:
+                    # Preserve in COLLECTION-SPEC shape (the collector's vocabulary), not
+                    # tf-var shape — otherwise key pair/CIDR answers are re-asked.
+                    spec_vals = params.from_tf_vars(state.get("workflow") or "",
+                                                    state.get("parsed_inputs") or {})
+                    await params.save_pending(state["session_id"], {
+                        "template": state.get("workflow"), "cloud": state.get("cloud"),
+                        "resource": state.get("resource"), "action": "create",
+                        "collected": {k: v for k, v in spec_vals.items()
+                                      if v not in (None, "", [])},
+                        "after_failure": True, "context_id": state.get("context_id")})
+                except Exception as pe:  # noqa: BLE001 - continuity is best-effort
+                    log.warning("cloudops.pending_preserve_failed", error=str(pe))
         return {"outcome": {"status": f"{mode}_failed", "error": str(e)[:500],
                             "failure": failure.__dict__ if failure else None,
+                            "partial": bool(leftover),
+                            "partial_resources": (leftover or [])[:20],
                             "retry": retry},
                 "answer": friendly,
                 "confidentiality": {"level": cc.level, "score": cc.score}}
@@ -1504,12 +1911,27 @@ async def cloudops_execute(state: AgentState, config) -> dict:
     # even if this write is interrupted, the outcome returned below is persisted by the outer
     # driver WITH the payload, so the orphan sweeper can rebuild a missing inventory row from the
     # run alone. A real applied resource is never invisible.
+    actor = (state.get("user") or {}).get("username")
     if mode == "destroy":
         outcome = {"status": "destroyed", **result}
         name = inventory.name_from_inputs(state.get("parsed_inputs") or {}, template.resource)
         try:
             async with session_scope() as s:
-                await inventory.mark_destroyed_txn(s, state["org_id"], template.workspace, name)
+                gone = await inventory.mark_destroyed_txn(s, state["org_id"], template.workspace, name)
+                for row in gone:
+                    # Immutable history: one `destroyed` revision per row, before-state preserved.
+                    await inventory.add_revision(
+                        s, state["org_id"], action="destroyed",
+                        payload={"name": row["name"], "cloud": row["cloud"],
+                                 "region": row.get("region"),
+                                 "resource_type": row["resource_type"],
+                                 "inputs": row.get("inputs"),
+                                 "session_id": state.get("session_id"),
+                                 "run_id": state.get("run_id")},
+                        before={"attributes": row.get("attributes"), "status": row["status"],
+                                "provider_id": row.get("provider_id")},
+                        resource_id=row["resource_id"], actor_user=actor,
+                        reason=state.get("message"), execution_result="destroyed")
                 run = await s.get(Run, uuid.UUID(state["run_id"]))
                 if run:
                     run.outcome = outcome
@@ -1519,13 +1941,23 @@ async def cloudops_execute(state: AgentState, config) -> dict:
     else:
         payload = inventory.inventory_payload(state, template, result.get("outputs", {}))
         outcome = {"status": "applied", **result, "_inventory": payload}
+        graph_action = "created"
         try:
             async with session_scope() as s:
-                await inventory.upsert_resource(s, state["org_id"], payload)
+                up = await inventory.upsert_resource(s, state["org_id"], payload)
+                graph_action = up["action"]
+                # Immutable history in the SAME transaction: a day-2 modify records
+                # `modified` with before/after — never another `created`.
+                await inventory.add_revision(
+                    s, state["org_id"], action=up["action"], payload=payload,
+                    before=up["before"], after={"attributes": result.get("outputs", {})},
+                    resource_id=up["resource"].id, actor_user=actor,
+                    reason=state.get("message"), execution_result="applied")
                 run = await s.get(Run, uuid.UUID(state["run_id"]))
                 if run:
                     run.outcome = outcome
         except Exception as e:  # noqa: BLE001 - inventory bookkeeping must never fail a real apply
             log.warning("cloudops.inventory_failed", error=str(e))
-        await inventory.record_graph(state, template, result.get("outputs", {}))
+        await inventory.record_graph(state, template, result.get("outputs", {}),
+                                     action=graph_action)
     return {"outcome": outcome, "tool_results": [result]}

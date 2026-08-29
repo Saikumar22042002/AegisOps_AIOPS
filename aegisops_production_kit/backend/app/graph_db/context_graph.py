@@ -134,25 +134,28 @@ class ContextGraph:
 
     async def add_resource(self, *, name: str, cloud: str, resource_type: str, provider_id: str | None,
                            region: str | None, run_id: str | None, session_id: str | None,
-                           attributes: dict | None = None) -> None:
+                           attributes: dict | None = None, action: str = "created") -> None:
         """Record a provisioned resource in the graph with resource ↔ run ↔ session relationships.
 
-        (Context)-[:PROVISIONED]->(Resource); (Run)-[:CREATED]->(Resource); (Session)-[:HAS_RUN]->(Run).
+        (Context)-[:PROVISIONED]->(Resource); (Run)-[:CREATED|MODIFIED]->(Resource);
+        (Session)-[:HAS_RUN]->(Run). `action` decides the run edge type — a day-2 modify
+        records MODIFIED, never another CREATED (forensic-audit remediation, 2026-08-17).
         Sensitive attributes are redacted. Facts here mirror the DB inventory (never LLM-inferred).
         """
         await self._ensure_open()
+        edge = "MODIFIED" if action == "modified" else "CREATED"
         await self._write(
-            """
-            MATCH (c:Context {id:$id})
-            MERGE (res:Resource {provider_id:$pid})
+            f"""
+            MATCH (c:Context {{id:$id}})
+            MERGE (res:Resource {{provider_id:$pid}})
               SET res.name=$name, res.cloud=$cloud, res.type=$rtype, res.region=$region,
                   res.context_id=$id, res.status='active', res.attributes=$attrs, res.updated_at=timestamp()
             MERGE (c)-[:PROVISIONED]->(res)
             FOREACH (_ IN CASE WHEN $run_id IS NULL THEN [] ELSE [1] END |
-              MERGE (run:Run {id:$run_id})
-              MERGE (run)-[:CREATED]->(res)
+              MERGE (run:Run {{id:$run_id}})
+              MERGE (run)-[:{edge}]->(res)
               FOREACH (__ IN CASE WHEN $session_id IS NULL THEN [] ELSE [1] END |
-                MERGE (sess:Session {id:$session_id})
+                MERGE (sess:Session {{id:$session_id}})
                 MERGE (sess)-[:HAS_RUN]->(run)))
             """,
             id=self.context_id, pid=provider_id or f"{cloud}:{name}", name=name, cloud=cloud,

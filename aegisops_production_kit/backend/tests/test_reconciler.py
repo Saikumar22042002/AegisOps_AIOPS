@@ -110,11 +110,12 @@ async def test_resumable_stranded_run_is_redriven_not_failed(live_db, live_redis
 
 
 async def test_kill_mid_apply_recovers_once_without_reapply(live_db, live_redis, org_id, monkeypatch):
-    """A worker died mid-apply: the run is 'applying', its idempotency key is claimed, heartbeat
+    """A worker died mid-apply: the run is 'executing' (the durable engine's transient — the
+    dead 'applying' literal was removed in P0/D5), its idempotency key is claimed, heartbeat
     gone. With no resumable checkpoint the reconciler marks it failed honestly — it does NOT
     re-apply. (For a resumable checkpoint, A1's wait-or-abort — tested in test_idempotency —
     guarantees the re-drive can't double-apply.)"""
-    rid = await _mk_run(org_id, "applying")
+    rid = await _mk_run(org_id, "executing")
     key = idempotency.make_key("tf-exec", rid, "apply")
     await idempotency.release(key)
     assert await idempotency.claim(key) is True  # the crashed worker's in-flight claim

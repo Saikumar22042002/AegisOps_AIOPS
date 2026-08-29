@@ -55,9 +55,37 @@ def harness_step_executor(settings: Settings, *, org_id: str | None = None):
     return execute
 
 
+def terraform_step_executor(settings: Settings, state: dict, config,
+                            order: dict[str, int]):
+    """DEF-17 (Prompt 3): the REAL mutation StepExecutor — module steps run through the
+    EXISTING `exec_loop.execute_governed_step` (wire-resolution → schema → plan → plan-guard
+    → policy → apply → Prompt-1 bookkeeping), so the durable engine gains real Terraform
+    execution without a second execution path. Read/verify/gate steps still go through the
+    P2 harness. Outputs are keyed by step id (== template_key for DEP-drafted DAGs), which
+    is exactly the observation key `resolve_wires` expects. `order` maps step id → its
+    stable draft ordinal (the loop-step idempotency identity across restarts)."""
+    from ..agents import exec_loop
+
+    read_exec = harness_step_executor(settings, org_id=state.get("org_id"))
+
+    async def execute(step: Step, outputs: dict) -> StepOutcome:
+        if step.kind != "module":
+            return await read_exec(step, outputs)
+        loop_step = dict(step.params)
+        loop_step.setdefault("template_key", step.template_key)
+        obs = await exec_loop.execute_governed_step(
+            state, loop_step, order.get(step.id, step.wave), config, observations=outputs)
+        ok = obs.get("status") in ("applied", "already_satisfied")
+        return StepOutcome(ok=ok, result=obs,
+                           evidence={"policy_checks": len(obs.get("policy_checks") or [])},
+                           error=None if ok else obs.get("error"))
+    return execute
+
+
 async def run_durable_workflow(settings: Settings, run_id: str, draft: list[dict], *,
                                org_id: str | None = None, executor=None,
-                               compensator=None) -> WorkflowResult:
+                               compensator=None, on_failure: str = "compensate",
+                               should_cancel=None) -> WorkflowResult:
     """Compile + run a goal-DAG as a durable workflow. `executor`/`compensator` default to
     the harness-backed / no-op implementations; callers (or tests) may inject others."""
     from .dag import compile_workflow
@@ -65,15 +93,18 @@ async def run_durable_workflow(settings: Settings, run_id: str, draft: list[dict
     return await engine.execute_workflow(
         settings, run_id, workflow,
         executor=executor or harness_step_executor(settings, org_id=org_id),
-        compensator=compensator or _noop_compensator, org_id=org_id)
+        compensator=compensator or _noop_compensator, org_id=org_id,
+        on_failure=on_failure, should_cancel=should_cancel)
 
 
 async def recover_run(settings: Settings, run_id: str, draft: list[dict], *,
                       org_id: str | None = None, executor=None,
-                      compensator=None) -> WorkflowResult:
+                      compensator=None, on_failure: str = "compensate",
+                      should_cancel=None) -> WorkflowResult:
     """Restart-recovery entry (called after a crash): identical to run_durable_workflow —
     `execute_workflow` reads durable step state + idempotency claims and continues from the
     first incomplete wave, never repeating completed work (06 §8.1)."""
     log.info("engine.recover_run", run_id=run_id)
     return await run_durable_workflow(settings, run_id, draft, org_id=org_id,
-                                      executor=executor, compensator=compensator)
+                                      executor=executor, compensator=compensator,
+                                      on_failure=on_failure, should_cancel=should_cancel)

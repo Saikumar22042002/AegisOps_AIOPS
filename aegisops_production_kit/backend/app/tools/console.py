@@ -63,15 +63,28 @@ class CommandConsole:
 
         result = CommandResult(returncode=-1)
 
+        callback_dead = False
+
         async def _pump(stream: asyncio.StreamReader, name: str, sink: list[str]) -> None:
+            # Prod-hardening (2026-08-17): the on_line callback is TRANSPORT (SSE/Redis
+            # mirroring) — its failure must never stop reading the subprocess. An unread
+            # pipe would fill and hang a live terraform apply mid-mutation; the durable
+            # record (sink → result) is what matters. First callback failure logs; the
+            # callback is then dropped for the rest of this command.
+            nonlocal callback_dead
             while True:
                 raw = await stream.readline()
                 if not raw:
                     break
                 line = redact(raw.decode(errors="replace").rstrip("\n"))
                 sink.append(line)
-                if on_line:
-                    await on_line(name, line)
+                if on_line and not callback_dead:
+                    try:
+                        await on_line(name, line)
+                    except Exception as cb_exc:  # noqa: BLE001 — transport loss ≠ command failure
+                        callback_dead = True
+                        log.warning("console.on_line_callback_failed_dropping",
+                                    error=str(cb_exc)[:200])
 
         try:
             await asyncio.wait_for(

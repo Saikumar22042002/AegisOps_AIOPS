@@ -110,22 +110,27 @@ async def rebuild_from_inventory() -> dict[str, int]:
     return out
 
 
-async def upsert_resource(org_id: str, payload: dict) -> None:
+async def upsert_resource(org_id: str, payload: dict, action: str = "created") -> None:
     """MERGE the resource into the world model (same node the context graph writes, enriched
-    with org scope + Terraform state refs) and its DEPENDS_ON edges from real inputs/outputs."""
+    with org scope + Terraform state refs) and its DEPENDS_ON edges from real inputs/outputs.
+
+    `action` decides the run edge type: a create records `(run)-[:CREATED]->(res)`; a day-2
+    modify records `(run)-[:MODIFIED]->(res)` — never another CREATED (forensic-audit
+    remediation, 2026-08-16: every touching run used to accrete a CREATED edge)."""
     pid = payload.get("provider_id") or f"{payload.get('cloud')}:{payload.get('name')}"
+    edge = "MODIFIED" if action == "modified" else "CREATED"
     await _run(
-        """
-        MERGE (res:Resource {provider_id:$pid})
+        f"""
+        MERGE (res:Resource {{provider_id:$pid}})
           SET res.org_id=$org_id, res.name=$name, res.cloud=$cloud, res.type=$rtype,
               res.region=$region, res.status='active', res.workspace=$workspace,
               res.state_workspace=$state_workspace, res.attributes=$attrs,
               res.updated_at=timestamp()
         FOREACH (_ IN CASE WHEN $run_id IS NULL THEN [] ELSE [1] END |
-          MERGE (run:Run {id:$run_id})
-          MERGE (run)-[:CREATED]->(res)
+          MERGE (run:Run {{id:$run_id}})
+          MERGE (run)-[:{edge}]->(res)
           FOREACH (__ IN CASE WHEN $session_id IS NULL THEN [] ELSE [1] END |
-            MERGE (sess:Session {id:$session_id})
+            MERGE (sess:Session {{id:$session_id}})
             MERGE (sess)-[:HAS_RUN]->(run)))
         """,
         pid=pid, org_id=org_id, name=payload.get("name"), cloud=payload.get("cloud"),

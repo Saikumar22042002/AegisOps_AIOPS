@@ -88,8 +88,19 @@ async def set_run_status(run_id: str, to: RunStatus, *, org_id: str | None = Non
 async def execute_workflow(settings: Settings, run_id: str, workflow: Workflow, *,
                            executor: StepExecutor, compensator: saga.Compensator,
                            org_id: str | None = None,
-                           max_steps: int | None = None) -> WorkflowResult:
-    """Run (or resume) a durable workflow to a terminal state."""
+                           max_steps: int | None = None,
+                           on_failure: str = "compensate",
+                           should_cancel: Callable[[], Awaitable[bool]] | None = None) -> WorkflowResult:
+    """Run (or resume) a durable workflow to a terminal state.
+
+    `on_failure` (Prompt 3, mandate 20): "compensate" = the P3 saga (reverse-order undo,
+    freeze on compensator failure — unchanged default); "retain" = successfully applied
+    steps are KEPT (never auto-destroyed because a later step failed) and the run ends
+    FAILED with the retained step ids recorded — the policy for real infrastructure.
+
+    `should_cancel` (Prompt 3, mandate 22): checked at every step boundary; a cancel ends
+    the run CANCELLED with completed work intact — a running step finishes, the next never
+    starts."""
     ceiling = max_steps or int(getattr(settings, "aegisops_max_steps", DEFAULT_MAX_STEPS))
     if len(workflow.steps) > ceiling:
         return WorkflowResult(status="failed",
@@ -111,6 +122,16 @@ async def execute_workflow(settings: Settings, run_id: str, workflow: Workflow, 
             if sid in completed:
                 continue                                    # already done — never re-run
 
+            # Cancellation is honored at the STEP BOUNDARY (mandate 22): applied work stays,
+            # the next step never starts, and the terminal is an honest CANCELLED.
+            if should_cancel is not None and await should_cancel():
+                await set_run_status(run_id, RunStatus.CANCELLED, org_id=org_id)
+                await run_log.append(run_id, "run_finished",
+                                     {"status": "cancelled", "completed": completed,
+                                      "cancelled_before": sid}, org_id=org_id)
+                return WorkflowResult(status="cancelled", completed=completed,
+                                      recovered=recovered, failed_step=sid)
+
             should_execute, stored = await step_store.claim_or_recover(step)
             if not should_execute:
                 # Another worker / a pre-crash run finished it: adopt the stored result.
@@ -129,6 +150,20 @@ async def execute_workflow(settings: Settings, run_id: str, workflow: Workflow, 
             if not outcome.ok:
                 await step_store.finish(run_id, step, ok=False, error=outcome.error,
                                         org_id=org_id)
+                # A failed step must be RETRYABLE: release its claim so recovery re-runs
+                # it (successful steps keep claim+result and are never re-applied).
+                await step_store.release_claim(step)
+                if on_failure == "retain":
+                    # Mandate 20: never auto-destroy successfully created infrastructure
+                    # because a later step failed. FAILED terminal, applied steps retained
+                    # and named — recovery/destroy is a governed human decision.
+                    await set_run_status(run_id, RunStatus.FAILED, org_id=org_id)
+                    await run_log.append(run_id, "run_finished",
+                                         {"status": "failed", "failed_step": step.id,
+                                          "error": outcome.error, "retained": completed,
+                                          "recovered": recovered}, org_id=org_id)
+                    return WorkflowResult(status="failed", completed=completed,
+                                          failed_step=step.id, recovered=recovered)
                 return await _fail_and_compensate(run_id, workflow, completed, step,
                                                   outcome.error, compensator, org_id)
 

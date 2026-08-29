@@ -56,12 +56,24 @@ async def general(state: AgentState, config) -> dict:
             await emitter.confidentiality(c.level, c.score)
             return {"answer": answer, "confidentiality": {"level": c.level, "score": c.score}}
 
-    # M1/M2: the full Context Engine slice — transcript + a verbatim positional-recall slot
-    # ("what was my 20th question?") + semantic/keyword retrieval of relevant earlier turns.
-    transcript = await memory.build_context(state.get("session_id", ""), purpose="general",
-                                            org_id=state.get("org_id"),
-                                            user_id=state.get("user", {}).get("user_id"),
-                                            current_message=state["message"], settings=get_settings())
+    # M1/M2 + Prompt 2: the full Context Engine slice — the canonical retrieval pipeline
+    # (gate → planner → typed sources → budget) with an observable trace, surfaced on the
+    # Analysis tab as safe retrieval evidence (query/sources/counts — never raw CoT).
+    transcript, rtrace = await memory.build_context(
+        state.get("session_id", ""), purpose="general", org_id=state.get("org_id"),
+        user_id=state.get("user", {}).get("user_id"), current_message=state["message"],
+        settings=get_settings(), run_id=state.get("run_id"), return_trace=True)
+    if rtrace is not None:
+        srcs = rtrace.summary()["sources"]
+        body = ("skipped — " + rtrace.skip_reason) if rtrace.skipped else (
+            "; ".join(f"{k}: {v['selected']}/{v['hits']}" for k, v in srcs.items()) or "no sources needed")
+        await emitter.analysis(
+            summary="Context assembled by the retrieval pipeline (gate → planner → typed "
+                    "sources → budget). Counts are selected/retrieved per source.",
+            cards=[{"title": "Retrieval evidence", "conf": "",
+                    "body": f"{body} · ~{rtrace.token_estimate} tokens"
+                            + (f" · dropped {rtrace.dropped_by_budget} by budget"
+                               if rtrace.dropped_by_budget else "")}])
     prompt = (f"Conversation so far in this session:\n{transcript}\n\n"
               f"User's current message: {state['message']}") if transcript else state["message"]
 
